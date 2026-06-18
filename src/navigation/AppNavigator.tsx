@@ -841,6 +841,17 @@ export function AppNavigator() {
               <Pressable
                 accessibilityRole="button"
                 hitSlop={8}
+                onPress={openSupportChat}
+                style={({ pressed }) => [
+                  styles.topActionButton,
+                  pressed && styles.topActionButtonPressed,
+                ]}
+              >
+                <Ionicons color={colors.primary} name="headset-outline" size={20} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                hitSlop={8}
                 onPress={() => setShowMenuSheet(true)}
                 style={({ pressed }) => [
                   styles.topActionButton,
@@ -1043,12 +1054,11 @@ export function AppNavigator() {
     <SafeAreaView edges={['top', 'right', 'bottom', 'left']} style={styles.safeArea}>
       {appContent}
 
-      {user && !adminUser ? (
+      {user && !adminUser && !isMobileLayout ? (
         <Pressable
           onPress={openSupportChat}
           style={({ pressed }) => [
             styles.supportFabHost,
-            isMobileLayout && styles.supportFabMobile,
             styles.supportFab,
             pressed && styles.supportFabPressed,
           ]}
@@ -1571,10 +1581,6 @@ function createStyles(colors: AppColors) {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
       ...shadows.card,
-    },
-    supportFabMobile: {
-      right: spacing.md,
-      bottom: 126,
     },
     supportFabPressed: {
       opacity: 0.9,
