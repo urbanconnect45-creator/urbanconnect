@@ -1,0 +1,21 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "App.tsx",
+    "index.ts",
+    "app.config.ts",
+    "src/**/*"
+  ],
+  "exclude": [
+    "my-app",
+    "dist",
+    ".expo",
+    "node_modules"
+  ]
+}

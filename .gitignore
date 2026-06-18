@@ -1,0 +1,17 @@
+node_modules/
+.expo/
+.expo-shared/
+dist/
+dist-check/
+web-build/
+coverage/
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+*.err
+.env
+.DS_Store
+--fetch-timeout=60000/
+my-app/
+supabase/.temp/

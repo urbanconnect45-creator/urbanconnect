@@ -1,0 +1,6 @@
+{
+  "mailer_subjects_magic_link": "Your UrbanConnect verification code",
+  "mailer_templates_magic_link_content": "<h2>Your UrbanConnect verification code</h2><p>Only enter the 8 digits shown below in UrbanConnect:</p><p style=\"font-size:32px;font-weight:700;margin:24px 0;\">{{ .Token }}</p><p>This code expires shortly. If you did not request this code, you can ignore this email.</p>",
+  "mailer_subjects_confirmation": "Your UrbanConnect verification code",
+  "mailer_templates_confirmation_content": "<h2>Your UrbanConnect verification code</h2><p>Only enter the 8 digits shown below in UrbanConnect to finish creating your account:</p><p style=\"font-size:32px;font-weight:700;margin:24px 0;\">{{ .Token }}</p><p>This code expires shortly. If you did not request this account, you can ignore this email.</p>"
+}
