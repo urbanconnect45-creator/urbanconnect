@@ -78,56 +78,56 @@ export const colors = lightColors;
 
 export const spacing = {
   xs: 8,
-  sm: 12,
-  md: 16,
-  lg: 20,
-  xl: 28,
-  xxl: 40,
+  sm: 10,
+  md: 14,
+  lg: 18,
+  xl: 24,
+  xxl: 34,
 } as const;
 
 export const radii = {
-  sm: 14,
-  md: 20,
-  lg: 28,
-  xl: 36,
+  sm: 12,
+  md: 18,
+  lg: 24,
+  xl: 30,
   pill: 999,
 } as const;
 
 export const typography = {
   eyebrow: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700' as const,
-    letterSpacing: 1.6,
+    letterSpacing: 1,
     textTransform: 'uppercase' as const,
   },
   title: {
-    fontSize: 32,
-    lineHeight: 38,
+    fontSize: 29,
+    lineHeight: 35,
     fontWeight: '800' as const,
   },
   section: {
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 21,
+    lineHeight: 27,
     fontWeight: '800' as const,
   },
   subtitle: {
-    fontSize: 18,
-    lineHeight: 25,
+    fontSize: 16,
+    lineHeight: 23,
     fontWeight: '700' as const,
   },
   body: {
-    fontSize: 15,
-    lineHeight: 23,
+    fontSize: 14,
+    lineHeight: 21,
     fontWeight: '400' as const,
   },
   bodyStrong: {
-    fontSize: 15,
-    lineHeight: 23,
+    fontSize: 14,
+    lineHeight: 21,
     fontWeight: '700' as const,
   },
   caption: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '500' as const,
   },
 };

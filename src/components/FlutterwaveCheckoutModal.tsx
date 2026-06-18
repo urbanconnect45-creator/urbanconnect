@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -91,6 +91,8 @@ export function FlutterwaveCheckoutModal({
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const hasReturnedRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isWebViewMounted, setIsWebViewMounted] = useState(false);
   const visiblePaymentOptions = activePaymentLabel
     ? paymentOptions.filter((option) => option.label === activePaymentLabel)
     : paymentOptions;
@@ -98,27 +100,48 @@ export function FlutterwaveCheckoutModal({
   useEffect(() => {
     if (visible) {
       hasReturnedRef.current = false;
+      setIsWebViewMounted(Boolean(checkoutUrl));
+      return;
     }
+
+    setIsWebViewMounted(false);
   }, [checkoutUrl, visible]);
 
-  const closeCheckout = () => {
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const finishCheckout = (callback: () => void) => {
     if (hasReturnedRef.current) {
       return;
     }
 
     hasReturnedRef.current = true;
-    onClose();
+    setIsWebViewMounted(false);
+
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+    }
+
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      callback();
+    }, 60);
+  };
+
+  const closeCheckout = () => {
+    finishCheckout(onClose);
   };
 
   const closeAfterProviderReturn = closeCheckout;
 
   const handlePaymentReturn = (url: string) => {
-    if (hasReturnedRef.current) {
-      return;
-    }
-
-    hasReturnedRef.current = true;
-    onPaymentReturn?.(url);
+    finishCheckout(() => onPaymentReturn?.(url));
   };
 
   if (!visible) {
@@ -126,7 +149,13 @@ export function FlutterwaveCheckoutModal({
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={closeCheckout} visible={visible}>
+    <Modal
+      animationType="none"
+      onDismiss={() => setIsWebViewMounted(false)}
+      onRequestClose={closeCheckout}
+      presentationStyle="fullScreen"
+      visible={visible}
+    >
       <View style={styles.screen}>
         <View style={styles.header}>
           <View style={styles.headerTopRow}>
@@ -170,7 +199,7 @@ export function FlutterwaveCheckoutModal({
         </View>
 
         <View style={styles.checkoutShell}>
-          {checkoutUrl ? (
+          {checkoutUrl && isWebViewMounted ? (
             <WebView
               key={checkoutUrl}
               allowsBackForwardNavigationGestures
