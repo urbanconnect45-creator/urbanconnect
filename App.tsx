@@ -1,4 +1,4 @@
-import { StatusBar, StyleSheet, View } from 'react-native';
+import { Platform, StatusBar, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -14,7 +14,7 @@ function AppFrame() {
 
   return (
     <View style={[styles.root, { backgroundColor: themeColors.background }]}>
-      <AppBackdrop />
+      {Platform.OS === 'web' ? <AppBackdrop /> : null}
       <BusinessDirectoryProvider>
         <AuthProvider>
           <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
