@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
@@ -192,6 +192,7 @@ export function AppNavigator() {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const {
     cartCount,
     getBusinessById,
@@ -841,17 +842,6 @@ export function AppNavigator() {
               <Pressable
                 accessibilityRole="button"
                 hitSlop={8}
-                onPress={openSupportChat}
-                style={({ pressed }) => [
-                  styles.topActionButton,
-                  pressed && styles.topActionButtonPressed,
-                ]}
-              >
-                <Ionicons color={colors.primary} name="headset-outline" size={20} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                hitSlop={8}
                 onPress={() => setShowMenuSheet(true)}
                 style={({ pressed }) => [
                   styles.topActionButton,
@@ -1051,14 +1041,25 @@ export function AppNavigator() {
     );
 
   return (
-    <SafeAreaView edges={['top', 'right', 'bottom', 'left']} style={styles.safeArea}>
+    <View
+      style={[
+        styles.safeArea,
+        {
+          paddingTop: insets.top,
+          paddingRight: insets.right,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+        },
+      ]}
+    >
       {appContent}
 
-      {user && !adminUser && !isMobileLayout ? (
+      {user && !adminUser ? (
         <Pressable
           onPress={openSupportChat}
           style={({ pressed }) => [
             styles.supportFabHost,
+            isMobileLayout && styles.supportFabMobile,
             styles.supportFab,
             pressed && styles.supportFabPressed,
           ]}
@@ -1362,7 +1363,7 @@ export function AppNavigator() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1581,6 +1582,10 @@ function createStyles(colors: AppColors) {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
       ...shadows.card,
+    },
+    supportFabMobile: {
+      right: spacing.md,
+      bottom: 126,
     },
     supportFabPressed: {
       opacity: 0.9,
