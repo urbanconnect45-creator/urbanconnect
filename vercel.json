@@ -4,8 +4,12 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/admin-portal",
+      "destination": "/admin-portal/index.html"
+    },
+    {
+      "source": "/admin-portal/(.*)",
+      "destination": "/admin-portal/index.html"
     }
   ]
 }

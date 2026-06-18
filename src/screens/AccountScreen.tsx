@@ -476,11 +476,16 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
 
   const handleCloseFlutterwaveCheckout = () => {
     setActiveFlutterwaveCheckout(null);
+    setDepositModalVisible(false);
+    setDepositStep('amount');
+    setDepositInstructionsAccepted(false);
   };
 
   const handleFlutterwaveReturn = () => {
     setActiveFlutterwaveCheckout(null);
     setDepositModalVisible(false);
+    setDepositStep('amount');
+    setDepositInstructionsAccepted(false);
     Alert.alert(
       'Payment submitted',
       `Flutterwave will update your portfolio after the live ${activeFlutterwaveCheckout?.channelLabel ?? 'payment'} payment is confirmed.`,

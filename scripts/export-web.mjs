@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+import { prepareWebOutput } from './build-web-output.mjs';
+
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const expoCli = path.join(rootDir, 'node_modules', 'expo', 'bin', 'cli');
 const nodeOptions = [
@@ -25,11 +27,22 @@ const child = spawn(
   },
 );
 
-child.on('exit', (code, signal) => {
+child.on('exit', async (code, signal) => {
   if (signal) {
     process.kill(process.pid, signal);
     return;
   }
 
-  process.exit(code ?? 1);
+  if (code !== 0) {
+    process.exit(code ?? 1);
+    return;
+  }
+
+  try {
+    await prepareWebOutput(rootDir);
+    process.exit(0);
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
 });

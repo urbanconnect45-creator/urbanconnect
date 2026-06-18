@@ -1783,6 +1783,32 @@ export async function sendEmailLogThroughSupabaseFunction(log: AutomatedEmailLog
   });
 }
 
+export async function sendTermiiPhoneOtp(phoneNumber: string, purpose = 'verify your account') {
+  return supabaseRequest<{ status: 'sent'; phoneNumber: string; pinId: string }>(
+    '/functions/v1/send-termii-otp',
+    {
+      method: 'POST',
+      body: {
+        phoneNumber,
+        purpose,
+      },
+    },
+  );
+}
+
+export async function verifyTermiiPhoneOtp(pinId: string, pin: string) {
+  return supabaseRequest<{ status: 'verified'; verified: true; pinId: string }>(
+    '/functions/v1/verify-termii-otp',
+    {
+      method: 'POST',
+      body: {
+        pinId,
+        pin,
+      },
+    },
+  );
+}
+
 export async function saveOrderToSupabase(order: Order) {
   const body = {
     id: order.id,

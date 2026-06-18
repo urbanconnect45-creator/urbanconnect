@@ -3,6 +3,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -180,6 +181,18 @@ function getBiometricLabel(types: LocalAuthentication.AuthenticationType[]) {
   return 'Biometric';
 }
 
+function isAdminWebEntrypoint() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const pathname =
+    (globalThis as { location?: { pathname?: string } }).location?.pathname?.toLowerCase() ??
+    '';
+
+  return pathname.replace(/\/+$/, '') === '/admin-portal';
+}
+
 export function AppNavigator() {
   const {
     adminUser,
@@ -201,7 +214,10 @@ export function AppNavigator() {
     markNotificationsRead,
     securitySettings,
   } = useBusinessDirectory();
-  const [authRoute, setAuthRoute] = useState<AuthRoute>('Login');
+  const adminWebEntrypoint = useMemo(() => isAdminWebEntrypoint(), []);
+  const [authRoute, setAuthRoute] = useState<AuthRoute>(() =>
+    adminWebEntrypoint ? 'AdminLogin' : 'Login',
+  );
   const [mainRoute, setMainRoute] = useState<MainRoute>('Dashboard');
   const [businessDetailsId, setBusinessDetailsId] = useState<string | null>(null);
   const [sellerProfileId, setSellerProfileId] = useState<string | null>(null);
@@ -620,14 +636,32 @@ export function AppNavigator() {
     ],
   );
 
+  const isMobileLayout = width < 780;
+  const compactSidebar = width < 980;
+  const adminWebBlockedOnMobile = adminWebEntrypoint && width < 900;
+
   let content: React.ReactNode;
 
   const handleReturnToApp = () => {
     signOutAdmin();
-    setAuthRoute('Login');
+    setAuthRoute(adminWebEntrypoint ? 'AdminLogin' : 'Login');
   };
 
-  if (adminUser) {
+  if (adminWebBlockedOnMobile) {
+    content = (
+      <View style={styles.adminMobileBlocked}>
+        <UrbanConnectLogo />
+        <View style={styles.adminMobileBlockedCard}>
+          <Ionicons color={colors.primary} name="laptop-outline" size={34} />
+          <Text style={styles.adminMobileBlockedTitle}>Admin is desktop only</Text>
+          <Text style={styles.adminMobileBlockedText}>
+            Open this private admin link on a laptop or desktop browser. Mobile web is reserved
+            for the public download website.
+          </Text>
+        </View>
+      </View>
+    );
+  } else if (adminUser) {
     content = <AdminPanelScreen onReturnToApp={handleReturnToApp} />;
   } else if (!user) {
     content =
@@ -683,8 +717,6 @@ export function AppNavigator() {
     content = <DashboardScreen navigation={navigation} />;
   }
 
-  const isMobileLayout = width < 780;
-  const compactSidebar = width < 980;
   const activeBusiness = businessDetailsId ? getBusinessById(businessDetailsId) : undefined;
   const activeOrder = orderDetailsId ? getOrderById(orderDetailsId) : undefined;
   const activeSeller = sellerProfileId ? findUserById(sellerProfileId) : undefined;
@@ -1372,6 +1404,36 @@ function createStyles(colors: AppColors) {
     safeArea: {
       flex: 1,
       backgroundColor: 'transparent',
+    },
+    adminMobileBlocked: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.lg,
+      padding: spacing.lg,
+      backgroundColor: colors.background,
+    },
+    adminMobileBlockedCard: {
+      width: '100%',
+      maxWidth: 420,
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.xl,
+      ...shadows.card,
+    },
+    adminMobileBlockedTitle: {
+      ...typography.subtitle,
+      color: colors.text,
+      textAlign: 'center',
+    },
+    adminMobileBlockedText: {
+      ...typography.body,
+      color: colors.textMuted,
+      textAlign: 'center',
     },
     desktopShell: {
       flex: 1,

@@ -34,8 +34,23 @@ function isUrbanConnectReturnUrl(url?: string) {
   return Boolean(url?.startsWith('urbanconnect://payments/flutterwave'));
 }
 
+function isFlutterwaveStatusReturnUrl(url?: string) {
+  const normalizedUrl = (url ?? '').toLowerCase();
+
+  return Boolean(
+    normalizedUrl.includes('flutterwave') &&
+      (normalizedUrl.includes('status=') ||
+        normalizedUrl.includes('transaction_id=') ||
+        normalizedUrl.includes('tx_ref=')),
+  );
+}
+
+function isPaymentReturnUrl(url?: string) {
+  return isUrbanConnectReturnUrl(url) || isFlutterwaveStatusReturnUrl(url);
+}
+
 function isCancelledFlutterwaveReturnUrl(url?: string) {
-  if (!isUrbanConnectReturnUrl(url)) {
+  if (!isPaymentReturnUrl(url)) {
     return false;
   }
 
@@ -50,7 +65,7 @@ function isCancelledFlutterwaveReturnUrl(url?: string) {
 }
 
 function isSuccessfulFlutterwaveReturnUrl(url?: string) {
-  if (!isUrbanConnectReturnUrl(url) || isCancelledFlutterwaveReturnUrl(url)) {
+  if (!isPaymentReturnUrl(url) || isCancelledFlutterwaveReturnUrl(url)) {
     return false;
   }
 
