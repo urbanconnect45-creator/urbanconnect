@@ -15,3 +15,5 @@ yarn-error.*
 --fetch-timeout=60000/
 my-app/
 supabase/.temp/
+
+.vercel

@@ -37,6 +37,13 @@ function isValidEmail(value?: string) {
   return Boolean(value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
 }
 
+function extractEmailAddress(value?: string) {
+  const trimmedValue = value?.trim() ?? '';
+  const bracketMatch = trimmedValue.match(/<([^<>]+)>/);
+
+  return (bracketMatch?.[1] ?? trimmedValue).trim();
+}
+
 serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -47,11 +54,28 @@ serve(async (request) => {
   }
 
   const resendApiKey = Deno.env.get('RESEND_API_KEY')?.trim();
-  const fromEmail = Deno.env.get('RESEND_FROM_EMAIL')?.trim() || 'UrbanConnect <onboarding@resend.dev>';
+  const fromEmail = Deno.env.get('RESEND_FROM_EMAIL')?.trim();
   const replyToEmail = Deno.env.get('RESEND_REPLY_TO')?.trim();
 
   if (!resendApiKey) {
     return jsonResponse({ error: 'RESEND_API_KEY is not configured.' }, 500);
+  }
+
+  const senderEmailAddress = extractEmailAddress(fromEmail).toLowerCase();
+
+  if (
+    !fromEmail ||
+    !isValidEmail(senderEmailAddress) ||
+    senderEmailAddress.endsWith('@resend.dev')
+  ) {
+    return jsonResponse(
+      { error: 'RESEND_FROM_EMAIL must be configured with a verified sender on your domain.' },
+      500,
+    );
+  }
+
+  if (replyToEmail && !isValidEmail(extractEmailAddress(replyToEmail))) {
+    return jsonResponse({ error: 'RESEND_REPLY_TO must be a valid email address.' }, 500);
   }
 
   let payload: EmailPayload;

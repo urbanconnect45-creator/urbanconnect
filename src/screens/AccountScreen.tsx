@@ -454,6 +454,9 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
       setGeneratedDepositAccountId(checkout.deposit.id);
       setDepositAmount('');
       setDepositError(null);
+      setDepositModalVisible(false);
+      setDepositStep('amount');
+      setDepositInstructionsAccepted(false);
       setActiveFlutterwaveCheckout({
         checkoutUrl: checkout.checkoutUrl,
         reference: checkout.reference,
@@ -462,9 +465,10 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         channelLabel: channel.label,
       });
     } catch (error) {
-      setDepositError(
-        error instanceof Error ? error.message : 'Flutterwave could not open checkout.',
-      );
+      const message =
+        error instanceof Error ? error.message : 'Flutterwave could not open checkout.';
+      setDepositError(message);
+      Alert.alert('Flutterwave checkout failed', message);
     } finally {
       setIsCreatingDepositAccount(false);
     }
