@@ -44,7 +44,7 @@ import {
 
 type ListingView = 'product' | 'profession';
 type DepositStep = 'amount' | 'instructions' | 'details';
-type DepositPaymentChannelId = 'card' | 'opay' | 'bank';
+type DepositPaymentChannelId = 'card' | 'bank';
 
 const depositFlutterwaveChannels: Array<{
   id: DepositPaymentChannelId;
@@ -59,13 +59,6 @@ const depositFlutterwaveChannels: Array<{
     icon: 'card-outline',
     paymentOptions: ['card'],
     subtitle: 'Pay with debit or credit card',
-  },
-  {
-    id: 'opay',
-    label: 'OPay',
-    icon: 'phone-portrait-outline',
-    paymentOptions: ['opay'],
-    subtitle: 'Pay with OPay checkout',
   },
   {
     id: 'bank',
@@ -356,6 +349,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     setDepositStep('amount');
     setDepositInstructionsAccepted(false);
     setGeneratedDepositAccountId(null);
+    setActiveFlutterwaveCheckout(null);
   };
 
   const closeDepositModal = () => {
@@ -369,6 +363,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     setDepositStep('amount');
     setDepositInstructionsAccepted(false);
     setGeneratedDepositAccountId(null);
+    setActiveFlutterwaveCheckout(null);
   };
 
   const handleDepositBack = () => {
@@ -425,15 +420,20 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     }
   };
 
-  const handleStartFlutterwaveDeposit = async () => {
+  const handleStartFlutterwaveDeposit = async (
+    channel = selectedDepositPaymentChannel,
+  ) => {
     if (!user || isCreatingDepositAccount) {
       return;
     }
 
+    setDepositPaymentChannel(channel.id);
     const amount = Math.floor(Number(depositAmount.replace(/,/g, '').trim()));
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      setDepositError('Enter a valid amount before opening Flutterwave.');
+      setDepositError(
+        `Enter an amount higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)} before opening ${channel.label}.`,
+      );
       return;
     }
 
@@ -449,7 +449,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
       const checkout = await startAddFundsFlutterwaveCheckout(
         user,
         amount,
-        selectedDepositPaymentChannel.paymentOptions,
+        channel.paymentOptions,
       );
       setGeneratedDepositAccountId(checkout.deposit.id);
       setDepositAmount('');
@@ -458,8 +458,8 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         checkoutUrl: checkout.checkoutUrl,
         reference: checkout.reference,
         title: 'Add funds checkout',
-        subtitle: `Pay ${formatCurrency(checkout.amount)} with ${selectedDepositPaymentChannel.label}.`,
-        channelLabel: selectedDepositPaymentChannel.label,
+        subtitle: `Pay ${formatCurrency(checkout.amount)} with ${channel.label}.`,
+        channelLabel: channel.label,
       });
     } catch (error) {
       setDepositError(
@@ -1169,7 +1169,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                   <View style={styles.depositHeroCopy}>
                     <Text style={styles.depositHeroKicker}>Live payment</Text>
                     <Text style={styles.depositHeroTitle}>Add funds with Flutterwave</Text>
-                    <Text style={styles.depositHeroSubtitle}>Card, OPay, or bank account</Text>
+                    <Text style={styles.depositHeroSubtitle}>Card or bank transfer</Text>
                   </View>
                 </View>
 
@@ -1181,8 +1181,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                       <Pressable
                         key={channel.id}
                         onPress={() => {
-                          setDepositPaymentChannel(channel.id);
-                          setDepositError(null);
+                          void handleStartFlutterwaveDeposit(channel);
                         }}
                         style={({ pressed }) => [
                           styles.depositMethodChip,
@@ -1271,7 +1270,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                 {depositError ? <Text style={styles.errorText}>{depositError}</Text> : null}
 
                 <AppButton
-                  label="Pay with Flutterwave"
+                  label={`Pay with ${selectedDepositPaymentChannel.label}`}
                   loading={isCreatingDepositAccount}
                   onPress={() => void handleStartFlutterwaveDeposit()}
                   style={styles.depositActionButton}
@@ -1518,16 +1517,19 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           </ScrollView>
         </View>
       </Modal>
-      <FlutterwaveCheckoutModal
-        activePaymentLabel={activeFlutterwaveCheckout?.channelLabel}
-        checkoutUrl={activeFlutterwaveCheckout?.checkoutUrl}
-        onClose={handleCloseFlutterwaveCheckout}
-        onPaymentReturn={handleFlutterwaveReturn}
-        reference={activeFlutterwaveCheckout?.reference}
-        subtitle={activeFlutterwaveCheckout?.subtitle}
-        title={activeFlutterwaveCheckout?.title ?? 'Flutterwave checkout'}
-        visible={Boolean(activeFlutterwaveCheckout)}
-      />
+      {activeFlutterwaveCheckout ? (
+        <FlutterwaveCheckoutModal
+          key={activeFlutterwaveCheckout.checkoutUrl}
+          activePaymentLabel={activeFlutterwaveCheckout.channelLabel}
+          checkoutUrl={activeFlutterwaveCheckout.checkoutUrl}
+          onClose={handleCloseFlutterwaveCheckout}
+          onPaymentReturn={handleFlutterwaveReturn}
+          reference={activeFlutterwaveCheckout.reference}
+          subtitle={activeFlutterwaveCheckout.subtitle}
+          title={activeFlutterwaveCheckout.title}
+          visible
+        />
+      ) : null}
     </>
   );
 }

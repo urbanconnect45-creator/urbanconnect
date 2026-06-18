@@ -3799,7 +3799,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           order.id,
           'placed',
           confirmedAt,
-          'Flutterwave confirmed the card, OPay, or bank payment.',
+          'Flutterwave confirmed the card or bank payment.',
         ),
       ],
     };

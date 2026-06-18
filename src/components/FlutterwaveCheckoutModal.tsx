@@ -27,7 +27,6 @@ type FlutterwaveCheckoutModalProps = {
 
 const paymentOptions = [
   { icon: 'card-outline', label: 'Card' },
-  { icon: 'phone-portrait-outline', label: 'OPay' },
   { icon: 'business-outline', label: 'Bank' },
 ] as const;
 
@@ -70,7 +69,7 @@ export function FlutterwaveCheckoutModal({
   onClose,
   onPaymentReturn,
   reference,
-  subtitle = 'Complete payment with card, OPay, or bank account.',
+  subtitle = 'Complete payment with card or bank transfer.',
   title,
   visible,
 }: FlutterwaveCheckoutModalProps) {
@@ -87,7 +86,7 @@ export function FlutterwaveCheckoutModal({
     }
   }, [checkoutUrl, visible]);
 
-  const closeAfterProviderReturn = () => {
+  const closeCheckout = () => {
     if (hasReturnedRef.current) {
       return;
     }
@@ -95,6 +94,8 @@ export function FlutterwaveCheckoutModal({
     hasReturnedRef.current = true;
     onClose();
   };
+
+  const closeAfterProviderReturn = closeCheckout;
 
   const handlePaymentReturn = (url: string) => {
     if (hasReturnedRef.current) {
@@ -105,14 +106,18 @@ export function FlutterwaveCheckoutModal({
     onPaymentReturn?.(url);
   };
 
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
+    <Modal animationType="slide" onRequestClose={closeCheckout} visible={visible}>
       <View style={styles.screen}>
         <View style={styles.header}>
           <View style={styles.headerTopRow}>
             <Pressable
               accessibilityRole="button"
-              onPress={onClose}
+              onPress={closeCheckout}
               style={({ pressed }) => [
                 styles.iconButton,
                 pressed && styles.pressed,
@@ -127,7 +132,7 @@ export function FlutterwaveCheckoutModal({
             </View>
             <Pressable
               accessibilityRole="button"
-              onPress={onClose}
+              onPress={closeCheckout}
               style={({ pressed }) => [
                 styles.doneButton,
                 pressed && styles.pressed,
@@ -152,6 +157,7 @@ export function FlutterwaveCheckoutModal({
         <View style={styles.checkoutShell}>
           {checkoutUrl ? (
             <WebView
+              key={checkoutUrl}
               allowsBackForwardNavigationGestures
               domStorageEnabled
               javaScriptEnabled

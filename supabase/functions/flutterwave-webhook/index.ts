@@ -322,7 +322,7 @@ async function handleOrderCharge(
     order_id: reference,
     status: optionalString(order.status) ?? 'placed',
     label: 'Payment confirmed',
-    note: 'Flutterwave confirmed the card, OPay, or bank payment.',
+    note: 'Flutterwave confirmed the card or bank payment.',
     created_at: now,
   }).catch(() => undefined);
   await reduceOrderStock(supabaseUrl, headers, reference).catch(() => undefined);

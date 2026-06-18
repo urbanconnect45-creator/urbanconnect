@@ -184,7 +184,7 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
         checkoutUrl: checkout.checkoutUrl,
         reference: checkout.reference,
         title: 'Subscription checkout',
-        subtitle: `Pay ${formatCurrency(checkout.amount)} with card, OPay, or bank account.`,
+        subtitle: `Pay ${formatCurrency(checkout.amount)} with card or bank transfer.`,
       });
     } catch (paymentError) {
       const message =
@@ -393,15 +393,18 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
         </View>
       </View>
     </ScrollView>
-    <FlutterwaveCheckoutModal
-      checkoutUrl={activeFlutterwaveCheckout?.checkoutUrl}
-      onClose={closeFlutterwaveCheckout}
-      onPaymentReturn={handleFlutterwaveReturn}
-      reference={activeFlutterwaveCheckout?.reference}
-      subtitle={activeFlutterwaveCheckout?.subtitle}
-      title={activeFlutterwaveCheckout?.title ?? 'Flutterwave checkout'}
-      visible={Boolean(activeFlutterwaveCheckout)}
-    />
+    {activeFlutterwaveCheckout ? (
+      <FlutterwaveCheckoutModal
+        key={activeFlutterwaveCheckout.checkoutUrl}
+        checkoutUrl={activeFlutterwaveCheckout.checkoutUrl}
+        onClose={closeFlutterwaveCheckout}
+        onPaymentReturn={handleFlutterwaveReturn}
+        reference={activeFlutterwaveCheckout.reference}
+        subtitle={activeFlutterwaveCheckout.subtitle}
+        title={activeFlutterwaveCheckout.title}
+        visible
+      />
+    ) : null}
     </>
   );
 }

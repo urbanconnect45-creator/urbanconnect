@@ -18,7 +18,7 @@ import { getAccountWalletBalance } from '../utils/wallet';
 
 const launchPaymentMethods: PaymentMethod[] = ['flutterwave', 'walletAccount'];
 
-type FlutterwaveChannelId = 'card' | 'opay' | 'bank';
+type FlutterwaveChannelId = 'card' | 'bank';
 
 const flutterwaveChannels: Array<{
   id: FlutterwaveChannelId;
@@ -33,13 +33,6 @@ const flutterwaveChannels: Array<{
     icon: 'card-outline',
     paymentOptions: ['card'],
     subtitle: 'Pay with debit or credit card',
-  },
-  {
-    id: 'opay',
-    label: 'OPay',
-    icon: 'phone-portrait-outline',
-    paymentOptions: ['opay'],
-    subtitle: 'Pay with OPay checkout',
   },
   {
     id: 'bank',
@@ -453,7 +446,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
                 const isActive = method === paymentMethod;
                 const methodCopy =
                   method === 'flutterwave'
-                    ? 'Open Flutterwave to pay with card, OPay, or bank account.'
+                    ? 'Open Flutterwave to pay with card or bank transfer.'
                     : 'Use your UrbanConnect account balance to pay now.';
 
                 return (
@@ -583,16 +576,19 @@ export function CartScreen({ navigation }: CartScreenProps) {
         </>
       )}
     </ScrollView>
-    <FlutterwaveCheckoutModal
-      activePaymentLabel={activeFlutterwaveCheckout?.channelLabel}
-      checkoutUrl={activeFlutterwaveCheckout?.checkoutUrl}
-      onClose={closeFlutterwaveCheckout}
-      onPaymentReturn={handleFlutterwaveReturn}
-      reference={activeFlutterwaveCheckout?.reference}
-      subtitle={activeFlutterwaveCheckout?.subtitle}
-      title={activeFlutterwaveCheckout?.title ?? 'Flutterwave checkout'}
-      visible={Boolean(activeFlutterwaveCheckout)}
-    />
+    {activeFlutterwaveCheckout ? (
+      <FlutterwaveCheckoutModal
+        key={activeFlutterwaveCheckout.checkoutUrl}
+        activePaymentLabel={activeFlutterwaveCheckout.channelLabel}
+        checkoutUrl={activeFlutterwaveCheckout.checkoutUrl}
+        onClose={closeFlutterwaveCheckout}
+        onPaymentReturn={handleFlutterwaveReturn}
+        reference={activeFlutterwaveCheckout.reference}
+        subtitle={activeFlutterwaveCheckout.subtitle}
+        title={activeFlutterwaveCheckout.title}
+        visible
+      />
+    ) : null}
     </>
   );
 }

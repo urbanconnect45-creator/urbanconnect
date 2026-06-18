@@ -1439,7 +1439,7 @@ export async function createFlutterwaveCheckoutSession(values: {
         title: values.title,
         description: values.description,
         purpose: values.purpose,
-        paymentOptions: values.paymentOptions ?? ['card', 'opay', 'account', 'banktransfer'],
+        paymentOptions: values.paymentOptions ?? ['card', 'account', 'banktransfer'],
         meta: values.meta ?? {},
       },
     },
@@ -1462,7 +1462,7 @@ export async function createFlutterwaveCheckoutSession(values: {
     amount: toNumber(response.amount ?? values.amount),
     currency: optionalString(response.currency) ?? 'NGN',
     checkoutUrl,
-    paymentOptions: response.paymentOptions ?? ['card', 'opay', 'account', 'banktransfer'],
+    paymentOptions: response.paymentOptions ?? ['card', 'account', 'banktransfer'],
     ...(response.mode ? { mode: response.mode } : {}),
     ...(response.providerBody ? { providerBody: JSON.stringify(response.providerBody) } : {}),
   } satisfies FlutterwaveCheckoutSession;

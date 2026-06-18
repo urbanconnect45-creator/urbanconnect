@@ -24,7 +24,7 @@ type CheckoutPayload = {
   meta?: Record<string, unknown>;
 };
 
-const defaultPaymentOptions = ['card', 'opay', 'account', 'banktransfer'];
+const defaultPaymentOptions = ['card', 'account', 'banktransfer'];
 const flutterwavePaymentsEndpoint = 'https://api.flutterwave.com/v3/payments';
 
 const corsHeaders = {
