@@ -26,6 +26,8 @@ type CheckoutPayload = {
 
 const defaultPaymentOptions = ['card', 'account', 'banktransfer'];
 const flutterwavePaymentsEndpoint = 'https://api.flutterwave.com/v3/payments';
+const defaultSiteUrl = 'https://urbanconnectstore.com';
+const flutterwaveCheckoutReturnPath = '/payments/flutterwave/return';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,6 +54,15 @@ function normalizeFlutterwaveSecretKey(value?: string) {
   }
 
   return result || undefined;
+}
+
+function getDefaultFlutterwaveRedirectUrl() {
+  const siteUrl =
+    Deno.env.get('URBANCONNECT_SITE_URL')?.trim() ||
+    Deno.env.get('PUBLIC_SITE_URL')?.trim() ||
+    defaultSiteUrl;
+
+  return `${siteUrl.replace(/\/+$/, '')}${flutterwaveCheckoutReturnPath}`;
 }
 
 type FlutterwaveCredentialKind =
@@ -284,7 +295,7 @@ Deno.serve(async (request: Request) => {
   const redirectUrl =
     payload.redirectUrl?.trim() ||
     Deno.env.get('FLUTTERWAVE_REDIRECT_URL')?.trim() ||
-    'urbanconnect://payments/flutterwave';
+    getDefaultFlutterwaveRedirectUrl();
   const paymentOptions =
     payload.paymentOptions?.map((option) => option.trim()).filter(Boolean) ??
     defaultPaymentOptions;

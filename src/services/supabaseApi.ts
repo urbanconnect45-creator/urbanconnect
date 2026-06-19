@@ -300,6 +300,9 @@ type FlutterwaveCheckoutFunctionResponse = {
   providerBody?: unknown;
 };
 
+const flutterwaveCheckoutReturnUrl =
+  'https://urbanconnectstore.com/payments/flutterwave/return';
+
 type SupabaseSecurityRow = {
   allow_resident_signups: boolean;
   allow_business_owner_signups: boolean;
@@ -1438,6 +1441,7 @@ export async function createFlutterwaveCheckoutSession(values: {
         customerPhone: values.customerPhone,
         title: values.title,
         description: values.description,
+        redirectUrl: flutterwaveCheckoutReturnUrl,
         purpose: values.purpose,
         paymentOptions: values.paymentOptions ?? ['card', 'account', 'banktransfer'],
         meta: values.meta ?? {},

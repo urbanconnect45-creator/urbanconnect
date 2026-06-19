@@ -30,23 +30,42 @@ const paymentOptions = [
   { icon: 'business-outline', label: 'Bank' },
 ] as const;
 
-function isUrbanConnectReturnUrl(url?: string) {
+function isUrbanConnectNativeReturnUrl(url?: string) {
   return Boolean(url?.startsWith('urbanconnect://payments/flutterwave'));
+}
+
+function isUrbanConnectWebReturnUrl(url?: string) {
+  const normalizedUrl = (url ?? '').toLowerCase();
+
+  return (
+    normalizedUrl.includes('/payments/flutterwave/return') ||
+    normalizedUrl.includes('/payments/flutterwave/cancel')
+  );
 }
 
 function isFlutterwaveStatusReturnUrl(url?: string) {
   const normalizedUrl = (url ?? '').toLowerCase();
 
+  if (
+    normalizedUrl.includes('checkout.flutterwave.com') ||
+    normalizedUrl.includes('flutterwave.com/v3/hosted/pay')
+  ) {
+    return false;
+  }
+
   return Boolean(
     normalizedUrl.includes('flutterwave') &&
-      (normalizedUrl.includes('status=') ||
-        normalizedUrl.includes('transaction_id=') ||
-        normalizedUrl.includes('tx_ref=')),
+    (normalizedUrl.includes('status=') ||
+      normalizedUrl.includes('transaction_id=')),
   );
 }
 
 function isPaymentReturnUrl(url?: string) {
-  return isUrbanConnectReturnUrl(url) || isFlutterwaveStatusReturnUrl(url);
+  return (
+    isUrbanConnectNativeReturnUrl(url) ||
+    isUrbanConnectWebReturnUrl(url) ||
+    isFlutterwaveStatusReturnUrl(url)
+  );
 }
 
 function isCancelledFlutterwaveReturnUrl(url?: string) {
@@ -90,6 +109,7 @@ export function FlutterwaveCheckoutModal({
 }: FlutterwaveCheckoutModalProps) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
+  const webViewRef = useRef<any>(null);
   const hasReturnedRef = useRef(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isWebViewMounted, setIsWebViewMounted] = useState(false);
@@ -109,6 +129,12 @@ export function FlutterwaveCheckoutModal({
 
   useEffect(
     () => () => {
+      try {
+        webViewRef.current?.stopLoading?.();
+      } catch {
+        // Native WebView cleanup is best-effort during unmount.
+      }
+
       if (closeTimerRef.current) {
         clearTimeout(closeTimerRef.current);
       }
@@ -122,6 +148,11 @@ export function FlutterwaveCheckoutModal({
     }
 
     hasReturnedRef.current = true;
+    try {
+      webViewRef.current?.stopLoading?.();
+    } catch {
+      // Native WebView cleanup is best-effort before closing the modal.
+    }
     setIsWebViewMounted(false);
 
     if (closeTimerRef.current) {
@@ -131,7 +162,7 @@ export function FlutterwaveCheckoutModal({
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
       callback();
-    }, 60);
+    }, 180);
   };
 
   const closeCheckout = () => {
@@ -201,10 +232,26 @@ export function FlutterwaveCheckoutModal({
         <View style={styles.checkoutShell}>
           {checkoutUrl && isWebViewMounted ? (
             <WebView
+              ref={webViewRef}
               key={checkoutUrl}
               allowsBackForwardNavigationGestures
               domStorageEnabled
               javaScriptEnabled
+              onError={(event) => {
+                if (isPaymentReturnUrl(event.nativeEvent.url)) {
+                  closeAfterProviderReturn();
+                }
+              }}
+              onLoadStart={(event) => {
+                if (isSuccessfulFlutterwaveReturnUrl(event.nativeEvent.url)) {
+                  handlePaymentReturn(event.nativeEvent.url);
+                  return;
+                }
+
+                if (isPaymentReturnUrl(event.nativeEvent.url)) {
+                  closeAfterProviderReturn();
+                }
+              }}
               onNavigationStateChange={(state) => {
                 if (isSuccessfulFlutterwaveReturnUrl(state.url)) {
                   handlePaymentReturn(state.url);
@@ -237,6 +284,7 @@ export function FlutterwaveCheckoutModal({
               )}
               source={{ uri: checkoutUrl }}
               startInLoadingState
+              setSupportMultipleWindows={false}
               style={styles.webView}
             />
           ) : (

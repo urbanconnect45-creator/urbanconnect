@@ -207,7 +207,12 @@ function buildFooter() {
   </footer>`;
 }
 
-function buildSharedHead({ canonicalPath, description, title }) {
+function buildSharedHead({
+  canonicalPath,
+  description,
+  robots = 'index,follow,max-image-preview:large',
+  title,
+}) {
   const siteUrl = normalizeBaseUrl(process.env.URBANCONNECT_SITE_URL);
   const canonicalUrl = `${siteUrl}${canonicalPath}`;
   const previewImageUrl = heroCarouselImages[0].src;
@@ -244,7 +249,7 @@ function buildSharedHead({ canonicalPath, description, title }) {
   return `<meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#12372A" />
-    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <meta name="robots" content="${escapeHtml(robots)}" />
     <meta name="description" content="${escapeHtml(description)}" />
     <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
     <link rel="preconnect" href="https://images.unsplash.com" />
@@ -376,6 +381,11 @@ function buildStyles() {
         font-weight: 950;
       }
       .nav-cta { min-width: 124px; }
+      .primary-link.ghost {
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--primary);
+      }
       .hero {
         position: relative;
         min-height: min(720px, calc(100vh - 34px));
@@ -807,11 +817,18 @@ function buildLaunchModal() {
     </script>`;
 }
 
-function buildDocument({ activePath, body, canonicalPath, description, title }) {
+function buildDocument({
+  activePath,
+  body,
+  canonicalPath,
+  description,
+  robots,
+  title,
+}) {
   return `<!doctype html>
 <html lang="en">
   <head>
-    ${buildSharedHead({ canonicalPath, description, title })}
+    ${buildSharedHead({ canonicalPath, description, robots, title })}
     ${buildStyles()}
   </head>
   <body>
@@ -1053,6 +1070,46 @@ function buildContactHtml() {
   });
 }
 
+function buildFlutterwaveReturnHtml(kind) {
+  const isCancel = kind === 'cancel';
+  const title = isCancel ? 'Payment cancelled' : 'Returning to UrbanConnect';
+  const copy = isCancel
+    ? 'This checkout was cancelled. Your UrbanConnect balance will not change unless Flutterwave later confirms a successful payment.'
+    : 'Flutterwave has returned this checkout. Your UrbanConnect app will update after provider confirmation.';
+  const deepLink = 'urbanconnect://payments/flutterwave';
+  const canonicalPath = isCancel
+    ? '/payments/flutterwave/cancel/'
+    : '/payments/flutterwave/return/';
+  const body = `<section class="page-hero payment-return-hero">
+      <div class="shell">
+        <p class="section-kicker">Flutterwave checkout</p>
+        <h1>${title}</h1>
+        <p class="hero-lead">${copy}</p>
+        <div class="store-row">
+          <a class="primary-link" href="${deepLink}">Open UrbanConnect</a>
+          <a class="primary-link ghost" href="/">Back to website</a>
+        </div>
+      </div>
+    </section>
+    <script>
+      (() => {
+        const deepLink = '${deepLink}' + window.location.search;
+        window.setTimeout(() => {
+          window.location.href = deepLink;
+        }, 450);
+      })();
+    </script>`;
+
+  return buildDocument({
+    activePath: '',
+    body,
+    canonicalPath,
+    description: 'Private Flutterwave payment return page for UrbanConnect app checkout.',
+    robots: 'noindex,nofollow',
+    title: `${title} | UrbanConnect`,
+  });
+}
+
 async function writePage(distDir, route, html) {
   if (route === '/') {
     await fs.writeFile(path.join(distDir, 'index.html'), html);
@@ -1109,4 +1166,6 @@ ${routes
   await writePage(distDir, '/how-it-works/', buildHowItWorksHtml());
   await writePage(distDir, '/about/', buildAboutHtml());
   await writePage(distDir, '/contact/', buildContactHtml());
+  await writePage(distDir, '/payments/flutterwave/return/', buildFlutterwaveReturnHtml('return'));
+  await writePage(distDir, '/payments/flutterwave/cancel/', buildFlutterwaveReturnHtml('cancel'));
 }
