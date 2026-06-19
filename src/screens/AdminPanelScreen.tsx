@@ -2700,7 +2700,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                 {isOwnerAdmin ? (
                   <SectionPanel
                     title="Payment plans"
-                    subtitle="Edit the weekly and monthly amounts shown on the business-owner Subscription page."
+                    subtitle="Edit the base plans and review the exact duration options shown under the Pay icon in business accounts."
                   >
                     <View style={styles.planGrid}>
                       {paymentPlans.map((plan) => {
@@ -2764,11 +2764,41 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         );
                       })}
                     </View>
+                    <View style={styles.recordCard}>
+                      <Text style={styles.recordTitle}>Business account Pay page options</Text>
+                      <Text style={styles.recordMeta}>
+                        These are the live duration choices business owners see under the Pay icon.
+                        Amounts are calculated from the weekly and monthly base plans above.
+                      </Text>
+                    </View>
+                    <View style={styles.planGrid}>
+                      {adminSubscriptionDurationOptions.map((option) => (
+                        <View key={option.id} style={styles.planEditorCard}>
+                          <View style={styles.planEditorHeader}>
+                            <View style={styles.recordCopy}>
+                              <Text style={styles.recordTitle}>{option.label}</Text>
+                              <Text style={styles.recordMeta}>
+                                {paymentCycleLabel(option.cycle)} option
+                              </Text>
+                            </View>
+                            <View style={styles.recordBadge}>
+                              <Text style={styles.recordBadgeText}>
+                                {formatCurrency(option.amount)}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.recordMeta}>{option.description}</Text>
+                          <Text style={styles.recordMeta}>
+                            Business owners pay this amount per listing covered.
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
                   </SectionPanel>
                 ) : (
                   <SectionPanel
                     title="Payment plans"
-                    subtitle="Customer care can see the active app subscription plans, but only the owner can edit them."
+                    subtitle="Customer care can see the active base plans and business Pay-page options, but only the owner can edit them."
                   >
                     <View style={styles.recordStack}>
                       {paymentPlans.map((plan) => (
@@ -2788,37 +2818,38 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         </View>
                       ))}
                     </View>
+                    <View style={styles.recordCard}>
+                      <Text style={styles.recordTitle}>Business account Pay page options</Text>
+                      <Text style={styles.recordMeta}>
+                        These are the exact duration choices shown under the Pay icon in a
+                        business account.
+                      </Text>
+                    </View>
+                    <View style={styles.planGrid}>
+                      {adminSubscriptionDurationOptions.map((option) => (
+                        <View key={option.id} style={styles.planEditorCard}>
+                          <View style={styles.planEditorHeader}>
+                            <View style={styles.recordCopy}>
+                              <Text style={styles.recordTitle}>{option.label}</Text>
+                              <Text style={styles.recordMeta}>
+                                {paymentCycleLabel(option.cycle)} option
+                              </Text>
+                            </View>
+                            <View style={styles.recordBadge}>
+                              <Text style={styles.recordBadgeText}>
+                                {formatCurrency(option.amount)}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.recordMeta}>{option.description}</Text>
+                          <Text style={styles.recordMeta}>
+                            Business owners pay this amount per listing covered.
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
                   </SectionPanel>
                 )}
-
-                <SectionPanel
-                  title="Business account Pay page options"
-                  subtitle="These are the duration choices shown under the Pay icon in a business account."
-                >
-                  <View style={styles.planGrid}>
-                    {adminSubscriptionDurationOptions.map((option) => (
-                      <View key={option.id} style={styles.planEditorCard}>
-                        <View style={styles.planEditorHeader}>
-                          <View style={styles.recordCopy}>
-                            <Text style={styles.recordTitle}>{option.label}</Text>
-                            <Text style={styles.recordMeta}>
-                              {paymentCycleLabel(option.cycle)} option
-                            </Text>
-                          </View>
-                          <View style={styles.recordBadge}>
-                            <Text style={styles.recordBadgeText}>
-                              {formatCurrency(option.amount)}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text style={styles.recordMeta}>{option.description}</Text>
-                        <Text style={styles.recordMeta}>
-                          Business owners pay this amount per listing covered.
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                </SectionPanel>
 
                 <SectionPanel
                   title="Flutterwave add-funds ledger"

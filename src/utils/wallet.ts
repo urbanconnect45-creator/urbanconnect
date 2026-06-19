@@ -1,13 +1,10 @@
 import type { AppUser } from '../types/auth';
 import type { DynamicDepositAccount, Order, SubscriptionPayment } from '../types/business';
 
-export const DEMO_WALLET_BALANCE = 200000;
+export const DEMO_WALLET_BALANCE = 0;
 export const BUSINESS_OWNER_DEFAULT_WALLET_BALANCE = 0;
 
-const TEST_ACCOUNT_BALANCES: Record<string, number> = {
-  'business.tomi.stone.086729@urbanconnect.test': 50000,
-  'danielkenneth616@gmail.com': 50000,
-};
+const TEST_ACCOUNT_BALANCES: Record<string, number> = {};
 
 function normalizeWalletKey(value?: string | null) {
   return value?.trim().toLowerCase();

@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  type AppStateStatus,
   Modal,
   Pressable,
   StyleSheet,
@@ -112,7 +114,9 @@ export function FlutterwaveCheckoutModal({
   const webViewRef = useRef<any>(null);
   const hasReturnedRef = useRef(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const [isWebViewMounted, setIsWebViewMounted] = useState(false);
+  const [isCheckoutSurfaceVisible, setIsCheckoutSurfaceVisible] = useState(false);
   const visiblePaymentOptions = activePaymentLabel
     ? paymentOptions.filter((option) => option.label === activePaymentLabel)
     : paymentOptions;
@@ -120,12 +124,35 @@ export function FlutterwaveCheckoutModal({
   useEffect(() => {
     if (visible) {
       hasReturnedRef.current = false;
+      setIsCheckoutSurfaceVisible(true);
       setIsWebViewMounted(Boolean(checkoutUrl));
       return;
     }
 
+    setIsCheckoutSurfaceVisible(false);
     setIsWebViewMounted(false);
   }, [checkoutUrl, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      return undefined;
+    }
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+
+      if (
+        isWebViewMounted &&
+        nextState === 'active' &&
+        /inactive|background/.test(previousState)
+      ) {
+        closeCheckout();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [isWebViewMounted, visible]);
 
   useEffect(
     () => () => {
@@ -154,6 +181,7 @@ export function FlutterwaveCheckoutModal({
       // Native WebView cleanup is best-effort before closing the modal.
     }
     setIsWebViewMounted(false);
+    setIsCheckoutSurfaceVisible(false);
 
     if (closeTimerRef.current) {
       clearTimeout(closeTimerRef.current);
@@ -185,7 +213,9 @@ export function FlutterwaveCheckoutModal({
       onDismiss={() => setIsWebViewMounted(false)}
       onRequestClose={closeCheckout}
       presentationStyle="fullScreen"
-      visible={visible}
+      hardwareAccelerated
+      statusBarTranslucent
+      visible={visible && isCheckoutSurfaceVisible}
     >
       <View style={styles.screen}>
         <View style={styles.header}>

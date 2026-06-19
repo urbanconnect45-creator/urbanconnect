@@ -980,14 +980,16 @@ export function AppNavigator() {
                     placement="sidebar"
                   />
                 ) : null}
-                <NavButton
-                  active={mainRoute === 'Chats'}
-                  compact={compactSidebar}
-                  icon={routeMeta.Chats.icon}
-                  label={routeMeta.Chats.label}
-                  onPress={() => navigation.navigate('Chats')}
-                  placement="sidebar"
-                />
+                {user.role !== 'businessOwner' ? (
+                  <NavButton
+                    active={mainRoute === 'Chats'}
+                    compact={compactSidebar}
+                    icon={routeMeta.Chats.icon}
+                    label={routeMeta.Chats.label}
+                    onPress={() => navigation.navigate('Chats')}
+                    placement="sidebar"
+                  />
+                ) : null}
                 <NavButton
                   active={mainRoute === 'Account'}
                   compact={compactSidebar}
@@ -1329,18 +1331,20 @@ export function AppNavigator() {
                 </View>
               </Pressable>
 
-              <Pressable
-                onPress={() => runMenuAction(() => navigation.navigate('Chats'))}
-                style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
-              >
-                <View style={styles.menuIconShell}>
-                  <Ionicons color={colors.primary} name="headset-outline" size={18} />
-                </View>
-                <View style={styles.menuCopy}>
-                  <Text style={styles.menuTitle}>Customer care</Text>
-                  <Text style={styles.menuMeta}>Message UrbanConnect support.</Text>
-                </View>
-              </Pressable>
+              {user?.role !== 'businessOwner' ? (
+                <Pressable
+                  onPress={() => runMenuAction(() => navigation.navigate('Chats'))}
+                  style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                >
+                  <View style={styles.menuIconShell}>
+                    <Ionicons color={colors.primary} name="headset-outline" size={18} />
+                  </View>
+                  <View style={styles.menuCopy}>
+                    <Text style={styles.menuTitle}>Customer care</Text>
+                    <Text style={styles.menuMeta}>Message UrbanConnect support.</Text>
+                  </View>
+                </Pressable>
+              ) : null}
 
               <Pressable
                 onPress={() => runMenuAction(() => navigation.navigate('Settings'))}
