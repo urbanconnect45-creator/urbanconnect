@@ -292,7 +292,7 @@ export function AppNavigator() {
 
   useEffect(() => {
     if (!user) {
-      setAuthRoute('Login');
+      setAuthRoute(adminWebEntrypoint ? 'AdminLogin' : 'Login');
       setMainRoute('Dashboard');
       setBusinessDetailsId(null);
       setIsCartRoute(false);
@@ -317,7 +317,7 @@ export function AppNavigator() {
     ) {
       setMainRoute('Dashboard');
     }
-  }, [mainRoute, user]);
+  }, [adminWebEntrypoint, mainRoute, user]);
 
   useEffect(() => {
     if (!user) {
@@ -661,6 +661,12 @@ export function AppNavigator() {
         </View>
       </View>
     );
+  } else if (adminWebEntrypoint) {
+    content = adminUser ? (
+      <AdminPanelScreen onReturnToApp={handleReturnToApp} />
+    ) : (
+      <AdminLoginScreen navigation={navigation} />
+    );
   } else if (adminUser) {
     content = <AdminPanelScreen onReturnToApp={handleReturnToApp} />;
   } else if (!user) {
@@ -825,7 +831,7 @@ export function AppNavigator() {
   };
 
   const appContent =
-    user && !adminUser ? (
+    user && !adminUser && !adminWebEntrypoint ? (
       isMobileLayout ? (
         <View style={styles.mobileShell}>
           <View style={styles.topBar}>
@@ -1086,7 +1092,7 @@ export function AppNavigator() {
     >
       {appContent}
 
-      {user && !adminUser ? (
+      {user && !adminUser && !adminWebEntrypoint ? (
         <Pressable
           onPress={openSupportChat}
           style={({ pressed }) => [

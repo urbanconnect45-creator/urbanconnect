@@ -206,22 +206,23 @@ export function FlutterwaveCheckoutModal({
               domStorageEnabled
               javaScriptEnabled
               onNavigationStateChange={(state) => {
-                if (isCancelledFlutterwaveReturnUrl(state.url)) {
-                  closeAfterProviderReturn();
-                }
-
                 if (isSuccessfulFlutterwaveReturnUrl(state.url)) {
                   handlePaymentReturn(state.url);
+                  return;
+                }
+
+                if (isPaymentReturnUrl(state.url)) {
+                  closeAfterProviderReturn();
                 }
               }}
               onShouldStartLoadWithRequest={(request) => {
-                if (isCancelledFlutterwaveReturnUrl(request.url)) {
-                  closeAfterProviderReturn();
+                if (isSuccessfulFlutterwaveReturnUrl(request.url)) {
+                  handlePaymentReturn(request.url);
                   return false;
                 }
 
-                if (isSuccessfulFlutterwaveReturnUrl(request.url)) {
-                  handlePaymentReturn(request.url);
+                if (isPaymentReturnUrl(request.url)) {
+                  closeAfterProviderReturn();
                   return false;
                 }
 

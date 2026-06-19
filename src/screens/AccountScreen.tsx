@@ -474,21 +474,29 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     }
   };
 
-  const handleCloseFlutterwaveCheckout = () => {
+  const resetAddFundsFlowToProfile = () => {
     setActiveFlutterwaveCheckout(null);
     setDepositModalVisible(false);
+    setDepositAmount('');
+    setDepositError(null);
     setDepositStep('amount');
     setDepositInstructionsAccepted(false);
+    setGeneratedDepositAccountId(null);
+    setIsCreatingDepositAccount(false);
+    navigation.navigate('Account');
+  };
+
+  const handleCloseFlutterwaveCheckout = () => {
+    resetAddFundsFlowToProfile();
   };
 
   const handleFlutterwaveReturn = () => {
-    setActiveFlutterwaveCheckout(null);
-    setDepositModalVisible(false);
-    setDepositStep('amount');
-    setDepositInstructionsAccepted(false);
+    const channelLabel = activeFlutterwaveCheckout?.channelLabel ?? 'payment';
+
+    resetAddFundsFlowToProfile();
     Alert.alert(
       'Payment submitted',
-      `Flutterwave will update your portfolio after the live ${activeFlutterwaveCheckout?.channelLabel ?? 'payment'} payment is confirmed.`,
+      `Flutterwave will update your portfolio after the live ${channelLabel} payment is confirmed.`,
     );
   };
 

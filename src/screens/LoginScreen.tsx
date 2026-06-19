@@ -17,7 +17,6 @@ import type { LoginScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { RANDOM_SIGNUP_PASSWORD } from '../utils/randomSignup';
 
 type LoginMode = 'email' | 'phone';
 type PasswordResetState = {
@@ -55,7 +54,7 @@ function generateVerificationCode() {
 }
 
 export function LoginScreen({ navigation }: LoginScreenProps) {
-  const { adminUsers, demoAccounts, resetPassword, signIn, users } = useAuth();
+  const { resetPassword, signIn, users } = useAuth();
   const { appendEmailLog, securitySettings } = useBusinessDirectory();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -149,21 +148,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       };
     }
 
-    const matchedAdmin = adminUsers.find(
-      (account) => account.email.trim().toLowerCase() === normalizedEmail,
-    );
-
-    if (!matchedAdmin) {
-      return undefined;
-    }
-
-    return {
-      identifier: matchedAdmin.email,
-      recipientEmail: matchedAdmin.email,
-      recipientName: matchedAdmin.fullName,
-      recipientType: matchedAdmin.role === 'owner' ? 'admin' : 'customerCare',
-      accountType: 'admin',
-    };
+    return undefined;
   };
 
   const sendPasswordResetCode = () => {
@@ -237,16 +222,10 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     }
 
     try {
-      const resetTarget = await resetPassword(passwordReset.identifier, resetPasswordDraft);
+      await resetPassword(passwordReset.identifier, resetPasswordDraft);
       const recipientEmail = passwordReset.recipientEmail;
       const nextPassword = resetPasswordDraft;
       closePasswordReset();
-
-      if (resetTarget === 'admin') {
-        Alert.alert('Admin password updated', 'Use Admin login with the new password.');
-        navigation.navigate('AdminLogin');
-        return;
-      }
 
       setLoginMode('email');
       setEmail(recipientEmail);
@@ -285,7 +264,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           <View style={styles.noticeCard}>
             <Text style={styles.noticeTitle}>Maintenance mode is active</Text>
             <Text style={styles.noticeText}>
-              Customer login is temporarily paused. Admin login remains available below.
+              Customer login is temporarily paused. Use the private admin portal on desktop.
             </Text>
           </View>
         ) : null}
@@ -479,37 +458,6 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
         </View>
       </Modal>
 
-      {demoAccounts.length > 0 ? (
-        <View style={styles.demoCard}>
-          <Text style={styles.sectionTitle}>Quick account access</Text>
-          {demoAccounts.map((account) => (
-            <Pressable
-              key={account.id}
-              onPress={() => {
-                setLoginMode('email');
-                setEmail(account.email);
-                setPhoneNumber('');
-                setPassword(RANDOM_SIGNUP_PASSWORD);
-              }}
-              style={({ pressed }) => [styles.demoRow, pressed && styles.demoRowPressed]}
-            >
-              <View style={styles.demoAvatar}>
-                <Text style={styles.demoAvatarText}>{account.firstName.slice(0, 1)}</Text>
-              </View>
-              <View style={styles.demoCopy}>
-                <Text style={styles.demoName}>{account.fullName}</Text>
-                <Text style={styles.demoMeta}>
-                  {account.phoneNumber} - {account.email}
-                </Text>
-              </View>
-              <View style={styles.demoActionPill}>
-                <Text style={styles.demoAction}>Use</Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
       <View style={styles.footer}>
         <Text style={styles.footerText}>Need an account?</Text>
         <AppButton
@@ -517,7 +465,6 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           onPress={() => navigation.navigate('Signup')}
           variant="ghost"
         />
-        <AppButton label="Admin login" onPress={() => navigation.navigate('AdminLogin')} variant="secondary" />
       </View>
     </ScrollView>
   );

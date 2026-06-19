@@ -51,6 +51,7 @@ type AuthContextValue = {
   requestSignUpVerification: (values: SignUpFormValues) => Promise<void>;
   signUp: (values: SignUpFormValues, verificationCode: string) => Promise<void>;
   changePassword: (currentPassword: string, nextPassword: string) => Promise<void>;
+  deleteCurrentAccount: () => Promise<void>;
   userSecurityPreference: UserSecurityPreference;
   updateUserSecurityPreference: (patch: Partial<UserSecurityPreference>) => void;
   resetPassword: (identifier: string, nextPassword: string) => Promise<'user' | 'admin'>;
@@ -425,6 +426,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       try {
         const remoteLogin = await signInWithSupabase(normalizedIdentifier, values.password);
 
+        if (!isUserActive(remoteLogin.user.status)) {
+          throw new Error('This account is currently suspended or deleted.');
+        }
+
         cacheStoredUser(remoteLogin.storedUser);
         setSupabaseSession(remoteLogin.session);
         setUser(remoteLogin.user);
@@ -726,6 +731,30 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(null);
   };
 
+  const deleteCurrentAccount = async () => {
+    if (!user) {
+      return;
+    }
+
+    const targetUser = user;
+
+    if (isSupabaseConfigured) {
+      await updateSupabaseUserProfile(targetUser.id, { status: 'suspended' });
+    }
+
+    setStoredUsers((currentUsers) =>
+      currentUsers.filter((storedUser) => storedUser.id !== targetUser.id),
+    );
+    setUserSecurityPreferencesByUser((currentPreferences) => {
+      const { [targetUser.id]: _deletedPreference, ...remainingPreferences } =
+        currentPreferences;
+
+      return remainingPreferences;
+    });
+    setSupabaseSession(null);
+    setUser(null);
+  };
+
   const signOutAdmin = () => {
     setAdminUser(null);
   };
@@ -982,6 +1011,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       requestSignUpVerification,
       signUp,
       changePassword,
+      deleteCurrentAccount,
       userSecurityPreference,
       updateUserSecurityPreference,
       resetPassword,

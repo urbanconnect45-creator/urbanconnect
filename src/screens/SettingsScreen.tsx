@@ -23,6 +23,7 @@ type SettingsPage = 'main' | 'security' | 'passcode';
 export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) {
   const {
     changePassword,
+    deleteCurrentAccount,
     updateUserSecurityPreference,
     user,
     userSecurityPreference: securityPreference,
@@ -40,6 +41,10 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
   const [securityMessage, setSecurityMessage] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isCheckingBiometric, setIsCheckingBiometric] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteConfirmDraft, setDeleteConfirmDraft] = useState('');
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const policyTitle =
     policyModal === 'privacy'
       ? privacyPolicyTitle
@@ -160,6 +165,44 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
       setSecurityError('Unable to start biometric access on this device.');
     } finally {
       setIsCheckingBiometric(false);
+    }
+  };
+
+  const openDeleteAccountModal = () => {
+    setDeleteConfirmDraft('');
+    setDeleteAccountError(null);
+    setShowDeleteAccountModal(true);
+  };
+
+  const closeDeleteAccountModal = () => {
+    if (isDeletingAccount) {
+      return;
+    }
+
+    setShowDeleteAccountModal(false);
+    setDeleteConfirmDraft('');
+    setDeleteAccountError(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmDraft.trim().toUpperCase() !== 'DELETE') {
+      setDeleteAccountError('Type DELETE to confirm account deletion.');
+      return;
+    }
+
+    try {
+      setIsDeletingAccount(true);
+      setDeleteAccountError(null);
+      await deleteCurrentAccount();
+      setShowDeleteAccountModal(false);
+      setDeleteConfirmDraft('');
+      Alert.alert('Account deleted', 'This account was removed from this device.');
+    } catch (error) {
+      setDeleteAccountError(
+        error instanceof Error ? error.message : 'Unable to delete this account right now.',
+      );
+    } finally {
+      setIsDeletingAccount(false);
     }
   };
 
@@ -306,6 +349,27 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
             <Text style={styles.rowMeta}>Marketplace and business owner terms.</Text>
           </View>
           <Ionicons color={colors.textMuted} name="chevron-forward-outline" size={20} />
+        </Pressable>
+      </View>
+
+      <View style={styles.dangerCard}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.dangerTitle}>Danger zone</Text>
+          <Text style={styles.rowMeta}>Permanent account actions are kept at the bottom.</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={openDeleteAccountModal}
+          style={({ pressed }) => [styles.settingsRow, styles.dangerRow, pressed && styles.rowPressed]}
+        >
+          <View style={styles.dangerIconShell}>
+            <Ionicons color={colors.danger} name="trash-outline" size={20} />
+          </View>
+          <View style={styles.copy}>
+            <Text style={styles.dangerTitle}>Delete account</Text>
+            <Text style={styles.rowMeta}>Remove your login from this device and disable the live profile.</Text>
+          </View>
+          <Ionicons color={colors.danger} name="chevron-forward-outline" size={20} />
         </Pressable>
       </View>
 
@@ -488,6 +552,50 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
           </ScrollView>
         </View>
       </Modal>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={showDeleteAccountModal}
+        onRequestClose={closeDeleteAccountModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.deleteModalCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.dangerTitle}>Delete account</Text>
+              <Text style={styles.bodyText}>
+                This will sign you out, remove this account from the app on this device, disable
+                the live profile, remove the saved app passcode, and stop this login from being
+                used again. Orders, receipts, payment records, and support history may still be
+                retained for compliance and customer care records.
+              </Text>
+            </View>
+            <FormField
+              autoCapitalize="characters"
+              label="Type DELETE to continue"
+              onChangeText={(value) => {
+                setDeleteConfirmDraft(value);
+                setDeleteAccountError(null);
+              }}
+              placeholder="DELETE"
+              value={deleteConfirmDraft}
+            />
+            {deleteAccountError ? (
+              <Text style={styles.errorText}>{deleteAccountError}</Text>
+            ) : null}
+            <View style={styles.inlineActionRow}>
+              <AppButton
+                disabled={deleteConfirmDraft.trim().toUpperCase() !== 'DELETE'}
+                label="Delete account"
+                loading={isDeletingAccount}
+                onPress={() => void handleDeleteAccount()}
+                variant="secondary"
+              />
+              <AppButton label="Cancel" onPress={closeDeleteAccountModal} variant="ghost" />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -528,6 +636,15 @@ function createStyles(colors: AppColors) {
       padding: spacing.lg,
       ...shadows.soft,
     },
+    dangerCard: {
+      gap: spacing.sm,
+      borderRadius: radii.xl,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      padding: spacing.lg,
+      ...shadows.soft,
+    },
     cardHeader: {
       gap: 4,
     },
@@ -562,6 +679,9 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       padding: spacing.md,
     },
+    dangerRow: {
+      borderColor: colors.danger,
+    },
     rowPressed: {
       opacity: 0.92,
     },
@@ -573,6 +693,14 @@ function createStyles(colors: AppColors) {
       borderRadius: 21,
       backgroundColor: colors.primarySoft,
     },
+    dangerIconShell: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 42,
+      width: 42,
+      borderRadius: 21,
+      backgroundColor: colors.secondarySoft,
+    },
     copy: {
       flex: 1,
       gap: 4,
@@ -580,6 +708,10 @@ function createStyles(colors: AppColors) {
     rowTitle: {
       ...typography.bodyStrong,
       color: colors.text,
+    },
+    dangerTitle: {
+      ...typography.bodyStrong,
+      color: colors.danger,
     },
     rowMeta: {
       ...typography.caption,
@@ -629,6 +761,24 @@ function createStyles(colors: AppColors) {
       flex: 1,
       backgroundColor: colors.background,
       padding: spacing.lg,
+    },
+    modalBackdrop: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.backdrop,
+      padding: spacing.lg,
+    },
+    deleteModalCard: {
+      width: '100%',
+      maxWidth: 480,
+      gap: spacing.md,
+      borderRadius: radii.xl,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      padding: spacing.lg,
+      ...shadows.card,
     },
     modalHeader: {
       flexDirection: 'row',

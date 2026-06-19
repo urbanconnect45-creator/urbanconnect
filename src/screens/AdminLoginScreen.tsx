@@ -8,10 +8,6 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
-function roleLabel(role: 'owner' | 'customerCare') {
-  return role === 'owner' ? 'Owner' : 'Customer care';
-}
-
 function MonoButton({
   dark = true,
   disabled = false,
@@ -44,11 +40,11 @@ function MonoButton({
 }
 
 export function AdminLoginScreen({ navigation }: AdminLoginScreenProps) {
-  const { adminDemoAccounts, signInAdmin } = useAuth();
+  const { signInAdmin } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const [email, setEmail] = useState('owner.admin@urbanconnect.com');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -108,37 +104,10 @@ export function AdminLoginScreen({ navigation }: AdminLoginScreenProps) {
           <MonoButton dark={false} label="Return to app" onPress={() => navigation.navigate('Login')} />
         </View>
 
-        <View style={styles.demoCard}>
-          <Text style={styles.sectionTitle}>Available local accounts</Text>
-          <View style={styles.roleStack}>
-            {adminDemoAccounts.map((account) => (
-              <View key={account.id} style={styles.demoRow}>
-                <View style={styles.demoCopy}>
-                  <Text style={styles.demoTitle}>{account.fullName}</Text>
-                  <Text style={styles.demoMeta}>
-                    {roleLabel(account.role)} - {account.isActive ? 'Active' : 'Inactive'}
-                  </Text>
-                </View>
-                <Text
-                  onPress={
-                    account.isActive
-                      ? () => {
-                          setEmail(account.email);
-                          setPassword('password123');
-                        }
-                      : undefined
-                  }
-                  style={[
-                    styles.useLink,
-                    !account.isActive && styles.useLinkDisabled,
-                  ]}
-                >
-                  Use
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
+        <Text style={styles.adminNote}>
+          Admin access is private. Use the owner or customer care credentials created in
+          the admin system.
+        </Text>
       </View>
     </ScrollView>
   );
@@ -201,6 +170,11 @@ function createStyles(colors: AppColors) {
     errorText: {
       ...typography.caption,
       color: '#111111',
+    },
+    adminNote: {
+      ...typography.caption,
+      color: '#666666',
+      textAlign: 'center',
     },
     demoCard: {
       gap: spacing.sm,
