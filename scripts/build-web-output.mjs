@@ -7,6 +7,23 @@ const siteName = 'UrbanConnect';
 const siteDescription =
   'UrbanConnect is the River Park marketplace app for approved products, services, support, payments, receipts, and delivery updates.';
 const supportEmail = 'support@urbanconnectstore.com';
+const heroCarouselImages = [
+  {
+    src: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1800&q=85',
+    alt: 'Customer shopping online with a card and phone',
+    dotLabel: 'Show online shopping slide',
+  },
+  {
+    src: 'https://images.unsplash.com/photo-1607083206968-13611e3d76db?auto=format&fit=crop&w=1800&q=85',
+    alt: 'Ecommerce shopping cart and product delivery concept',
+    dotLabel: 'Show marketplace delivery slide',
+  },
+  {
+    src: 'https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?auto=format&fit=crop&w=1800&q=85',
+    alt: 'Mobile payment and customer support for online orders',
+    dotLabel: 'Show payment and support slide',
+  },
+];
 
 const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
   <title id="title">UrbanConnect</title>
@@ -193,7 +210,7 @@ function buildFooter() {
 function buildSharedHead({ canonicalPath, description, title }) {
   const siteUrl = normalizeBaseUrl(process.env.URBANCONNECT_SITE_URL);
   const canonicalUrl = `${siteUrl}${canonicalPath}`;
-  const previewImageUrl = `${siteUrl}/assets/urbanconnect-carousel-market.svg`;
+  const previewImageUrl = heroCarouselImages[0].src;
   const organizationJson = {
     '@context': 'https://schema.org',
     '@type': 'Organization',
@@ -230,6 +247,7 @@ function buildSharedHead({ canonicalPath, description, title }) {
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <meta name="description" content="${escapeHtml(description)}" />
     <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
+    <link rel="preconnect" href="https://images.unsplash.com" />
     <link rel="icon" type="image/svg+xml" href="/assets/urbanconnect-mark.svg" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="${siteName}" />
@@ -809,15 +827,15 @@ function buildDocument({ activePath, body, canonicalPath, description, title }) 
 
 function buildHomeHtml() {
   const body = `<section class="hero" aria-labelledby="hero-title">
-      <div class="hero-slide is-active" data-hero-slide>
-        <img src="/assets/urbanconnect-carousel-market.svg" alt="UrbanConnect marketplace app preview" />
-      </div>
-      <div class="hero-slide" data-hero-slide>
-        <img src="/assets/urbanconnect-carousel-wallet.svg" alt="UrbanConnect wallet payment preview" />
-      </div>
-      <div class="hero-slide" data-hero-slide>
-        <img src="/assets/urbanconnect-carousel-support.svg" alt="UrbanConnect customer care preview" />
-      </div>
+      ${heroCarouselImages
+        .map(
+          (image, index) => `<div class="hero-slide${index === 0 ? ' is-active' : ''}" data-hero-slide>
+        <img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt)}" ${
+          index === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'
+        } />
+      </div>`,
+        )
+        .join('')}
       <div class="hero-content">
         <div class="eyebrow">Built for River Park residents and business owners</div>
         <h1 id="hero-title">UrbanConnect</h1>
@@ -831,9 +849,14 @@ function buildHomeHtml() {
           <a class="primary-link" href="/how-it-works/">See how it works</a>
         </div>
         <div class="hero-dots" aria-label="Hero carousel controls">
-          <button class="hero-dot is-active" type="button" aria-label="Show marketplace slide" data-hero-dot="0"></button>
-          <button class="hero-dot" type="button" aria-label="Show wallet slide" data-hero-dot="1"></button>
-          <button class="hero-dot" type="button" aria-label="Show support slide" data-hero-dot="2"></button>
+          ${heroCarouselImages
+            .map(
+              (image, index) =>
+                `<button class="hero-dot${index === 0 ? ' is-active' : ''}" type="button" aria-label="${escapeHtml(
+                  image.dotLabel,
+                )}" data-hero-dot="${index}"></button>`,
+            )
+            .join('')}
         </div>
       </div>
     </section>
