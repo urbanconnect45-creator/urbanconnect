@@ -173,7 +173,7 @@ function jsonLdScript(value) {
 function buildHeader(activePath) {
   return `<header class="site-header">
     <a class="brand" href="/">
-      <img src="/assets/urbanconnect-mark.svg" alt="UrbanConnect logo" />
+      <span class="brand-logo" aria-hidden="true">${logoSvg}</span>
       <span>
         <strong>UrbanConnect</strong>
         <span>River Park marketplace</span>
@@ -219,6 +219,7 @@ function buildSharedHead({
   const previewImageUrl = heroCarouselImages[0].src;
   const organizationJson = {
     '@context': 'https://schema.org',
+    '@id': `${siteUrl}/#organization`,
     '@type': 'Organization',
     name: siteName,
     url: siteUrl,
@@ -235,11 +236,25 @@ function buildSharedHead({
   };
   const appJson = {
     '@context': 'https://schema.org',
+    '@id': `${siteUrl}/#app`,
     '@type': 'SoftwareApplication',
     name: siteName,
+    url: siteUrl,
+    image: previewImageUrl,
+    logo: `${siteUrl}/assets/urbanconnect-mark.svg`,
     applicationCategory: 'ShoppingApplication',
     operatingSystem: 'iOS, Android',
     description: siteDescription,
+    publisher: {
+      '@id': `${siteUrl}/#organization`,
+    },
+    featureList: [
+      'Approved River Park marketplace listings',
+      'Wallet and Flutterwave payments',
+      'Receipts and delivery updates',
+      'Customer care support',
+      'Business owner tools',
+    ],
     offers: {
       '@type': 'Offer',
       price: '0',
@@ -327,10 +342,19 @@ function buildStyles() {
         text-decoration: none;
         min-width: max-content;
       }
-      .brand img {
+      .brand-logo {
+        display: grid;
+        place-items: center;
         width: 44px;
         height: 44px;
         border-radius: 8px;
+        overflow: hidden;
+        flex: 0 0 auto;
+      }
+      .brand-logo svg {
+        display: block;
+        width: 100%;
+        height: 100%;
       }
       .brand strong {
         display: block;
