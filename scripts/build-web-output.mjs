@@ -334,7 +334,13 @@ function escapeHtml(value) {
 
 function normalizeBaseUrl(value) {
   const trimmed = value?.trim() || defaultSiteUrl;
-  return trimmed.replace(/\/+$/, '') || defaultSiteUrl;
+  const normalized = trimmed.replace(/\/+$/, '') || defaultSiteUrl;
+
+  if (normalized === 'http://urbanconnectstore.com') {
+    return defaultSiteUrl;
+  }
+
+  return normalized;
 }
 
 function jsonLdScript(value) {
