@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const adminPath = 'admin-portal';
+const appPath = 'app';
 const defaultSiteUrl = 'https://urbanconnectstore.com';
 const siteName = 'UrbanConnect';
 const siteDescription =
@@ -468,6 +469,10 @@ function buildStyles() {
         background: #fff;
         color: var(--primary);
       }
+      .store-button.web-link {
+        background: var(--gold);
+        color: var(--primary);
+      }
       .hero-dots {
         display: flex;
         gap: 8px;
@@ -863,6 +868,7 @@ function buildHomeHtml() {
         <div class="store-row">
           <button class="store-button" type="button" data-store-button="App Store">App Store</button>
           <button class="store-button secondary" type="button" data-store-button="Google Play">Google Play</button>
+          <a class="store-button web-link" href="/${appPath}/">Web</a>
           <a class="primary-link" href="/how-it-works/">See how it works</a>
         </div>
         <div class="hero-dots" aria-label="Hero carousel controls">
@@ -1127,9 +1133,13 @@ export async function prepareWebOutput(rootDir) {
   const indexPath = path.join(distDir, 'index.html');
   const expoIndex = await fs.readFile(indexPath, 'utf8');
   const adminDir = path.join(distDir, adminPath);
+  const appDir = path.join(distDir, appPath);
   const assetsDir = path.join(distDir, 'assets');
   const adminIndex = expoIndex
     .replace('<title>UrbanConnect</title>', '<title>UrbanConnect Admin</title>')
+    .replace('</head>', '    <meta name="robots" content="noindex,nofollow" />\n  </head>');
+  const appIndex = expoIndex
+    .replace('<title>UrbanConnect</title>', '<title>UrbanConnect Login</title>')
     .replace('</head>', '    <meta name="robots" content="noindex,nofollow" />\n  </head>');
   const routes = ['/', '/how-it-works/', '/about/', '/contact/'];
   const lastmod = new Date().toISOString().slice(0, 10);
@@ -1152,8 +1162,10 @@ ${routes
 `;
 
   await fs.mkdir(adminDir, { recursive: true });
+  await fs.mkdir(appDir, { recursive: true });
   await fs.mkdir(assetsDir, { recursive: true });
   await fs.writeFile(path.join(adminDir, 'index.html'), adminIndex);
+  await fs.writeFile(path.join(appDir, 'index.html'), appIndex);
   await fs.writeFile(path.join(assetsDir, 'urbanconnect-mark.svg'), logoSvg);
   await Promise.all(
     Object.entries(assetMap).map(([filename, svg]) =>

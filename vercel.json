@@ -10,6 +10,14 @@
     {
       "source": "/admin-portal/(.*)",
       "destination": "/admin-portal/index.html"
+    },
+    {
+      "source": "/app",
+      "destination": "/app/index.html"
+    },
+    {
+      "source": "/app/(.*)",
+      "destination": "/app/index.html"
     }
   ]
 }
