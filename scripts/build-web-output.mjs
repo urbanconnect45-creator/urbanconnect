@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 
 const adminPath = 'admin-portal';
 const appPath = 'app';
@@ -145,6 +146,176 @@ const assetMap = {
 </svg>`,
 };
 
+function buildCrcTable() {
+  const table = new Uint32Array(256);
+
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+
+    table[index] = value >>> 0;
+  }
+
+  return table;
+}
+
+const crcTable = buildCrcTable();
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+
+  for (const byte of buffer) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data = Buffer.alloc(0)) {
+  const typeBuffer = Buffer.from(type, 'ascii');
+  const chunk = Buffer.alloc(12 + data.length);
+
+  chunk.writeUInt32BE(data.length, 0);
+  typeBuffer.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(Buffer.concat([typeBuffer, data])), 8 + data.length);
+
+  return chunk;
+}
+
+function createPng(width, height, rgba) {
+  const rowLength = width * 4 + 1;
+  const raw = Buffer.alloc(rowLength * height);
+
+  for (let y = 0; y < height; y += 1) {
+    const rawOffset = y * rowLength;
+    raw[rawOffset] = 0;
+    rgba.copy(raw, rawOffset + 1, y * width * 4, (y + 1) * width * 4);
+  }
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND'),
+  ]);
+}
+
+function drawPixel(rgba, size, x, y, color) {
+  const roundedX = Math.round(x);
+  const roundedY = Math.round(y);
+
+  if (roundedX < 0 || roundedY < 0 || roundedX >= size || roundedY >= size) {
+    return;
+  }
+
+  const offset = (roundedY * size + roundedX) * 4;
+  rgba[offset] = color[0];
+  rgba[offset + 1] = color[1];
+  rgba[offset + 2] = color[2];
+  rgba[offset + 3] = color[3];
+}
+
+function drawRect(rgba, size, x, y, width, height, color) {
+  for (let currentY = y; currentY < y + height; currentY += 1) {
+    for (let currentX = x; currentX < x + width; currentX += 1) {
+      drawPixel(rgba, size, currentX, currentY, color);
+    }
+  }
+}
+
+function drawCircle(rgba, size, centerX, centerY, radius, color) {
+  const minX = Math.floor(centerX - radius);
+  const maxX = Math.ceil(centerX + radius);
+  const minY = Math.floor(centerY - radius);
+  const maxY = Math.ceil(centerY + radius);
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const dx = x + 0.5 - centerX;
+      const dy = y + 0.5 - centerY;
+
+      if (dx * dx + dy * dy <= radius * radius) {
+        drawPixel(rgba, size, x, y, color);
+      }
+    }
+  }
+}
+
+function drawRoundedRect(rgba, size, color) {
+  const radius = Math.round(size * 0.22);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const clampedX = Math.max(radius, Math.min(size - radius, x + 0.5));
+      const clampedY = Math.max(radius, Math.min(size - radius, y + 0.5));
+      const dx = x + 0.5 - clampedX;
+      const dy = y + 0.5 - clampedY;
+
+      if (dx * dx + dy * dy <= radius * radius) {
+        drawPixel(rgba, size, x, y, color);
+      }
+    }
+  }
+}
+
+function createFaviconPng(size) {
+  const rgba = Buffer.alloc(size * size * 4);
+  const scale = size / 48;
+  const green = [18, 55, 42, 255];
+  const gold = [242, 184, 75, 255];
+  const white = [255, 255, 255, 255];
+  const coral = [239, 106, 78, 255];
+
+  drawRoundedRect(rgba, size, green);
+
+  for (let x = 8 * scale; x <= 40 * scale; x += Math.max(0.5, scale)) {
+    const normalized = (x / scale - 24) / 16;
+    const y = (35 - 9 * (1 - normalized * normalized)) * scale;
+    drawCircle(rgba, size, x, y, 2.6 * scale, gold);
+  }
+
+  drawRect(rgba, size, 9 * scale, 15 * scale, 4 * scale, 16 * scale, white);
+  drawRect(rgba, size, 19 * scale, 15 * scale, 4 * scale, 16 * scale, white);
+  drawRect(rgba, size, 12 * scale, 29 * scale, 10 * scale, 4 * scale, white);
+  drawRect(rgba, size, 26 * scale, 15 * scale, 15 * scale, 4 * scale, white);
+  drawRect(rgba, size, 26 * scale, 15 * scale, 4 * scale, 18 * scale, white);
+  drawRect(rgba, size, 26 * scale, 29 * scale, 15 * scale, 4 * scale, white);
+
+  drawCircle(rgba, size, 36 * scale, 11 * scale, 6 * scale, coral);
+  drawCircle(rgba, size, 36 * scale, 11 * scale, 2 * scale, white);
+
+  return createPng(size, size, rgba);
+}
+
+function createIcoFromPng(png, size) {
+  const ico = Buffer.alloc(22 + png.length);
+
+  ico.writeUInt16LE(0, 0);
+  ico.writeUInt16LE(1, 2);
+  ico.writeUInt16LE(1, 4);
+  ico[6] = size >= 256 ? 0 : size;
+  ico[7] = size >= 256 ? 0 : size;
+  ico[8] = 0;
+  ico[9] = 0;
+  ico.writeUInt16LE(1, 10);
+  ico.writeUInt16LE(32, 12);
+  ico.writeUInt32LE(png.length, 14);
+  ico.writeUInt32LE(22, 18);
+  png.copy(ico, 22);
+
+  return ico;
+}
+
 const navLinks = [
   { href: '/', label: 'Home' },
   { href: '/how-it-works/', label: 'How it works' },
@@ -223,7 +394,7 @@ function buildSharedHead({
     '@type': 'Organization',
     name: siteName,
     url: siteUrl,
-    logo: `${siteUrl}/assets/urbanconnect-mark.svg`,
+    logo: `${siteUrl}/favicon-96x96.png`,
     email: supportEmail,
     description: siteDescription,
   };
@@ -241,7 +412,7 @@ function buildSharedHead({
     name: siteName,
     url: siteUrl,
     image: previewImageUrl,
-    logo: `${siteUrl}/assets/urbanconnect-mark.svg`,
+    logo: `${siteUrl}/favicon-96x96.png`,
     applicationCategory: 'ShoppingApplication',
     operatingSystem: 'iOS, Android',
     description: siteDescription,
@@ -269,7 +440,11 @@ function buildSharedHead({
     <meta name="description" content="${escapeHtml(description)}" />
     <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
     <link rel="preconnect" href="https://images.unsplash.com" />
-    <link rel="icon" type="image/svg+xml" href="/assets/urbanconnect-mark.svg" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="${siteName}" />
     <meta property="og:title" content="${escapeHtml(title)}" />
@@ -1190,6 +1365,13 @@ ${routes
   await fs.mkdir(assetsDir, { recursive: true });
   await fs.writeFile(path.join(adminDir, 'index.html'), adminIndex);
   await fs.writeFile(path.join(appDir, 'index.html'), appIndex);
+  const favicon48 = createFaviconPng(48);
+  const favicon96 = createFaviconPng(96);
+  await fs.writeFile(path.join(distDir, 'favicon-48x48.png'), favicon48);
+  await fs.writeFile(path.join(distDir, 'favicon-96x96.png'), favicon96);
+  await fs.writeFile(path.join(distDir, 'apple-touch-icon.png'), favicon96);
+  await fs.writeFile(path.join(distDir, 'favicon.ico'), createIcoFromPng(favicon48, 48));
+  await fs.writeFile(path.join(distDir, 'favicon.svg'), logoSvg);
   await fs.writeFile(path.join(assetsDir, 'urbanconnect-mark.svg'), logoSvg);
   await Promise.all(
     Object.entries(assetMap).map(([filename, svg]) =>
