@@ -723,6 +723,16 @@ export function AppNavigator() {
     content = <DashboardScreen navigation={navigation} />;
   }
 
+  const shouldUseWebAuthFrame =
+    Platform.OS === 'web' && !user && !adminUser && !adminWebEntrypoint && authRoute !== 'AdminLogin';
+  const framedContent = shouldUseWebAuthFrame ? (
+    <View style={styles.authWebStage}>
+      <View style={styles.authWebFrame}>{content}</View>
+    </View>
+  ) : (
+    content
+  );
+
   const activeBusiness = businessDetailsId ? getBusinessById(businessDetailsId) : undefined;
   const activeOrder = orderDetailsId ? getOrderById(orderDetailsId) : undefined;
   const activeSeller = sellerProfileId ? findUserById(sellerProfileId) : undefined;
@@ -1077,7 +1087,7 @@ export function AppNavigator() {
         </View>
       )
     ) : (
-      <View style={styles.fullContent}>{content}</View>
+      <View style={styles.fullContent}>{framedContent}</View>
     );
 
   return (
@@ -1571,6 +1581,24 @@ function createStyles(colors: AppColors) {
     },
     fullContent: {
       flex: 1,
+    },
+    authWebStage: {
+      flex: 1,
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+    },
+    authWebFrame: {
+      flex: 1,
+      width: '100%',
+      maxWidth: 430,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 28,
+      overflow: 'hidden',
+      ...shadows.soft,
     },
     topBar: {
       flexDirection: 'row',
