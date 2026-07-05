@@ -2,6 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
+  AppState,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -18,21 +21,27 @@ import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import { AppButton } from '../components/AppButton';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
+import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { AccountScreen } from '../screens/AccountScreen';
 import { AdminLoginScreen } from '../screens/AdminLoginScreen';
 import { AdminPanelScreen } from '../screens/AdminPanelScreen';
 import { BusinessDetailsScreen } from '../screens/BusinessDetailsScreen';
+import { CatalogAdminScreen } from '../screens/CatalogAdminScreen';
 import { CartScreen } from '../screens/CartScreen';
 import { ChatsScreen } from '../screens/ChatsScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
+import { FoodScreen } from '../screens/FoodScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OrderDetailsScreen } from '../screens/OrderDetailsScreen';
 import { ProfessionsScreen } from '../screens/ProfessionsScreen';
 import { ProfileEditScreen } from '../screens/ProfileEditScreen';
 import { RegisterBusinessScreen } from '../screens/RegisterBusinessScreen';
 import { SellerProfileScreen } from '../screens/SellerProfileScreen';
+import { SellerPortalLoginScreen } from '../screens/SellerPortalLoginScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { SignupScreen } from '../screens/SignupScreen';
+import { StoreOwnerDashboardScreen } from '../screens/StoreOwnerDashboardScreen';
+import { StoresScreen } from '../screens/StoresScreen';
 import { SubscriptionScreen } from '../screens/SubscriptionScreen';
 import { TransactionsScreen } from '../screens/TransactionsScreen';
 import { WithdrawalScreen } from '../screens/WithdrawalScreen';
@@ -42,9 +51,37 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import { getOrderStatusLabel } from '../utils/order';
 import type { AppNavigation, MainTabParamList } from './types';
 
-type AuthRoute = 'Login' | 'Signup' | 'AdminLogin';
+type AuthRoute = 'Login' | 'Signup' | 'DispatchLogin' | 'AdminLogin';
 type MainRoute = keyof MainTabParamList;
 type IconName = keyof typeof Ionicons.glyphMap;
+
+const publicSiteUrl = 'https://www.view2connect.ng';
+const socialShareLinks: Array<{
+  icon: IconName;
+  label: string;
+  url: string;
+}> = [
+  {
+    icon: 'logo-facebook',
+    label: 'Facebook',
+    url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(publicSiteUrl)}`,
+  },
+  {
+    icon: 'logo-twitter',
+    label: 'X',
+    url: `https://twitter.com/intent/tweet?url=${encodeURIComponent(publicSiteUrl)}&text=${encodeURIComponent('Shop and sell with View2Connect')}`,
+  },
+  {
+    icon: 'logo-whatsapp',
+    label: 'WhatsApp',
+    url: `https://wa.me/?text=${encodeURIComponent(`Shop and sell with View2Connect: ${publicSiteUrl}`)}`,
+  },
+  {
+    icon: 'logo-linkedin',
+    label: 'LinkedIn',
+    url: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(publicSiteUrl)}`,
+  },
+];
 
 type NavButtonProps = {
   active: boolean;
@@ -67,14 +104,32 @@ const routeMeta: Record<
   Dashboard: {
     icon: 'home-outline',
     label: 'Home',
-    title: 'River Park shop',
-    subtitle: 'Buy approved products from businesses inside River Park.',
+    title: 'Local shop',
+    subtitle: 'Buy approved products from nearby businesses.',
+  },
+  Stores: {
+    icon: 'storefront-outline',
+    label: 'Shop',
+    title: 'Stores',
+    subtitle: 'Browse approved stores and their available items.',
   },
   Professions: {
-    icon: 'briefcase-outline',
-    label: 'Services',
-    title: 'River Park services',
-    subtitle: 'Find approved local services and use customer care for help.',
+    icon: 'grid-outline',
+    label: 'Categories',
+    title: 'Categories',
+    subtitle: 'Browse approved products and services by category.',
+  },
+  Food: {
+    icon: 'restaurant-outline',
+    label: 'Food',
+    title: 'Food',
+    subtitle: 'Browse meals, restaurants, snacks, and bakeries.',
+  },
+  SellerMode: {
+    icon: 'storefront-outline',
+    label: 'Seller',
+    title: 'Seller workspace',
+    subtitle: 'Manage your store, catalog, orders, payments, and security.',
   },
   RegisterBusiness: {
     icon: 'add-outline',
@@ -86,19 +141,19 @@ const routeMeta: Record<
     icon: 'card-outline',
     label: 'Pay',
     title: 'Subscription',
-    subtitle: 'Manage business subscription payment and River Park verification.',
+    subtitle: 'Manage business subscription payment and listing visibility.',
   },
   Chats: {
     icon: 'headset-outline',
     label: 'Support',
     title: 'Customer care',
-    subtitle: 'Message UrbanConnect customer care.',
+    subtitle: 'Contact View2Connect customer care.',
   },
   Account: {
     icon: 'person-circle-outline',
     label: 'Profile',
     title: 'Account',
-    subtitle: 'Manage orders, listings, and River Park profile details.',
+    subtitle: 'Manage orders, listings, and profile details.',
   },
   ProfileEdit: {
     icon: 'create-outline',
@@ -190,7 +245,45 @@ function isAdminWebEntrypoint() {
     (globalThis as { location?: { pathname?: string } }).location?.pathname?.toLowerCase() ??
     '';
 
-  return pathname.replace(/\/+$/, '') === '/admin-portal';
+  const normalizedPathname = pathname.replace(/\/+$/, '');
+
+  return normalizedPathname === '/admin-portal' || normalizedPathname === '/catalog-admin';
+}
+
+function isCatalogAdminWebEntrypoint() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const pathname =
+    (globalThis as { location?: { pathname?: string } }).location?.pathname?.toLowerCase() ??
+    '';
+
+  return pathname.replace(/\/+$/, '') === '/catalog-admin';
+}
+
+function isSellerWebEntrypoint() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const pathname =
+    (globalThis as { location?: { pathname?: string } }).location?.pathname?.toLowerCase() ??
+    '';
+
+  return pathname.replace(/\/+$/, '') === '/seller-portal';
+}
+
+function isPublicStoreWebEntrypoint() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const pathname =
+    (globalThis as { location?: { pathname?: string } }).location?.pathname?.toLowerCase() ??
+    '';
+
+  return pathname.replace(/\/+$/, '') === '';
 }
 
 export function AppNavigator() {
@@ -215,6 +308,9 @@ export function AppNavigator() {
     securitySettings,
   } = useBusinessDirectory();
   const adminWebEntrypoint = useMemo(() => isAdminWebEntrypoint(), []);
+  const catalogAdminWebEntrypoint = useMemo(() => isCatalogAdminWebEntrypoint(), []);
+  const sellerWebEntrypoint = useMemo(() => isSellerWebEntrypoint(), []);
+  const publicStoreWebEntrypoint = useMemo(() => isPublicStoreWebEntrypoint(), []);
   const [authRoute, setAuthRoute] = useState<AuthRoute>(() =>
     adminWebEntrypoint ? 'AdminLogin' : 'Login',
   );
@@ -229,6 +325,9 @@ export function AppNavigator() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [openNotificationIds, setOpenNotificationIds] = useState<string[]>([]);
   const [showLoginAnnouncement, setShowLoginAnnouncement] = useState(false);
+  const [showGuestAuthPage, setShowGuestAuthPage] = useState(false);
+  const [showGuestAuthPrompt, setShowGuestAuthPrompt] = useState(false);
+  const [showAccessChoice, setShowAccessChoice] = useState(false);
   const [showPasscodeGate, setShowPasscodeGate] = useState(false);
   const [passcodeGateDraft, setPasscodeGateDraft] = useState('');
   const [passcodeGateError, setPasscodeGateError] = useState<string | null>(null);
@@ -241,6 +340,38 @@ export function AppNavigator() {
   const passcodeUnlockedUserId = useRef<string | null>(null);
   const biometricPromptedUserId = useRef<string | null>(null);
   const passcodePreferenceSignature = useRef<string | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const routeHistoryRef = useRef<MainRoute[]>([]);
+
+  const requestGuestAuthentication = useCallback(() => {
+    setShowGuestAuthPrompt(true);
+  }, []);
+
+  const openWebPath = useCallback((path: string) => {
+    const targetUrl = `${publicSiteUrl}${path}`;
+
+    if (Platform.OS === 'web') {
+      const location = (globalThis as { location?: { href: string } }).location;
+
+      if (location) {
+        location.href = targetUrl;
+        return;
+      }
+    }
+
+    void Linking.openURL(targetUrl).catch(() => {
+      Alert.alert(
+        'Open on the website',
+        'Seller registration and catalog management are available from view2connect.ng.',
+      );
+    });
+  }, []);
+
+  const openSocialShare = useCallback((url: string) => {
+    void Linking.openURL(url).catch(() => {
+      Alert.alert('Unable to open social app', 'Please try again from your browser.');
+    });
+  }, []);
 
   const unlockPasscodeGate = useCallback(() => {
     if (user) {
@@ -274,7 +405,7 @@ export function AppNavigator() {
         cancelLabel: 'Cancel',
         disableDeviceFallback: false,
         fallbackLabel: 'Use passcode',
-        promptMessage: 'Unlock UrbanConnect',
+        promptMessage: 'Unlock View2Connect',
       });
 
       if (result.success) {
@@ -293,13 +424,17 @@ export function AppNavigator() {
   useEffect(() => {
     if (!user) {
       setAuthRoute(adminWebEntrypoint ? 'AdminLogin' : 'Login');
-      setMainRoute('Dashboard');
-      setBusinessDetailsId(null);
-      setIsCartRoute(false);
-      setIsWithdrawalRoute(false);
-      setIsTransactionsRoute(false);
-      setSellerProfileId(null);
-      setOrderDetailsId(null);
+
+      if (!publicStoreWebEntrypoint) {
+        setMainRoute('Dashboard');
+        setBusinessDetailsId(null);
+        setIsCartRoute(false);
+        setIsWithdrawalRoute(false);
+        setIsTransactionsRoute(false);
+        setSellerProfileId(null);
+        setOrderDetailsId(null);
+      }
+
       setShowMenuSheet(false);
       setShowNotifications(false);
       setShowLoginAnnouncement(false);
@@ -311,13 +446,41 @@ export function AppNavigator() {
       return;
     }
 
+    setShowGuestAuthPage(false);
+    setShowGuestAuthPrompt(false);
+
+    if (user.role === 'businessOwner' && mainRoute !== 'SellerMode') {
+      setMainRoute('SellerMode');
+      return;
+    }
+
     if (
       user.role !== 'businessOwner' &&
-      (mainRoute === 'RegisterBusiness' || mainRoute === 'Subscription')
+      (mainRoute === 'Subscription' || mainRoute === 'SellerMode')
     ) {
       setMainRoute('Dashboard');
     }
-  }, [adminWebEntrypoint, mainRoute, user]);
+  }, [adminWebEntrypoint, mainRoute, publicStoreWebEntrypoint, user]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !publicStoreWebEntrypoint || !user) {
+      return;
+    }
+
+    const browserWindow = globalThis as {
+      history?: { replaceState: (state: unknown, title: string, url: string) => void };
+      location?: { search?: string };
+    };
+    const search = browserWindow.location?.search ?? '';
+
+    if (new URLSearchParams(search).get('paymentReturn') !== 'flutterwave') {
+      return;
+    }
+
+    setShowGuestAuthPage(false);
+    setMainRoute('Account');
+    browserWindow.history?.replaceState(null, '', '/');
+  }, [publicStoreWebEntrypoint, user]);
 
   useEffect(() => {
     if (!user) {
@@ -347,7 +510,12 @@ export function AppNavigator() {
       return;
     }
 
-    if (!userSecurityPreference.passcodeEnabled || !userSecurityPreference.passcode) {
+    const hasPasscode = Boolean(
+      userSecurityPreference.passcodeEnabled && userSecurityPreference.passcode,
+    );
+    const hasBiometric = userSecurityPreference.biometricEnabled;
+
+    if (!hasPasscode && !hasBiometric) {
       setShowPasscodeGate(false);
       setPasscodeGateDraft('');
       setPasscodeGateError(null);
@@ -357,18 +525,9 @@ export function AppNavigator() {
       return;
     }
 
-    const currentPreferenceSignature = `${user.id}:${userSecurityPreference.passcode}:${userSecurityPreference.updatedAt}`;
+    const currentPreferenceSignature = `${user.id}:${hasPasscode ? userSecurityPreference.passcode : 'none'}:${hasBiometric}:${userSecurityPreference.updatedAt}`;
     if (passcodePreferenceSignature.current !== currentPreferenceSignature) {
-      const updatedAt = Date.parse(userSecurityPreference.updatedAt);
-      const changedDuringCurrentSession =
-        passcodeUnlockedUserId.current === user.id &&
-        Number.isFinite(updatedAt) &&
-        Date.now() - updatedAt < 5000;
-
-      if (!changedDuringCurrentSession) {
-        passcodeUnlockedUserId.current = null;
-      }
-
+      passcodeUnlockedUserId.current = null;
       biometricPromptedUserId.current = null;
       passcodePreferenceSignature.current = currentPreferenceSignature;
     }
@@ -381,9 +540,55 @@ export function AppNavigator() {
   }, [
     adminUser,
     user,
+    userSecurityPreference.biometricEnabled,
     userSecurityPreference.passcode,
     userSecurityPreference.passcodeEnabled,
     userSecurityPreference.updatedAt,
+  ]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return undefined;
+    }
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+
+      if (!user || adminUser) {
+        return;
+      }
+
+      const lockEnabled =
+        userSecurityPreference.biometricEnabled ||
+        Boolean(userSecurityPreference.passcodeEnabled && userSecurityPreference.passcode);
+
+      if (/inactive|background/.test(nextState) && lockEnabled) {
+        passcodeUnlockedUserId.current = null;
+        biometricPromptedUserId.current = null;
+        setPasscodeGateDraft('');
+        setPasscodeGateError(null);
+        setShowPasscodeGate(true);
+        return;
+      }
+
+      if (
+        nextState === 'active' &&
+        /inactive|background/.test(previousState) &&
+        lockEnabled
+      ) {
+        biometricPromptedUserId.current = null;
+        setShowPasscodeGate(true);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [
+    adminUser,
+    user,
+    userSecurityPreference.biometricEnabled,
+    userSecurityPreference.passcode,
+    userSecurityPreference.passcodeEnabled,
   ]);
 
   useEffect(() => {
@@ -451,8 +656,59 @@ export function AppNavigator() {
         screen: string,
         params?: { businessId: string } | { userId: string } | { orderId: string },
       ) => {
-        if (screen === 'Login' || screen === 'Signup' || screen === 'AdminLogin') {
+        if (screen === 'AuthPrompt') {
+          if (publicStoreWebEntrypoint && !user) {
+            requestGuestAuthentication();
+          } else {
+            setAuthRoute('Login');
+          }
+          return;
+        }
+
+        if (
+          screen === 'Login' ||
+          screen === 'Signup' ||
+          screen === 'DispatchLogin' ||
+          screen === 'AdminLogin'
+        ) {
           setAuthRoute(screen);
+          setShowGuestAuthPrompt(false);
+
+          if (publicStoreWebEntrypoint && screen !== 'AdminLogin') {
+            setShowGuestAuthPage(true);
+          }
+          return;
+        }
+
+        if (
+          publicStoreWebEntrypoint &&
+          !user &&
+          (screen === 'Dashboard' ||
+            screen === 'Stores' ||
+            screen === 'Professions' ||
+            screen === 'Food')
+        ) {
+          setShowGuestAuthPage(false);
+          setShowGuestAuthPrompt(false);
+        }
+
+        if (
+          publicStoreWebEntrypoint &&
+          !user &&
+          (screen === 'SellerProfile' ||
+            screen === 'Cart' ||
+            screen === 'Withdrawal' ||
+            screen === 'Transactions' ||
+            screen === 'OrderDetails' ||
+            screen === 'SellerMode' ||
+            screen === 'RegisterBusiness' ||
+            screen === 'Subscription' ||
+            screen === 'Chats' ||
+            screen === 'Account' ||
+            screen === 'ProfileEdit' ||
+            screen === 'Settings')
+        ) {
+          requestGuestAuthentication();
           return;
         }
 
@@ -503,17 +759,6 @@ export function AppNavigator() {
         }
 
         if (screen === 'Withdrawal') {
-          if (user?.role !== 'businessOwner') {
-            setBusinessDetailsId(null);
-            setSellerProfileId(null);
-            setOrderDetailsId(null);
-            setIsCartRoute(false);
-            setIsWithdrawalRoute(false);
-            setIsTransactionsRoute(false);
-            setMainRoute('Account');
-            return;
-          }
-
           setBusinessDetailsId(null);
           setSellerProfileId(null);
           setOrderDetailsId(null);
@@ -535,7 +780,10 @@ export function AppNavigator() {
 
         if (
           screen === 'Dashboard' ||
+          screen === 'Stores' ||
           screen === 'Professions' ||
+          screen === 'Food' ||
+          screen === 'SellerMode' ||
           screen === 'RegisterBusiness' ||
           screen === 'Subscription' ||
           screen === 'Chats' ||
@@ -549,6 +797,10 @@ export function AppNavigator() {
           setIsTransactionsRoute(false);
           setSellerProfileId(null);
           setOrderDetailsId(null);
+          if (mainRoute !== screen) {
+            routeHistoryRef.current.push(mainRoute);
+          }
+
           setMainRoute(screen);
         }
       }) as AppNavigation['navigate'],
@@ -556,6 +808,15 @@ export function AppNavigator() {
         screen: 'OrderDetails' | 'BusinessDetails' | 'SellerProfile',
         params: { businessId: string } | { userId: string } | { orderId: string },
       ) => {
+        if (
+          publicStoreWebEntrypoint &&
+          !user &&
+          (screen === 'OrderDetails' || screen === 'SellerProfile')
+        ) {
+          requestGuestAuthentication();
+          return;
+        }
+
         if (screen === 'OrderDetails' && 'orderId' in params) {
           setIsCartRoute(false);
           setIsWithdrawalRoute(false);
@@ -621,6 +882,18 @@ export function AppNavigator() {
           return;
         }
 
+        if (!user && publicStoreWebEntrypoint && showGuestAuthPage) {
+          setShowGuestAuthPage(false);
+          setAuthRoute('Login');
+          return;
+        }
+
+        if (routeHistoryRef.current.length > 0) {
+          const previous = routeHistoryRef.current.pop()!;
+          setMainRoute(previous);
+          return;
+        }
+
         setMainRoute('Dashboard');
       },
     }),
@@ -631,14 +904,20 @@ export function AppNavigator() {
       isTransactionsRoute,
       isWithdrawalRoute,
       orderDetailsId,
+      publicStoreWebEntrypoint,
+      requestGuestAuthentication,
       sellerProfileId,
+      showGuestAuthPage,
       user,
     ],
   );
 
   const isMobileLayout = width < 780;
   const compactSidebar = width < 980;
-  const adminWebBlockedOnMobile = adminWebEntrypoint && width < 900;
+  const adminWebBlockedOnMobile =
+    adminWebEntrypoint && !catalogAdminWebEntrypoint && width < 900;
+  const browsingPublicStore =
+    publicStoreWebEntrypoint && !user && !adminUser && !showGuestAuthPage;
 
   let content: React.ReactNode;
 
@@ -663,18 +942,49 @@ export function AppNavigator() {
     );
   } else if (adminWebEntrypoint) {
     content = adminUser ? (
-      <AdminPanelScreen onReturnToApp={handleReturnToApp} />
+      catalogAdminWebEntrypoint ? (
+        <CatalogAdminScreen />
+      ) : (
+        <AdminPanelScreen onReturnToApp={handleReturnToApp} />
+      )
     ) : (
       <AdminLoginScreen navigation={navigation} />
     );
+  } else if (sellerWebEntrypoint) {
+    content = user ? (
+      user.role === 'businessOwner' ? (
+        <StoreOwnerDashboardScreen />
+      ) : (
+        <SellerPortalLoginScreen />
+      )
+    ) : (
+      <SellerPortalLoginScreen />
+    );
   } else if (adminUser) {
     content = <AdminPanelScreen onReturnToApp={handleReturnToApp} />;
+  } else if (browsingPublicStore) {
+    content = businessDetailsId ? (
+      <BusinessDetailsScreen
+        navigation={navigation}
+        route={{ params: { businessId: businessDetailsId } }}
+      />
+    ) : mainRoute === 'Professions' ? (
+      <ProfessionsScreen navigation={navigation} />
+    ) : mainRoute === 'Stores' ? (
+      <StoresScreen navigation={navigation} />
+    ) : mainRoute === 'Food' ? (
+      <FoodScreen navigation={navigation} />
+    ) : (
+      <DashboardScreen navigation={navigation} />
+    );
   } else if (!user) {
     content =
       authRoute === 'AdminLogin' ? (
         <AdminLoginScreen navigation={navigation} />
       ) : authRoute === 'Signup' ? (
         <SignupScreen navigation={navigation} />
+      ) : authRoute === 'DispatchLogin' ? (
+        <LoginScreen navigation={navigation} accountRole="dispatch" />
       ) : (
         <LoginScreen navigation={navigation} />
       );
@@ -705,14 +1015,20 @@ export function AppNavigator() {
         route={{ params: { userId: sellerProfileId } }}
       />
     );
+  } else if (mainRoute === 'SellerMode' && user.role === 'businessOwner') {
+    content = <StoreOwnerDashboardScreen />;
   } else if (mainRoute === 'Professions') {
     content = <ProfessionsScreen navigation={navigation} />;
-  } else if (mainRoute === 'RegisterBusiness' && user.role === 'businessOwner') {
+  } else if (mainRoute === 'Stores') {
+    content = <StoresScreen navigation={navigation} />;
+  } else if (mainRoute === 'Food') {
+    content = <FoodScreen navigation={navigation} />;
+  } else if (mainRoute === 'RegisterBusiness') {
     content = <RegisterBusinessScreen navigation={navigation} />;
-  } else if (mainRoute === 'Subscription' && user.role === 'businessOwner') {
-    content = <SubscriptionScreen navigation={navigation} />;
   } else if (mainRoute === 'Chats') {
     content = <ChatsScreen navigation={navigation} />;
+  } else if (mainRoute === 'Subscription' && user.role === 'businessOwner') {
+    content = <SubscriptionScreen navigation={navigation} />;
   } else if (mainRoute === 'ProfileEdit') {
     content = <ProfileEditScreen navigation={navigation} />;
   } else if (mainRoute === 'Settings') {
@@ -724,10 +1040,18 @@ export function AppNavigator() {
   }
 
   const shouldUseWebAuthFrame =
-    Platform.OS === 'web' && !user && !adminUser && !adminWebEntrypoint && authRoute !== 'AdminLogin';
+    Platform.OS === 'web' &&
+    !user &&
+    !adminUser &&
+    !adminWebEntrypoint &&
+    !sellerWebEntrypoint &&
+    !browsingPublicStore &&
+    authRoute !== 'AdminLogin';
   const framedContent = shouldUseWebAuthFrame ? (
-    <View style={styles.authWebStage}>
-      <View style={styles.authWebFrame}>{content}</View>
+    <View style={[styles.authWebStage, width >= 900 && styles.authWebStageWide]}>
+      <View style={[styles.authWebFrame, width >= 900 && styles.authWebFrameWide]}>
+        {content}
+      </View>
     </View>
   ) : (
     content
@@ -759,10 +1083,10 @@ export function AppNavigator() {
       ? `${getOrderStatusLabel(activeOrder.status)} - ${activeOrder.items.length} item${activeOrder.items.length > 1 ? 's' : ''} - ${activeOrder.deliveryCluster}`
     : activeBusiness
     ? activeBusiness.listingType === 'product'
-      ? 'Product details inside River Park'
-      : 'Profession profile inside River Park'
+      ? 'Product details'
+      : 'Profession profile'
     : activeSeller
-      ? `${activeSeller.firstName}'s approved River Park business profile.`
+      ? `${activeSeller.firstName}'s approved business profile.`
       : routeMeta[mainRoute].subtitle;
 
   const runMenuAction = (action: () => void) => {
@@ -820,15 +1144,6 @@ export function AppNavigator() {
       markNotificationsRead(user.id);
     }
   };
-  const openSupportChat = () => {
-    setBusinessDetailsId(null);
-    setSellerProfileId(null);
-    setOrderDetailsId(null);
-    setIsCartRoute(false);
-    setIsWithdrawalRoute(false);
-    setIsTransactionsRoute(false);
-    setMainRoute('Chats');
-  };
   const handlePasscodeGateUnlock = () => {
     const cleanedPasscode = passcodeGateDraft.replace(/\D/g, '').slice(0, 6);
 
@@ -840,8 +1155,121 @@ export function AppNavigator() {
     unlockPasscodeGate();
   };
 
-  const appContent =
-    user && !adminUser && !adminWebEntrypoint ? (
+  const appContent = browsingPublicStore ? (
+    <View style={styles.guestStoreShell}>
+      <View style={[styles.guestStoreHeader, isMobileLayout && styles.guestStoreHeaderMobile]}>
+        <View style={styles.guestBrandRow}>
+          <UrbanConnectLogo />
+          <View style={styles.cacBadge}>
+            <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
+            <Text style={styles.cacBadgeText}>CAC registered</Text>
+          </View>
+          <View style={styles.guestSocialRow}>
+            {socialShareLinks.map((link) => (
+              <Pressable
+                accessibilityLabel={`Share on ${link.label}`}
+                accessibilityRole="button"
+                key={link.label}
+                onPress={() => openSocialShare(link.url)}
+                style={({ pressed }) => [
+                  styles.guestSocialButton,
+                  pressed && styles.topActionButtonPressed,
+                ]}
+              >
+                <Ionicons color={colors.primary} name={link.icon} size={17} />
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        <View style={[styles.guestStoreNav, isMobileLayout && styles.guestStoreNavMobile]}>
+          <Pressable
+            accessibilityLabel="Open stores"
+            accessibilityRole="button"
+            onPress={() => navigation.navigate('Stores')}
+            style={({ pressed }) => [
+              styles.guestNavButton,
+              isMobileLayout && styles.guestNavButtonMobile,
+              mainRoute === 'Stores' && !businessDetailsId && styles.guestNavButtonActive,
+              pressed && styles.topActionButtonPressed,
+            ]}
+          >
+            <Ionicons color={colors.primary} name="storefront-outline" size={18} />
+            <Text style={styles.guestNavText}>Shop</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => navigation.navigate('Professions')}
+            style={({ pressed }) => [
+              styles.guestNavButton,
+              isMobileLayout && styles.guestNavButtonMobile,
+              mainRoute === 'Professions' && styles.guestNavButtonActive,
+              pressed && styles.topActionButtonPressed,
+            ]}
+          >
+            <Ionicons color={colors.primary} name="grid-outline" size={18} />
+            <Text style={styles.guestNavText}>Categories</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Open food marketplace"
+            accessibilityRole="button"
+            onPress={() => navigation.navigate('Food')}
+            style={({ pressed }) => [
+              styles.guestNavButton,
+              isMobileLayout && styles.guestNavButtonMobile,
+              mainRoute === 'Food' && styles.guestNavButtonActive,
+              pressed && styles.topActionButtonPressed,
+            ]}
+          >
+            <Ionicons color={colors.primary} name="restaurant-outline" size={18} />
+            <Text style={styles.guestNavText}>Food</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Start selling"
+            accessibilityRole="button"
+            onPress={() => openWebPath('/business-registration/')}
+            style={({ pressed }) => [
+              styles.guestNavButton,
+              styles.guestSellButton,
+              isMobileLayout && styles.guestNavButtonMobile,
+              pressed && styles.topActionButtonPressed,
+            ]}
+          >
+            <Ionicons color={colors.white} name="pricetag-outline" size={18} />
+            <Text style={styles.guestSellText}>Sell</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Open sign in"
+            accessibilityRole="button"
+            onPress={() => setShowAccessChoice(true)}
+            style={({ pressed }) => [
+              styles.guestSignInButton,
+              isMobileLayout && styles.guestSignInButtonMobile,
+              pressed && styles.topActionButtonPressed,
+            ]}
+          >
+            <Ionicons
+              color={isMobileLayout ? colors.primary : colors.white}
+              name="person-outline"
+              size={18}
+            />
+            <Text
+              style={[styles.guestSignInText, isMobileLayout && styles.guestSignInTextMobile]}
+            >
+              Sign in
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+      <View style={styles.guestStoreContent}>{content}</View>
+    </View>
+  ) : user &&
+    user.role === 'businessOwner' &&
+    mainRoute === 'SellerMode' &&
+    !adminUser &&
+    !adminWebEntrypoint &&
+    !sellerWebEntrypoint ? (
+    <View style={styles.fullContent}>{content}</View>
+  ) : user && !adminUser && !adminWebEntrypoint && !sellerWebEntrypoint ? (
       isMobileLayout ? (
         <View style={styles.mobileShell}>
           <View style={styles.topBar}>
@@ -855,6 +1283,19 @@ export function AppNavigator() {
               </Text>
             </View>
             <View style={styles.topBarActions}>
+              <Pressable
+                accessibilityLabel="Sell an item"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => navigation.navigate('RegisterBusiness')}
+                style={({ pressed }) => [
+                  styles.topActionButton,
+                  styles.sellActionButton,
+                  pressed && styles.topActionButtonPressed,
+                ]}
+              >
+                <Ionicons color={colors.white} name="pricetag-outline" size={20} />
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 hitSlop={8}
@@ -901,7 +1342,7 @@ export function AppNavigator() {
             </View>
           </View>
 
-          <View style={styles.mobileContent}>{content}</View>
+          <View pointerEvents="auto" style={styles.mobileContent}>{content}</View>
 
           <View style={styles.bottomBar}>
             <NavButton
@@ -911,6 +1352,13 @@ export function AppNavigator() {
               onPress={() => navigation.navigate('Dashboard')}
               placement="bottom"
             />
+              <NavButton
+                active={mainRoute === 'Stores'}
+                icon={'storefront-outline'}
+                label={'Shop'}
+                onPress={() => navigation.navigate('Stores')}
+                placement="bottom"
+              />
             <NavButton
               active={mainRoute === 'Professions'}
               icon={routeMeta.Professions.icon}
@@ -918,24 +1366,13 @@ export function AppNavigator() {
               onPress={() => navigation.navigate('Professions')}
               placement="bottom"
             />
-            {user.role === 'businessOwner' ? (
-              <NavButton
-                active={mainRoute === 'RegisterBusiness'}
-                icon={routeMeta.RegisterBusiness.icon}
-                label={routeMeta.RegisterBusiness.label}
-                onPress={() => navigation.navigate('RegisterBusiness')}
-                placement="bottom"
-              />
-            ) : null}
-            {user.role === 'businessOwner' ? (
-              <NavButton
-                active={mainRoute === 'Subscription'}
-                icon={routeMeta.Subscription.icon}
-                label={routeMeta.Subscription.label}
-                onPress={() => navigation.navigate('Subscription')}
-                placement="bottom"
-              />
-            ) : null}
+            <NavButton
+              active={mainRoute === 'Food'}
+              icon={routeMeta.Food.icon}
+              label={routeMeta.Food.label}
+              onPress={() => navigation.navigate('Food')}
+              placement="bottom"
+            />
             <NavButton
               active={mainRoute === 'Account'}
               icon={routeMeta.Account.icon}
@@ -963,6 +1400,14 @@ export function AppNavigator() {
                   placement="sidebar"
                 />
                 <NavButton
+                  active={mainRoute === 'Stores'}
+                  compact={compactSidebar}
+                  icon={'storefront-outline'}
+                  label={'Shop'}
+                  onPress={() => navigation.navigate('Stores')}
+                  placement="sidebar"
+                />
+                <NavButton
                   active={mainRoute === 'Professions'}
                   compact={compactSidebar}
                   icon={routeMeta.Professions.icon}
@@ -970,36 +1415,14 @@ export function AppNavigator() {
                   onPress={() => navigation.navigate('Professions')}
                   placement="sidebar"
                 />
-                {user.role === 'businessOwner' ? (
-                  <NavButton
-                    active={mainRoute === 'RegisterBusiness'}
-                    compact={compactSidebar}
-                    icon={routeMeta.RegisterBusiness.icon}
-                    label={routeMeta.RegisterBusiness.label}
-                    onPress={() => navigation.navigate('RegisterBusiness')}
-                    placement="sidebar"
-                  />
-                ) : null}
-                {user.role === 'businessOwner' ? (
-                  <NavButton
-                    active={mainRoute === 'Subscription'}
-                    compact={compactSidebar}
-                    icon={routeMeta.Subscription.icon}
-                    label={routeMeta.Subscription.label}
-                    onPress={() => navigation.navigate('Subscription')}
-                    placement="sidebar"
-                  />
-                ) : null}
-                {user.role !== 'businessOwner' ? (
-                  <NavButton
-                    active={mainRoute === 'Chats'}
-                    compact={compactSidebar}
-                    icon={routeMeta.Chats.icon}
-                    label={routeMeta.Chats.label}
-                    onPress={() => navigation.navigate('Chats')}
-                    placement="sidebar"
-                  />
-                ) : null}
+                <NavButton
+                  active={mainRoute === 'Food'}
+                  compact={compactSidebar}
+                  icon={routeMeta.Food.icon}
+                  label={routeMeta.Food.label}
+                  onPress={() => navigation.navigate('Food')}
+                  placement="sidebar"
+                />
                 <NavButton
                   active={mainRoute === 'Account'}
                   compact={compactSidebar}
@@ -1015,7 +1438,7 @@ export function AppNavigator() {
               <View style={styles.sidebarFooter}>
                 <Text style={styles.sidebarFooterTitle}>Launch focus</Text>
                 <Text style={styles.sidebarFooterText}>
-                  Shops and service providers are limited to River Park for this rollout.
+                  Store owners can manage products from the seller portal.
                 </Text>
               </View>
             ) : null}
@@ -1033,6 +1456,19 @@ export function AppNavigator() {
               </View>
 
               <View style={styles.topBarActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => navigation.navigate('RegisterBusiness')}
+                  style={({ pressed }) => [
+                    styles.topActionButton,
+                    styles.sellActionButton,
+                    pressed && styles.topActionButtonPressed,
+                  ]}
+                >
+                  <Ionicons color={colors.white} name="pricetag-outline" size={20} />
+                  <Text style={styles.sellActionText}>Sell</Text>
+                </Pressable>
                 <Pressable
                   accessibilityRole="button"
                   hitSlop={8}
@@ -1102,22 +1538,203 @@ export function AppNavigator() {
         },
       ]}
     >
+      {isUrbanConnectLocalTestMode ? (
+        <View style={styles.localTestBanner}>
+          <Ionicons color={colors.text} name="flask-outline" size={15} />
+          <Text style={styles.localTestBannerText}>
+            Local test mode - Supabase reads and writes are off
+          </Text>
+        </View>
+      ) : null}
+
       {appContent}
 
-      {user && !adminUser && !adminWebEntrypoint ? (
-        <Pressable
-          onPress={openSupportChat}
-          style={({ pressed }) => [
+      {user &&
+      !adminUser &&
+      !adminWebEntrypoint &&
+      !sellerWebEntrypoint &&
+      mainRoute !== 'Chats' ? (
+        <View
+          pointerEvents="box-none"
+          style={[
             styles.supportFabHost,
-            isMobileLayout && styles.supportFabMobile,
-            styles.supportFab,
-            pressed && styles.supportFabPressed,
+            isMobileLayout && styles.supportFabHostMobile,
+            isMobileLayout ? { bottom: 112 + insets.bottom } : null,
           ]}
         >
-          <Ionicons color={colors.white} name="headset-outline" size={24} />
-          <Text style={styles.supportFabText}>Care</Text>
-        </Pressable>
+          <Pressable
+            accessibilityLabel="Open customer support"
+            accessibilityRole="button"
+            onPress={() => {
+              setBusinessDetailsId(null);
+              setSellerProfileId(null);
+              setOrderDetailsId(null);
+              setIsCartRoute(false);
+              setIsWithdrawalRoute(false);
+              setIsTransactionsRoute(false);
+              setMainRoute('Chats');
+            }}
+            style={({ pressed }) => [
+              styles.supportFab,
+              isMobileLayout && styles.supportFabMobile,
+              pressed && styles.supportFabPressed,
+            ]}
+          >
+            <Ionicons color={colors.white} name="headset-outline" size={20} />
+            <Text style={styles.supportFabText}>Support</Text>
+          </Pressable>
+        </View>
       ) : null}
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showAccessChoice}
+        onRequestClose={() => setShowAccessChoice(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.accessChoiceCard}>
+            <View style={styles.accessChoiceHeader}>
+              <View style={styles.accessChoiceHeaderCopy}>
+                <Text style={styles.modalEyebrow}>Choose account type</Text>
+                <Text style={[styles.modalTitle, styles.accessChoiceTitle]}>
+                  How would you like to continue?
+                </Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Close account choices"
+                onPress={() => setShowAccessChoice(false)}
+                style={({ pressed }) => [
+                  styles.supportCloseButton,
+                  pressed && styles.menuRowPressed,
+                ]}
+              >
+                <Ionicons color={colors.text} name="close-outline" size={22} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                setShowAccessChoice(false);
+                setAuthRoute('Login');
+                setShowGuestAuthPage(true);
+              }}
+              style={({ pressed }) => [
+                styles.accessChoiceOption,
+                pressed && styles.menuRowPressed,
+              ]}
+            >
+              <View style={styles.accessChoiceIcon}>
+                <Ionicons color={colors.white} name="cart-outline" size={22} />
+              </View>
+              <View style={styles.menuCopy}>
+                <Text style={styles.menuTitle}>Customer</Text>
+                <Text style={styles.menuMeta}>Sign in or create an account to shop.</Text>
+              </View>
+              <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                setShowAccessChoice(false);
+                setAuthRoute('DispatchLogin');
+                setShowGuestAuthPage(true);
+              }}
+              style={({ pressed }) => [
+                styles.accessChoiceOption,
+                styles.accessChoiceOptionDispatch,
+                pressed && styles.menuRowPressed,
+              ]}
+            >
+              <View style={[styles.accessChoiceIcon, styles.accessChoiceDispatchIcon]}>
+                <Ionicons color={colors.white} name="bicycle-outline" size={22} />
+              </View>
+              <View style={styles.menuCopy}>
+                <Text style={styles.menuTitle}>Delivery</Text>
+                <Text style={styles.menuMeta}>Sign in as dispatch to manage delivery work.</Text>
+              </View>
+              <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+            </Pressable>
+
+            {/* Individual seller option removed — customers can create listings via the List flow */}
+
+            <Pressable
+              onPress={() => openWebPath('/business-registration/?sellerType=store')}
+              style={({ pressed }) => [
+                styles.accessChoiceOption,
+                styles.accessChoiceStore,
+                pressed && styles.menuRowPressed,
+              ]}
+            >
+              <View style={[styles.accessChoiceIcon, styles.accessChoiceStoreIcon]}>
+                <Ionicons color={colors.white} name="storefront-outline" size={22} />
+              </View>
+              <View style={styles.menuCopy}>
+                <Text style={styles.menuTitle}>Store owner</Text>
+                <Text style={styles.menuMeta}>Register a store, food business, or established catalog.</Text>
+              </View>
+              <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+            </Pressable>
+
+            <View style={styles.accessChoiceActions}>
+              <AppButton
+                label="Seller login"
+                onPress={() => openWebPath('/seller-portal/')}
+                variant="secondary"
+              />
+              <AppButton
+                label="Open Catalog"
+                onPress={() => openWebPath('/seller-portal/?page=catalog')}
+                variant="ghost"
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showGuestAuthPrompt}
+        onRequestClose={() => setShowGuestAuthPrompt(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.guestPromptIcon}>
+              <Ionicons color={colors.white} name="person-outline" size={24} />
+            </View>
+            <Text style={styles.modalTitle}>Sign in to continue</Text>
+            <Text style={styles.modalBody}>
+              Create an account or sign in to add items to your cart, open seller profiles,
+              checkout, and track orders.
+            </Text>
+            <View style={styles.passcodeGateActions}>
+              <AppButton
+                label="Sign in"
+                onPress={() => {
+                  setShowGuestAuthPrompt(false);
+                  setAuthRoute('Login');
+                  setShowGuestAuthPage(true);
+                }}
+              />
+              <AppButton
+                label="Create account"
+                onPress={() => {
+                  setShowGuestAuthPrompt(false);
+                  setAuthRoute('Signup');
+                  setShowGuestAuthPage(true);
+                }}
+                variant="secondary"
+              />
+              <AppButton
+                label="Continue shopping"
+                onPress={() => setShowGuestAuthPrompt(false)}
+                variant="ghost"
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         animationType="fade"
@@ -1133,24 +1750,26 @@ export function AppNavigator() {
               </View>
               <View style={styles.topBarCopy}>
                 <Text style={styles.modalEyebrow}>App passcode</Text>
-                <Text style={styles.modalTitle}>Unlock UrbanConnect</Text>
+                <Text style={styles.modalTitle}>Unlock View2Connect</Text>
               </View>
             </View>
-            <TextInput
-              accessibilityLabel="App passcode"
-              keyboardType="number-pad"
-              maxLength={6}
-              onChangeText={(value) => {
-                setPasscodeGateDraft(value.replace(/\D/g, '').slice(0, 6));
-                setPasscodeGateError(null);
-              }}
-              onSubmitEditing={handlePasscodeGateUnlock}
-              placeholder="0000"
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-              style={styles.passcodeGateInput}
-              value={passcodeGateDraft}
-            />
+            {userSecurityPreference.passcodeEnabled && userSecurityPreference.passcode ? (
+              <TextInput
+                accessibilityLabel="App passcode"
+                keyboardType="number-pad"
+                maxLength={6}
+                onChangeText={(value) => {
+                  setPasscodeGateDraft(value.replace(/\D/g, '').slice(0, 6));
+                  setPasscodeGateError(null);
+                }}
+                onSubmitEditing={handlePasscodeGateUnlock}
+                placeholder="0000"
+                placeholderTextColor={colors.textMuted}
+                secureTextEntry
+                style={styles.passcodeGateInput}
+                value={passcodeGateDraft}
+              />
+            ) : null}
             {passcodeGateError ? (
               <Text style={styles.passcodeGateError}>{passcodeGateError}</Text>
             ) : null}
@@ -1167,7 +1786,9 @@ export function AppNavigator() {
                   variant="secondary"
                 />
               ) : null}
-              <AppButton label="Unlock" onPress={handlePasscodeGateUnlock} />
+              {userSecurityPreference.passcodeEnabled && userSecurityPreference.passcode ? (
+                <AppButton label="Unlock" onPress={handlePasscodeGateUnlock} />
+              ) : null}
               <AppButton
                 label="Sign out"
                 onPress={() => {
@@ -1199,7 +1820,7 @@ export function AppNavigator() {
               </View>
               <View style={styles.topBarCopy}>
                 <Text style={styles.modalEyebrow}>Notifications</Text>
-                <Text style={styles.modalTitle}>UrbanConnect updates.</Text>
+                <Text style={styles.modalTitle}>View2Connect updates.</Text>
               </View>
               <Pressable
                 onPress={() => setShowNotifications(false)}
@@ -1246,7 +1867,7 @@ export function AppNavigator() {
                 <Ionicons color={colors.white} name="megaphone-outline" size={22} />
               </View>
               <View style={styles.topBarCopy}>
-                <Text style={styles.modalEyebrow}>UrbanConnect notice</Text>
+                <Text style={styles.modalEyebrow}>View2Connect notice</Text>
                 <Text style={styles.modalTitle}>
                   {securitySettings.loginAnnouncementTitle}
                 </Text>
@@ -1275,7 +1896,7 @@ export function AppNavigator() {
             <View style={styles.menuHeader}>
               <View>
                 <Text style={styles.modalEyebrow}>Menu</Text>
-                <Text style={styles.modalTitle}>UrbanConnect</Text>
+                <Text style={styles.modalTitle}>View2Connect</Text>
               </View>
               <Pressable
                 onPress={() => setShowMenuSheet(false)}
@@ -1310,9 +1931,40 @@ export function AppNavigator() {
                   <Ionicons color={colors.primary} name="briefcase-outline" size={18} />
                 </View>
                 <View style={styles.menuCopy}>
-                  <Text style={styles.menuTitle}>Services</Text>
-                  <Text style={styles.menuMeta}>Browse approved local services.</Text>
+                  <Text style={styles.menuTitle}>Categories</Text>
+                  <Text style={styles.menuMeta}>Browse approved products and services.</Text>
                 </View>
+              </Pressable>
+
+              <Pressable
+                onPress={() => runMenuAction(() => navigation.navigate('Food'))}
+                style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+              >
+                <View style={styles.menuIconShell}>
+                  <Ionicons color={colors.primary} name="restaurant-outline" size={18} />
+                </View>
+                <View style={styles.menuCopy}>
+                  <Text style={styles.menuTitle}>Food</Text>
+                  <Text style={styles.menuMeta}>Browse meals, restaurants, snacks, and bakeries.</Text>
+                </View>
+              </Pressable>
+
+              <Pressable
+                onPress={() => runMenuAction(() => navigation.navigate('RegisterBusiness'))}
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  styles.menuSellRow,
+                  pressed && styles.menuRowPressed,
+                ]}
+              >
+                <View style={[styles.menuIconShell, styles.menuSellIcon]}>
+                  <Ionicons color={colors.white} name="pricetag-outline" size={18} />
+                </View>
+                <View style={styles.menuCopy}>
+                  <Text style={styles.menuTitle}>Sell</Text>
+                  <Text style={styles.menuMeta}>Create a product or service listing.</Text>
+                </View>
+                <Ionicons color={colors.primary} name="chevron-forward" size={18} />
               </Pressable>
 
               <Pressable
@@ -1341,21 +1993,6 @@ export function AppNavigator() {
                 </View>
               </Pressable>
 
-              {user?.role !== 'businessOwner' ? (
-                <Pressable
-                  onPress={() => runMenuAction(() => navigation.navigate('Chats'))}
-                  style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
-                >
-                  <View style={styles.menuIconShell}>
-                    <Ionicons color={colors.primary} name="headset-outline" size={18} />
-                  </View>
-                  <View style={styles.menuCopy}>
-                    <Text style={styles.menuTitle}>Customer care</Text>
-                    <Text style={styles.menuMeta}>Message UrbanConnect support.</Text>
-                  </View>
-                </Pressable>
-              ) : null}
-
               <Pressable
                 onPress={() => runMenuAction(() => navigation.navigate('Settings'))}
                 style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
@@ -1369,34 +2006,29 @@ export function AppNavigator() {
                 </View>
               </Pressable>
 
-              {user?.role === 'businessOwner' ? (
-                <Pressable
-                  onPress={() => runMenuAction(() => navigation.navigate('RegisterBusiness'))}
-                  style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
-                >
-                  <View style={styles.menuIconShell}>
-                    <Ionicons color={colors.primary} name="add-outline" size={18} />
-                  </View>
-                  <View style={styles.menuCopy}>
-                    <Text style={styles.menuTitle}>Create listing</Text>
-                    <Text style={styles.menuMeta}>Publish a product or service.</Text>
-                  </View>
-                </Pressable>
-              ) : null}
-              {user?.role === 'businessOwner' ? (
-                <Pressable
-                  onPress={() => runMenuAction(() => navigation.navigate('Subscription'))}
-                  style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
-                >
-                  <View style={styles.menuIconShell}>
-                    <Ionicons color={colors.primary} name="card-outline" size={18} />
-                  </View>
-                  <View style={styles.menuCopy}>
-                    <Text style={styles.menuTitle}>Subscription</Text>
-                    <Text style={styles.menuMeta}>Pay from account balance and review status.</Text>
-                  </View>
-                </Pressable>
-              ) : null}
+              <View style={styles.socialShareSection}>
+                <View>
+                  <Text style={styles.menuTitle}>Share View2Connect</Text>
+                  <Text style={styles.menuMeta}>Invite customers and sellers.</Text>
+                </View>
+                <View style={styles.socialShareRow}>
+                  {socialShareLinks.map((link) => (
+                    <Pressable
+                      accessibilityLabel={`Share on ${link.label}`}
+                      accessibilityRole="button"
+                      key={link.label}
+                      onPress={() => openSocialShare(link.url)}
+                      style={({ pressed }) => [
+                        styles.socialShareButton,
+                        pressed && styles.menuRowPressed,
+                      ]}
+                    >
+                      <Ionicons color={colors.primary} name={link.icon} size={20} />
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
             </ScrollView>
 
             <Pressable
@@ -1423,7 +2055,30 @@ function createStyles(colors: AppColors) {
   return StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: 'transparent',
+      backgroundColor: colors.background,
+    },
+    localTestBanner: {
+      position: 'absolute',
+      top: spacing.xs,
+      left: spacing.sm,
+      right: spacing.sm,
+      zIndex: 50,
+      minHeight: 32,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      borderRadius: radii.pill,
+      backgroundColor: colors.accentSoft,
+      borderWidth: 1,
+      borderColor: colors.accent,
+      paddingHorizontal: spacing.md,
+    },
+    localTestBannerText: {
+      ...typography.caption,
+      color: colors.text,
+      fontWeight: '800',
+      textAlign: 'center',
     },
     adminMobileBlocked: {
       flex: 1,
@@ -1582,23 +2237,188 @@ function createStyles(colors: AppColors) {
     fullContent: {
       flex: 1,
     },
+    guestStoreShell: {
+      flex: 1,
+      minHeight: 0,
+      gap: spacing.md,
+      backgroundColor: colors.background,
+      padding: spacing.md,
+    },
+    guestStoreHeader: {
+      width: '100%',
+      maxWidth: 1280,
+      minHeight: 70,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      paddingHorizontal: spacing.sm,
+      paddingBottom: spacing.md,
+    },
+    guestStoreHeaderMobile: {
+      minHeight: 0,
+      alignItems: 'stretch',
+      flexDirection: 'column',
+    },
+    guestBrandRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+    },
+    cacBadge: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+      paddingHorizontal: spacing.sm,
+    },
+    cacBadgeText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
+    },
+    guestSocialRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    guestSocialButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    guestStoreNav: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: spacing.sm,
+    },
+    guestStoreNavMobile: {
+      width: '100%',
+      flexWrap: 'nowrap',
+      justifyContent: 'space-between',
+      gap: 0,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: 4,
+    },
+    guestNavButton: {
+      minHeight: 42,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      borderRadius: radii.lg,
+      paddingHorizontal: spacing.md,
+    },
+    guestNavButtonActive: {
+      backgroundColor: colors.primarySoft,
+    },
+    guestNavButtonMobile: {
+      flexGrow: 1,
+      flexBasis: '20%',
+      minHeight: 52,
+      flexDirection: 'column',
+      justifyContent: 'center',
+      gap: 2,
+      borderRadius: 8,
+      paddingHorizontal: 4,
+    },
+    guestNavText: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    guestSellButton: {
+      backgroundColor: colors.primary,
+    },
+    guestSellText: {
+      ...typography.bodyStrong,
+      color: colors.white,
+    },
+    guestIconButton: {
+      height: 42,
+      width: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 21,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    guestSignInButton: {
+      minHeight: 42,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      borderRadius: radii.lg,
+      backgroundColor: colors.primary,
+      paddingHorizontal: spacing.md,
+    },
+    guestSignInText: {
+      ...typography.bodyStrong,
+      color: colors.white,
+    },
+    guestSignInButtonMobile: {
+      flexGrow: 1,
+      flexBasis: '20%',
+      minHeight: 52,
+      flexDirection: 'column',
+      justifyContent: 'center',
+      gap: 2,
+      borderRadius: 8,
+      backgroundColor: 'transparent',
+      paddingHorizontal: 4,
+    },
+    guestSignInTextMobile: {
+      color: colors.primary,
+    },
+    guestStoreContent: {
+      flex: 1,
+      minHeight: 0,
+      width: '100%',
+      maxWidth: 1280,
+      alignSelf: 'center',
+    },
     authWebStage: {
       flex: 1,
-      alignItems: 'center',
-      backgroundColor: colors.background,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
+      width: '100%',
+      backgroundColor: '#160F25',
+    },
+    authWebStageWide: {
+      width: '100%',
     },
     authWebFrame: {
       flex: 1,
       width: '100%',
-      maxWidth: 430,
-      backgroundColor: colors.background,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 28,
-      overflow: 'hidden',
-      ...shadows.soft,
+      maxWidth: '100%',
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      borderRadius: 0,
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    authWebFrameWide: {
+      maxWidth: '100%',
+      borderWidth: 0,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      shadowOpacity: 0,
+      elevation: 0,
     },
     topBar: {
       flexDirection: 'row',
@@ -1652,6 +2472,15 @@ function createStyles(colors: AppColors) {
       ...typography.caption,
       color: colors.primary,
     },
+    sellActionButton: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    sellActionText: {
+      ...typography.caption,
+      color: colors.white,
+      fontWeight: '800',
+    },
     cartBadge: {
       minWidth: 22,
       alignItems: 'center',
@@ -1669,8 +2498,8 @@ function createStyles(colors: AppColors) {
       position: 'absolute',
       right: spacing.lg,
       bottom: spacing.xxl,
-      zIndex: 7,
-      elevation: 7,
+      zIndex: 40,
+      elevation: 40,
     },
     supportFab: {
       flexDirection: 'row',
@@ -1683,9 +2512,12 @@ function createStyles(colors: AppColors) {
       paddingVertical: spacing.sm,
       ...shadows.card,
     },
-    supportFabMobile: {
+    supportFabHostMobile: {
       right: spacing.md,
-      bottom: 126,
+    },
+    supportFabMobile: {
+      minHeight: 48,
+      paddingHorizontal: spacing.md,
     },
     supportFabPressed: {
       opacity: 0.9,
@@ -1763,6 +2595,85 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       padding: spacing.xl,
       ...shadows.card,
+    },
+    guestPromptIcon: {
+      height: 48,
+      width: 48,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 24,
+      backgroundColor: colors.primary,
+    },
+    accessChoiceCard: {
+      width: '100%',
+      maxWidth: 560,
+      gap: spacing.sm,
+      borderRadius: 8,
+      borderWidth: 2,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.lg,
+      ...shadows.card,
+    },
+    accessChoiceHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: spacing.md,
+      marginBottom: spacing.xs,
+    },
+    accessChoiceHeaderCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    accessChoiceTitle: {
+      fontSize: 20,
+      lineHeight: 26,
+    },
+    accessChoiceOption: {
+      minHeight: 76,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: spacing.md,
+    },
+    accessChoiceIndividual: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    accessChoiceStore: {
+      borderColor: colors.secondary,
+      backgroundColor: colors.secondarySoft,
+    },
+    accessChoiceOptionDispatch: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+    },
+    accessChoiceIcon: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 8,
+      backgroundColor: colors.primary,
+    },
+    accessChoiceIndividualIcon: {
+      backgroundColor: colors.primary,
+    },
+    accessChoiceStoreIcon: {
+      backgroundColor: colors.secondary,
+    },
+    accessChoiceDispatchIcon: {
+      backgroundColor: colors.accent,
+    },
+    accessChoiceActions: {
+      gap: spacing.xs,
+      marginTop: spacing.xs,
     },
     passcodeGateCard: {
       width: '100%',
@@ -1996,6 +2907,10 @@ function createStyles(colors: AppColors) {
     menuRowPressed: {
       opacity: 0.9,
     },
+    menuSellRow: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
     menuIconShell: {
       alignItems: 'center',
       justifyContent: 'center',
@@ -2003,6 +2918,9 @@ function createStyles(colors: AppColors) {
       width: 42,
       borderRadius: 21,
       backgroundColor: colors.primarySoft,
+    },
+    menuSellIcon: {
+      backgroundColor: colors.primary,
     },
     menuCopy: {
       flex: 1,
@@ -2015,6 +2933,29 @@ function createStyles(colors: AppColors) {
     menuMeta: {
       ...typography.caption,
       color: colors.textMuted,
+    },
+    socialShareSection: {
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
+    },
+    socialShareRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    socialShareButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.primarySoft,
     },
     menuFooterRow: {
       flexDirection: 'row',

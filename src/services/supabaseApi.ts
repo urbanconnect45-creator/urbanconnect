@@ -1,4 +1,4 @@
-import type { AdminUser, AppUser, SignUpFormValues, StoredUser } from '../types/auth';
+import type { AdminUser, AppUser, SignUpFormValues, StoredUser, UserRole } from '../types/auth';
 import type {
   AppNotification,
   AuditLog,
@@ -6,6 +6,7 @@ import type {
   Business,
   BusinessMedia,
   DynamicDepositAccount,
+  FlutterwaveBank,
   FlutterwaveCheckoutSession,
   OwnerBusinessProfile,
   PaymentPlan,
@@ -18,6 +19,7 @@ import type {
   RiverParkCluster,
   SubscriptionPayment,
   VirtualAccount,
+  VerifiedSellerPayoutAccount,
   WithdrawalRequest,
 } from '../types/business';
 import {
@@ -25,8 +27,10 @@ import {
   MINIMUM_ADD_FUNDS_DEPOSIT,
   withDynamicDepositExpiry,
 } from '../utils/deposits';
+import { isUrbanConnectLocalTestMode, readPublicEnv } from '../config/runtime';
 import { formatCurrency } from '../utils/format';
 import { normalizeOrderStatus } from '../utils/order';
+import { normalizeProductCategory } from '../utils/category';
 
 const fallbackSupabaseUrl = 'https://uyhudlqajzuzonntodqk.supabase.co';
 const fallbackSupabaseKey = 'sb_publishable_Y0_i8Q_ZVknA09MPuFhL8g_76LD1dpP';
@@ -54,6 +58,12 @@ type SupabaseAuthResponse = {
   user?: SupabaseAuthUser;
 };
 
+type CompleteAccountSignupResponse = {
+  status?: string;
+  authUserId?: string;
+  profile?: SupabaseProfileRow;
+};
+
 export type SupabaseSession = {
   accessToken: string;
   refreshToken?: string;
@@ -69,7 +79,7 @@ type SupabaseProfileRow = {
   email: string;
   phone_number: string;
   password_hash?: string | null;
-  role: 'resident' | 'businessOwner';
+  role: UserRole;
   estate_id: string;
   business_name?: string | null;
   business_cluster?: string | null;
@@ -197,6 +207,11 @@ type SupabaseOwnerProfileRow = {
   subscription_next_billing_at?: string | null;
   subscription_item_count?: number | null;
   river_park_verified?: boolean | null;
+  payout_bank_code?: string | null;
+  payout_bank_name?: string | null;
+  payout_account_number?: string | null;
+  payout_account_name?: string | null;
+  payout_verified_at?: string | null;
   updated_at: string;
 };
 
@@ -301,7 +316,7 @@ type FlutterwaveCheckoutFunctionResponse = {
 };
 
 const flutterwaveCheckoutReturnUrl =
-  'https://urbanconnectstore.com/payments/flutterwave/return';
+  'https://www.view2connect.ng/payments/flutterwave/return';
 
 type SupabaseSecurityRow = {
   allow_resident_signups: boolean;
@@ -394,23 +409,40 @@ export class SupabaseApiError extends Error {
   }
 }
 
-function readEnv(name: 'EXPO_PUBLIC_SUPABASE_URL' | 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY') {
-  return typeof process !== 'undefined' ? process.env[name] : undefined;
-}
-
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
 }
 
+function normalizeSupabaseUrl(value?: string) {
+  const candidate = value?.trim() ?? '';
+
+  if (
+    !candidate ||
+    /your-project-ref|myprojectid|your-project-id/i.test(candidate)
+  ) {
+    return fallbackSupabaseUrl;
+  }
+
+  const withProtocol = /^https?:\/\//i.test(candidate)
+    ? candidate
+    : `https://${candidate}`;
+
+  try {
+    return trimTrailingSlash(new URL(withProtocol).toString());
+  } catch {
+    return fallbackSupabaseUrl;
+  }
+}
+
 export const supabaseConfig = {
-  url: trimTrailingSlash(readEnv('EXPO_PUBLIC_SUPABASE_URL') ?? fallbackSupabaseUrl),
-  publishableKey: readEnv('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY') ?? fallbackSupabaseKey,
+  url: normalizeSupabaseUrl(readPublicEnv('EXPO_PUBLIC_SUPABASE_URL')),
+  publishableKey: readPublicEnv('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY') ?? fallbackSupabaseKey,
 };
 
 const listingMediaBucket = 'urbanconnect-listing-media';
 
 export const isSupabaseConfigured = Boolean(
-  supabaseConfig.url && supabaseConfig.publishableKey,
+  !isUrbanConnectLocalTestMode && supabaseConfig.url && supabaseConfig.publishableKey,
 );
 
 function toNumber(value: number | string | null | undefined) {
@@ -429,6 +461,22 @@ function toNumber(value: number | string | null | undefined) {
 function optionalString(value: string | null | undefined) {
   const trimmedValue = value?.trim();
   return trimmedValue ? trimmedValue : undefined;
+}
+
+function normalizeUserRole(value: unknown): UserRole {
+  return value === 'businessOwner' || value === 'dispatch' ? value : 'resident';
+}
+
+function roleLabel(role: UserRole) {
+  if (role === 'businessOwner') {
+    return 'store owner';
+  }
+
+  if (role === 'dispatch') {
+    return 'dispatch';
+  }
+
+  return 'customer';
 }
 
 function getPayloadMessage(payload: unknown, fallback: string) {
@@ -468,6 +516,13 @@ async function supabaseRequest<T>(
     headers?: Record<string, string>;
   } = {},
 ) {
+  if (isUrbanConnectLocalTestMode) {
+    throw new SupabaseApiError(
+      'View2Connect local test mode is enabled. Supabase calls are disabled.',
+      0,
+    );
+  }
+
   if (!isSupabaseConfigured) {
     throw new SupabaseApiError('Supabase is not configured for this app.', 0);
   }
@@ -566,7 +621,7 @@ function encodeStoragePath(path: string) {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-async function uploadMediaUriToSupabaseStorage(
+export async function uploadMediaUriToSupabaseStorage(
   uri: string,
   path: string,
   kind: BusinessMedia['type'],
@@ -675,6 +730,7 @@ function toSession(response: SupabaseAuthResponse): SupabaseSession | null {
 function profileToAppUser(row: SupabaseProfileRow): AppUser {
   const businessName = optionalString(row.business_name);
   const businessCluster = optionalString(row.business_cluster);
+  const role = normalizeUserRole(row.role);
 
   return {
     id: row.id,
@@ -683,7 +739,7 @@ function profileToAppUser(row: SupabaseProfileRow): AppUser {
     fullName: row.full_name,
     email: row.email,
     phoneNumber: row.phone_number,
-    role: row.role,
+    role,
     estateId: row.estate_id,
     riverParkVerified: Boolean(row.river_park_verified),
     status: row.status ?? 'active',
@@ -731,21 +787,31 @@ function buildProfilePayload(
   values?: SignUpFormValues,
 ): SupabaseProfileRow {
   const metadata = authUser.user_metadata ?? {};
+  const metadataFullName = String(metadata.full_name ?? metadata.name ?? '').trim();
+  const metadataNameParts = metadataFullName.split(/\s+/).filter(Boolean);
   const firstName =
-    values?.firstName.trim() || String(metadata.first_name ?? metadata.firstName ?? 'Urban');
+    values?.firstName.trim() ||
+    String(metadata.first_name ?? metadata.firstName ?? metadataNameParts[0] ?? 'View2Connect');
   const lastName =
-    values?.lastName.trim() || String(metadata.last_name ?? metadata.lastName ?? 'Resident');
-  const fullName = `${firstName} ${lastName}`.trim();
-  const roleValue = values?.role ?? metadata.role;
-  const role = roleValue === 'businessOwner' ? 'businessOwner' : 'resident';
+    values?.lastName.trim() ||
+    String(
+      metadata.last_name ??
+        metadata.lastName ??
+        (metadataNameParts.slice(1).join(' ') || 'User'),
+    );
+  const fullName =
+    values
+      ? `${firstName} ${lastName}`.trim()
+      : metadataFullName || `${firstName} ${lastName}`.trim();
+  const role = normalizeUserRole(values?.role ?? metadata.role);
   const businessName =
-    values?.role === 'businessOwner'
-      ? values.businessName.trim()
-      : optionalString(String(metadata.business_name ?? ''));
+    role === 'businessOwner'
+      ? values?.businessName.trim() || optionalString(String(metadata.business_name ?? ''))
+      : undefined;
   const businessCluster =
-    values?.role === 'businessOwner'
-      ? values.businessCluster
-      : optionalString(String(metadata.business_cluster ?? ''));
+    role === 'businessOwner'
+      ? values?.businessCluster || optionalString(String(metadata.business_cluster ?? ''))
+      : undefined;
 
   return {
     id: authUser.id,
@@ -754,7 +820,10 @@ function buildProfilePayload(
     full_name: fullName,
     email: values?.email.trim().toLowerCase() || authUser.email || '',
     phone_number:
-      values?.phoneNumber.trim() || authUser.phone || String(metadata.phone_number ?? ''),
+      values?.phoneNumber.trim() ||
+      authUser.phone ||
+      String(metadata.phone_number ?? '').trim() ||
+      `oauth-${authUser.id}`,
     password_hash: 'supabase-auth-managed',
     role,
     estate_id: values?.estateId ?? String(metadata.estate_id ?? 'river-park'),
@@ -800,23 +869,108 @@ async function fetchProfileByEmail(email: string, accessToken?: string) {
   return rows[0] ? profileToAppUser(rows[0]) : undefined;
 }
 
-async function getNextSequentialUserId() {
-  const rows = await supabaseRequest<Pick<SupabaseProfileRow, 'id'>[]>(
-    '/rest/v1/app_users?select=id',
-  ).catch(() => [] as Pick<SupabaseProfileRow, 'id'>[]);
-  const highest = rows.reduce((maxValue, row) => {
-    const parsedValue = /^\d+$/.test(row.id) ? Number.parseInt(row.id, 10) : -1;
-    return Number.isFinite(parsedValue) ? Math.max(maxValue, parsedValue) : maxValue;
-  }, -1);
+async function fetchProfileByEmailAndRole(email: string, role: UserRole, accessToken?: string) {
+  const rows = await supabaseRequest<SupabaseProfileRow[]>(
+    `/rest/v1/app_users?select=*&email=eq.${encodeURIComponent(
+      email.trim().toLowerCase(),
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
+    { accessToken },
+  );
 
-  return String(highest + 1);
+  return rows[0] ? profileToAppUser(rows[0]) : undefined;
 }
 
-async function resolveSupabaseEmail(identifier: string) {
+async function fetchProfileByPhoneAndRole(phoneNumber: string, role: UserRole) {
+  const rows = await supabaseRequest<SupabaseProfileRow[]>(
+    `/rest/v1/app_users?select=*&phone_number=eq.${encodeURIComponent(
+      phoneNumber.trim(),
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
+  );
+
+  return rows[0] ? profileToAppUser(rows[0]) : undefined;
+}
+
+async function syncProfileNameFromAuth(
+  profile: AppUser,
+  authUser: SupabaseAuthUser,
+  accessToken?: string,
+) {
+  const metadata = authUser.user_metadata ?? {};
+  const hasProviderName = Boolean(
+    String(
+      metadata.full_name ??
+        metadata.name ??
+        metadata.first_name ??
+        metadata.firstName ??
+        '',
+    ).trim(),
+  );
+
+  if (!hasProviderName) {
+    return profile;
+  }
+
+  const authProfile = buildProfilePayload(authUser);
+
+  if (
+    profile.firstName === authProfile.first_name &&
+    profile.lastName === authProfile.last_name &&
+    profile.fullName === authProfile.full_name
+  ) {
+    return profile;
+  }
+
+  const rows = await supabaseRequest<SupabaseProfileRow[]>(
+    `/rest/v1/app_users?id=eq.${encodeURIComponent(profile.id)}`,
+    {
+      method: 'PATCH',
+      accessToken,
+      body: {
+        first_name: authProfile.first_name,
+        last_name: authProfile.last_name,
+        full_name: authProfile.full_name,
+        updated_at: new Date().toISOString(),
+      },
+      headers: {
+        Prefer: 'return=representation',
+      },
+    },
+  ).catch(() => []);
+
+  return rows[0] ? profileToAppUser(rows[0]) : profile;
+}
+
+async function resolveSupabaseEmail(identifier: string, requiredRole?: UserRole) {
   const normalizedIdentifier = identifier.trim();
 
   if (normalizedIdentifier.includes('@')) {
-    return normalizedIdentifier.toLowerCase();
+    const email = normalizedIdentifier.toLowerCase();
+
+    if (requiredRole) {
+      const profile = await fetchProfileByEmailAndRole(email, requiredRole);
+
+      if (!profile) {
+        throw new SupabaseApiError(
+          `No ${roleLabel(requiredRole)} account was found for this email.`,
+          404,
+        );
+      }
+    }
+
+    return email;
+  }
+
+  if (requiredRole) {
+    const profile = await fetchProfileByPhoneAndRole(normalizedIdentifier, requiredRole);
+
+    if (!profile) {
+      throw new SupabaseApiError(
+        `No ${roleLabel(requiredRole)} account was found for this phone number.`,
+        404,
+      );
+    }
+
+    return profile.email;
   }
 
   const rows = await supabaseRequest<Pick<SupabaseProfileRow, 'email'>[]>(
@@ -831,23 +985,73 @@ async function upsertProfile(
   values?: SignUpFormValues,
   accessToken?: string,
 ) {
-  const payload = {
-    ...buildProfilePayload(authUser, values),
-    ...(values ? { id: await getNextSequentialUserId() } : {}),
-  };
-  const rows = await supabaseRequest<SupabaseProfileRow[]>(
-    '/rest/v1/app_users?on_conflict=id',
-    {
-      method: 'POST',
-      body: payload,
-      accessToken,
-      headers: {
-        Prefer: 'resolution=merge-duplicates,return=representation',
+  const payload = buildProfilePayload(authUser, values);
+  const saveProfile = (token?: string) =>
+    supabaseRequest<SupabaseProfileRow[]>(
+      '/rest/v1/app_users?on_conflict=id',
+      {
+        method: 'POST',
+        body: payload,
+        accessToken: token,
+        headers: {
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
       },
-    },
-  );
+    );
+  const rows = await saveProfile(accessToken).catch((error) => {
+    if (!accessToken) {
+      throw error;
+    }
+
+    return saveProfile();
+  });
 
   return rows[0] ? profileToAppUser(rows[0]) : profileToAppUser(payload);
+}
+
+async function updateExistingProfileFromSignup(
+  profile: AppUser,
+  authUser: SupabaseAuthUser,
+  values: SignUpFormValues,
+  accessToken?: string,
+) {
+  const nextProfile = buildProfilePayload(authUser, values);
+  const patch = {
+    first_name: nextProfile.first_name,
+    last_name: nextProfile.last_name,
+    full_name: nextProfile.full_name,
+    email: nextProfile.email,
+    phone_number: nextProfile.phone_number,
+    password_hash: 'supabase-auth-managed',
+    role: nextProfile.role,
+    estate_id: nextProfile.estate_id,
+    business_name: nextProfile.business_name ?? null,
+    business_cluster: nextProfile.business_cluster ?? null,
+    river_park_verified: nextProfile.river_park_verified ?? false,
+    status: 'active',
+    updated_at: new Date().toISOString(),
+  };
+  const updateProfile = (token?: string) =>
+    supabaseRequest<SupabaseProfileRow[]>(
+      `/rest/v1/app_users?id=eq.${encodeURIComponent(profile.id)}`,
+      {
+        method: 'PATCH',
+        body: patch,
+        accessToken: token,
+        headers: {
+          Prefer: 'return=representation',
+        },
+      },
+    );
+  const rows = await updateProfile(accessToken).catch((error) => {
+    if (!accessToken) {
+      throw error;
+    }
+
+    return updateProfile();
+  });
+
+  return rows[0] ? profileToAppUser(rows[0]) : profile;
 }
 
 async function getOrCreateProfile(
@@ -859,38 +1063,125 @@ async function getOrCreateProfile(
   const existingEmailProfile = authUser.email
     ? await fetchProfileByEmail(authUser.email, accessToken).catch(() => undefined)
     : undefined;
+  const publicEmailProfile =
+    !existingEmailProfile && authUser.email && accessToken
+      ? await fetchProfileByEmail(authUser.email).catch(() => undefined)
+      : undefined;
 
-  if (existingProfile && !values) {
-    return existingProfile;
+  if (existingProfile) {
+    return values
+      ? updateExistingProfileFromSignup(existingProfile, authUser, values, accessToken)
+      : syncProfileNameFromAuth(existingProfile, authUser, accessToken);
   }
 
-  if (existingEmailProfile && !values) {
-    return existingEmailProfile;
+  if (existingEmailProfile) {
+    return values
+      ? updateExistingProfileFromSignup(existingEmailProfile, authUser, values, accessToken)
+      : syncProfileNameFromAuth(existingEmailProfile, authUser, accessToken);
+  }
+
+  if (publicEmailProfile) {
+    return values
+      ? updateExistingProfileFromSignup(publicEmailProfile, authUser, values, accessToken)
+      : syncProfileNameFromAuth(publicEmailProfile, authUser, accessToken);
   }
 
   return upsertProfile(authUser, values, accessToken);
 }
 
-export async function signInWithSupabase(identifier: string, password: string) {
-  const email = await resolveSupabaseEmail(identifier);
+async function requestPasswordSession(email: string, password: string) {
+  const isHostedWeb =
+    typeof window !== 'undefined' &&
+    !['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
-  const response = await supabaseRequest<SupabaseAuthResponse>(
-    '/auth/v1/token?grant_type=password',
-    {
-      method: 'POST',
-      body: {
-        email,
-        password,
-      },
+  if (isHostedWeb) {
+    try {
+      const response = await fetch('/api/auth-login', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+      const payload = await parseResponse(response);
+
+      if (!response.ok) {
+        const message = getPayloadMessage(
+          payload,
+          `Login failed with status ${response.status}.`,
+        );
+        throw new SupabaseApiError(
+          /invalid login credentials|invalid.*password|email.*password/i.test(message) ||
+            response.status === 400 ||
+            response.status === 401
+            ? 'Incorrect email or password.'
+            : message,
+          response.status,
+        );
+      }
+
+      return payload as SupabaseAuthResponse;
+    } catch (error) {
+      if (
+        error instanceof SupabaseApiError &&
+        error.status !== 404 &&
+        error.status !== 405
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  return supabaseRequest<SupabaseAuthResponse>('/auth/v1/token?grant_type=password', {
+    method: 'POST',
+    body: {
+      email,
+      password,
     },
-  );
+  });
+}
 
-  if (!response.user) {
+export async function signInWithSupabase(
+  identifier: string,
+  password: string,
+  requiredRole?: UserRole,
+) {
+  const email = await resolveSupabaseEmail(identifier, requiredRole);
+  let response: SupabaseAuthResponse;
+
+  try {
+    response = await requestPasswordSession(email, password);
+  } catch (error) {
+    if (
+      error instanceof SupabaseApiError &&
+      (error.status === 400 ||
+        error.status === 401 ||
+        /invalid login credentials|invalid.*password|email.*password|hostname/i.test(error.message))
+    ) {
+      throw new SupabaseApiError('Incorrect email or password.', error.status);
+    }
+
+    throw error;
+  }
+
+  const authUser = response.user;
+
+  if (!authUser) {
     throw new SupabaseApiError('Supabase did not return a user for this login.', 500);
   }
 
   const session = toSession(response);
-  const user = await getOrCreateProfile(response.user, session?.accessToken);
+  const user = await getOrCreateProfile(authUser, session?.accessToken);
+
+  if (requiredRole && user.role !== requiredRole) {
+    throw new SupabaseApiError(
+      `This login belongs to a ${roleLabel(user.role)} account. Use the ${roleLabel(
+        requiredRole,
+      )} login for this portal.`,
+      403,
+    );
+  }
 
   return {
     user,
@@ -900,13 +1191,17 @@ export async function signInWithSupabase(identifier: string, password: string) {
 }
 
 export async function sendSupabaseSignupVerificationCode(values: SignUpFormValues) {
-  return supabaseRequest('/auth/v1/otp', {
+  return supabaseRequest('/functions/v1/request-account-signup-otp', {
     method: 'POST',
     body: {
+      firstName: values.firstName.trim(),
+      lastName: values.lastName.trim(),
+      phoneNumber: values.phoneNumber.trim(),
       email: values.email.trim().toLowerCase(),
-      data: buildSignupMetadata(values),
-      create_user: true,
-      gotrue_meta_security: {},
+      role: values.role,
+      estateId: values.estateId,
+      businessName: values.role === 'businessOwner' ? values.businessName.trim() : '',
+      businessCluster: values.role === 'businessOwner' ? values.businessCluster : '',
     },
   });
 }
@@ -921,41 +1216,64 @@ export async function signUpWithSupabase(
     throw new SupabaseApiError('Enter the email verification code to create this account.', 400);
   }
 
-  const response = await supabaseRequest<SupabaseAuthResponse>('/auth/v1/verify', {
+  await supabaseRequest<CompleteAccountSignupResponse>('/functions/v1/complete-account-signup', {
     method: 'POST',
     body: {
+      firstName: values.firstName.trim(),
+      lastName: values.lastName.trim(),
+      phoneNumber: values.phoneNumber.trim(),
       email: values.email.trim().toLowerCase(),
-      token,
-      type: 'email',
-      gotrue_meta_security: {},
-    },
-  });
-
-  if (!response.user) {
-    throw new SupabaseApiError('Supabase did not return a user after email verification.', 500);
-  }
-
-  const session = toSession(response);
-
-  if (!session?.accessToken) {
-    throw new SupabaseApiError('Supabase did not return a session after email verification.', 500);
-  }
-
-  const updatedAuthUser = await supabaseRequest<SupabaseAuthUserUpdateResponse>('/auth/v1/user', {
-    method: 'PUT',
-    accessToken: session.accessToken,
-    body: {
       password: values.password,
-      data: buildSignupMetadata(values),
+      role: values.role,
+      estateId: values.estateId,
+      businessName: values.role === 'businessOwner' ? values.businessName.trim() : '',
+      businessCluster: values.role === 'businessOwner' ? values.businessCluster : '',
+      code: token,
     },
   });
-  const authUser = unwrapAuthUser(updatedAuthUser) ?? response.user;
-  const user = await getOrCreateProfile(authUser, session.accessToken, values);
+  let passwordResponse: SupabaseAuthResponse;
+
+  try {
+    passwordResponse = await requestPasswordSession(
+      values.email.trim().toLowerCase(),
+      values.password,
+    );
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    passwordResponse = await requestPasswordSession(
+      values.email.trim().toLowerCase(),
+      values.password,
+    );
+  }
+
+  const passwordSession = toSession(passwordResponse);
+  const authUser = passwordResponse.user;
+
+  if (!passwordSession?.accessToken || !authUser) {
+    throw new SupabaseApiError(
+      'Your email was verified, but the password could not be confirmed. Try creating the password again.',
+      500,
+    );
+  }
+
+  const user = await getOrCreateProfile(authUser, passwordSession.accessToken, values);
 
   return {
     user,
     storedUser: { ...user, password: '' },
-    session,
+    session: passwordSession,
+  };
+}
+
+export async function syncSupabaseSessionProfile(accessToken: string) {
+  const authUser = await supabaseRequest<SupabaseAuthUser>('/auth/v1/user', {
+    accessToken,
+  });
+  const user = await getOrCreateProfile(authUser, accessToken);
+
+  return {
+    user,
+    storedUser: { ...user, password: '' },
   };
 }
 
@@ -966,6 +1284,13 @@ export async function updateSupabaseAuthPassword(accessToken: string, nextPasswo
     body: {
       password: nextPassword,
     },
+  });
+}
+
+export async function signOutSupabase(accessToken: string) {
+  return supabaseRequest('/auth/v1/logout?scope=global', {
+    method: 'POST',
+    accessToken,
   });
 }
 
@@ -1006,7 +1331,12 @@ export async function setRiverParkVerificationInSupabase(userId: string, verifie
       },
     });
   } catch (error) {
-    if (!isRecoverableSupabaseSetupError(error)) {
+    const isAmbiguousLegacyVerificationFunction =
+      error instanceof SupabaseApiError &&
+      error.status === 400 &&
+      /verified.*ambiguous|ambiguous.*verified|42702/i.test(error.message);
+
+    if (!isRecoverableSupabaseSetupError(error) && !isAmbiguousLegacyVerificationFunction) {
       throw error;
     }
 
@@ -1072,9 +1402,28 @@ export async function completeSupabaseOAuth(url: string) {
   };
 }
 
-export function getSupabaseOAuthUrl(provider: 'google' | 'apple') {
-  const redirectTo = encodeURIComponent('urbanconnect://auth/callback');
+export function getSupabaseOAuthUrl(
+  provider: 'google' | 'apple',
+  webRedirectPath = '/auth/callback',
+) {
   const encodedProvider = encodeURIComponent(provider);
+
+  let redirect = 'urbanconnect://auth/callback';
+
+  try {
+    if (typeof window !== 'undefined' && (window as any).location?.origin) {
+      // Use a web-friendly redirect when running in a browser so the OAuth
+      // flow returns to the web app instead of the native deep link.
+      const normalizedPath = webRedirectPath.startsWith('/')
+        ? webRedirectPath
+        : `/${webRedirectPath}`;
+      redirect = `${(window as any).location.origin}${normalizedPath}`;
+    }
+  } catch {
+    // ignore and fall back to deep link
+  }
+
+  const redirectTo = encodeURIComponent(redirect);
 
   return `${supabaseConfig.url}/auth/v1/authorize?provider=${encodedProvider}&redirect_to=${redirectTo}`;
 }
@@ -1106,7 +1455,10 @@ function businessRowToBusiness(row: SupabaseBusinessRow): Business {
     ...(ownerUserId ? { ownerUserId } : {}),
     ...(ownerEmail ? { ownerEmail } : {}),
     cluster: row.cluster as RiverParkCluster,
-    category: row.category,
+    category:
+      row.listing_type === 'product'
+        ? normalizeProductCategory(row.category, row.name, row.description, row.long_description)
+        : row.category,
     description: row.description,
     longDescription: row.long_description,
     imageUrl: row.image_url,
@@ -1219,6 +1571,11 @@ function ownerProfileRowToProfile(row: SupabaseOwnerProfileRow): OwnerBusinessPr
   const galleryVideos = optionalString(row.gallery_videos);
   const subscriptionPaidAt = optionalString(row.subscription_paid_at);
   const subscriptionNextBillingAt = optionalString(row.subscription_next_billing_at);
+  const payoutBankCode = optionalString(row.payout_bank_code);
+  const payoutBankName = optionalString(row.payout_bank_name);
+  const payoutAccountNumber = optionalString(row.payout_account_number);
+  const payoutAccountName = optionalString(row.payout_account_name);
+  const payoutVerifiedAt = optionalString(row.payout_verified_at);
 
   return {
     id: row.id,
@@ -1244,6 +1601,11 @@ function ownerProfileRowToProfile(row: SupabaseOwnerProfileRow): OwnerBusinessPr
     ...(subscriptionNextBillingAt ? { subscriptionNextBillingAt } : {}),
     ...(row.subscription_item_count ? { subscriptionItemCount: row.subscription_item_count } : {}),
     riverParkVerified: Boolean(row.river_park_verified),
+    ...(payoutBankCode ? { payoutBankCode } : {}),
+    ...(payoutBankName ? { payoutBankName } : {}),
+    ...(payoutAccountNumber ? { payoutAccountNumber } : {}),
+    ...(payoutAccountName ? { payoutAccountName } : {}),
+    ...(payoutVerifiedAt ? { payoutVerifiedAt } : {}),
     updatedAt: row.updated_at,
   };
 }
@@ -1472,6 +1834,52 @@ export async function createFlutterwaveCheckoutSession(values: {
   } satisfies FlutterwaveCheckoutSession;
 }
 
+export async function fetchFlutterwaveNigerianBanks(accessToken: string) {
+  const response = await supabaseRequest<{ banks?: FlutterwaveBank[] }>(
+    '/functions/v1/verify-seller-bank-account',
+    {
+      method: 'POST',
+      accessToken,
+      body: { action: 'banks' },
+    },
+  );
+
+  return Array.isArray(response.banks) ? response.banks : [];
+}
+
+export async function verifySellerPayoutAccount(
+  accessToken: string,
+  values: {
+    ownerUserId: string;
+    bankCode: string;
+    bankName: string;
+    accountNumber: string;
+  },
+) {
+  const response = await supabaseRequest<{
+    account?: VerifiedSellerPayoutAccount;
+  }>('/functions/v1/verify-seller-bank-account', {
+    method: 'POST',
+    accessToken,
+    body: {
+      action: 'resolve',
+      ownerUserId: values.ownerUserId,
+      bankCode: values.bankCode,
+      bankName: values.bankName,
+      accountNumber: values.accountNumber,
+    },
+  });
+
+  if (!response.account?.accountName) {
+    throw new SupabaseApiError(
+      'Flutterwave did not return the verified account name.',
+      502,
+    );
+  }
+
+  return response.account;
+}
+
 export async function createFlutterwaveVirtualAccount(
   owner: AppUser,
   values: {
@@ -1494,7 +1902,7 @@ export async function createFlutterwaveVirtualAccount(
         purpose: values.purpose ?? (hasKyc ? 'withdrawal' : 'deposit'),
         ...(values.kycType ? { kycType: values.kycType } : {}),
         ...(cleanKycNumber ? { kycNumber: cleanKycNumber } : {}),
-        narration: `${owner.businessName ?? owner.fullName} UrbanConnect wallet`,
+        narration: `${owner.businessName ?? owner.fullName} View2Connect wallet`,
       },
     },
   );
@@ -1566,7 +1974,7 @@ export async function createFlutterwaveDynamicDepositAccount(
         phoneNumber: user.phoneNumber,
         purpose: 'deposit',
         amount: roundedAmount,
-        narration: `${user.businessName ?? user.fullName} UrbanConnect deposit`,
+        narration: `${user.businessName ?? user.fullName} View2Connect deposit`,
       },
     },
   );
@@ -1974,6 +2382,11 @@ export async function saveOwnerBusinessProfileToSupabase(profile: OwnerBusinessP
       subscription_next_billing_at: profile.subscriptionNextBillingAt ?? null,
       subscription_item_count: profile.subscriptionItemCount ?? null,
       river_park_verified: profile.riverParkVerified ?? false,
+      payout_bank_code: profile.payoutBankCode ?? null,
+      payout_bank_name: profile.payoutBankName ?? null,
+      payout_account_number: profile.payoutAccountNumber ?? null,
+      payout_account_name: profile.payoutAccountName ?? null,
+      payout_verified_at: profile.payoutVerifiedAt ?? null,
       updated_at: profile.updatedAt,
     },
     headers: {
@@ -2149,10 +2562,10 @@ function securityRowToSettings(row: SupabaseSecurityRow): SecuritySettings {
     sessionTimeoutMinutes: row.session_timeout_minutes,
     maxLoginAttempts: row.max_login_attempts,
     loginAnnouncementEnabled: row.login_announcement_enabled ?? true,
-    loginAnnouncementTitle: row.login_announcement_title ?? 'Welcome to UrbanConnect',
+    loginAnnouncementTitle: row.login_announcement_title ?? 'Welcome to View2Connect',
     loginAnnouncementBody:
       row.login_announcement_body ??
-      'River Park marketplace updates, verification notices, and customer care messages will appear in your notifications.',
+      'Marketplace updates, verification notices, and customer care messages will appear in your notifications.',
     subscriptionExemptAccountEmail: row.subscription_exempt_account_email ?? 'owner.admin@urbanconnect.com',
   };
 }
