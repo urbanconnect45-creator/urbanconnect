@@ -18,14 +18,10 @@ const kycTypeOptions: { label: string; value: WithdrawalKycType }[] = [
   { label: 'NIN', value: 'nin' },
 ];
 
-function isWarehouseReleased(status: string) {
-  return status === 'delivered';
-}
-
 export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
   const { user } = useAuth();
   const {
-    getOrdersForOwner,
+    getAvailableAccountBalanceForUser,
     getVirtualAccountForOwner,
     getWithdrawalsForOwner,
     requestWithdrawal,
@@ -44,40 +40,13 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
   const [isReplacingKyc, setIsReplacingKyc] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ownerOrders = useMemo(
-    () => (user?.role === 'businessOwner' ? getOrdersForOwner(user.id, user) : []),
-    [getOrdersForOwner, user],
-  );
   const withdrawals = useMemo(
-    () => (user?.role === 'businessOwner' ? getWithdrawalsForOwner(user.id) : []),
+    () => (user ? getWithdrawalsForOwner(user.id) : []),
     [getWithdrawalsForOwner, user],
   );
-  const ownerKeys = [
-    user?.id,
-    user?.fullName,
-    user?.businessName,
-    user?.email,
-  ]
-    .map((key) => key?.trim().toLowerCase())
-    .filter((key): key is string => Boolean(key));
-  const availableBeforeWithdrawals = ownerOrders.reduce(
-    (total, order) =>
-      total +
-      (order.paymentStatus === 'paid' && isWarehouseReleased(order.status)
-        ? order.items
-            .filter((item) =>
-              [item.ownerUserId, item.ownerName]
-                .map((key) => key?.trim().toLowerCase())
-                .some((key) => Boolean(key && ownerKeys.includes(key))),
-            )
-            .reduce((itemTotal, item) => itemTotal + item.lineTotal, 0)
-        : 0),
-    0,
-  );
   const withdrawn = withdrawals.reduce((total, withdrawal) => total + withdrawal.amount, 0);
-  const available = Math.max(0, availableBeforeWithdrawals - withdrawn);
-  const virtualAccount =
-    user?.role === 'businessOwner' ? getVirtualAccountForOwner(user.id) : undefined;
+  const available = user ? getAvailableAccountBalanceForUser(user) : 0;
+  const virtualAccount = user ? getVirtualAccountForOwner(user.id) : undefined;
   const withdrawalAccountVerified =
     !isReplacingKyc &&
     virtualAccount?.status === 'verified' &&
@@ -117,7 +86,7 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
   };
 
   const submitKycVerification = async () => {
-    if (user.role !== 'businessOwner' || isVerifying) {
+    if (isVerifying) {
       return;
     }
 
@@ -163,10 +132,6 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
   };
 
   const submitWithdrawal = () => {
-    if (user.role !== 'businessOwner') {
-      return;
-    }
-
     if (!withdrawalAccountVerified) {
       setError('Verify your BVN or NIN with Flutterwave before withdrawal.');
       return;
@@ -218,22 +183,13 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
           <Ionicons color={colors.white} name="cash-outline" size={26} />
         </View>
         <Text style={styles.eyebrow}>Withdrawal</Text>
-        <Text style={styles.title}>Send seller earnings to your bank.</Text>
+        <Text style={styles.title}>Send available funds to your bank.</Text>
         <Text style={styles.subtitle}>
-          Only delivered seller earnings are available for withdrawal.
+          Paid wallet deposits and delivered seller earnings can be withdrawn after KYC.
         </Text>
       </View>
 
-      {user.role !== 'businessOwner' ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>No withdrawal for buyers</Text>
-          <Text style={styles.bodyText}>
-            Resident portfolios are for buying items only. Withdrawal is available to sellers.
-          </Text>
-          <AppButton label="Back to profile" onPress={() => navigation.navigate('Account')} />
-        </View>
-      ) : (
-        <>
+      <>
           <View style={styles.metricGrid}>
             <View style={styles.metricCard}>
               <Text style={styles.metricValue}>{formatCurrency(available)}</Text>
@@ -436,8 +392,7 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
               ) : null}
             </View>
           </View>
-        </>
-      )}
+      </>
     </ScrollView>
   );
 }

@@ -24,18 +24,16 @@ export function ProfessionsScreen({ navigation }: MainTabsScreenProps<'Professio
   const { user } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { businesses, currentEstateId, estates } = useBusinessDirectory();
+  const { businesses } = useBusinessDirectory();
   const { width } = useWindowDimensions();
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const selectedEstate = estates.find((estate) => estate.id === currentEstateId) ?? estates[0];
   const professionListings = useMemo(
     () =>
       businesses
         .filter(
           (business) =>
-            business.estateId === selectedEstate?.id &&
             business.listingType === 'profession' &&
             isPublicBusiness(business),
         )
@@ -43,7 +41,7 @@ export function ProfessionsScreen({ navigation }: MainTabsScreenProps<'Professio
           (leftBusiness, rightBusiness) =>
             getBusinessPriorityScore(rightBusiness) - getBusinessPriorityScore(leftBusiness),
         ),
-    [businesses, selectedEstate?.id],
+    [businesses],
   );
   const availableCategories = useMemo(
     () => ['All', ...new Set(professionListings.map((business) => business.category))],
@@ -95,10 +93,8 @@ export function ProfessionsScreen({ navigation }: MainTabsScreenProps<'Professio
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <View style={styles.hero}>
-              <View style={styles.heroOrbOne} />
-              <View style={styles.heroOrbTwo} />
               <Text style={styles.eyebrow}>Services</Text>
-              <Text style={styles.title}>Find River Park services.</Text>
+              <Text style={styles.title}>Find trusted local services.</Text>
               <Text style={styles.subtitle}>
                 Browse approved service providers. Use customer care if you need help with next
                 steps.
@@ -190,6 +186,11 @@ export function ProfessionsScreen({ navigation }: MainTabsScreenProps<'Professio
             onActionPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
             onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
             onProfilePress={() => {
+              if (!user) {
+                navigation.navigate('AuthPrompt');
+                return;
+              }
+
               if (item.ownerUserId) {
                 navigation.navigate('SellerProfile', { userId: item.ownerUserId });
               }

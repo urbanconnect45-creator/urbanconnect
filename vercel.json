@@ -2,6 +2,19 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run export:web",
   "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "urbanconnectstore.com"
+        }
+      ],
+      "destination": "https://www.view2connect.ng/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/admin-portal",
@@ -12,12 +25,32 @@
       "destination": "/admin-portal/index.html"
     },
     {
+      "source": "/catalog-admin",
+      "destination": "/admin-portal/index.html"
+    },
+    {
+      "source": "/catalog-admin/(.*)",
+      "destination": "/admin-portal/index.html"
+    },
+    {
       "source": "/app",
       "destination": "/app/index.html"
     },
     {
       "source": "/app/(.*)",
       "destination": "/app/index.html"
+    },
+    {
+      "source": "/auth/callback",
+      "destination": "/app/index.html"
+    },
+    {
+      "source": "/seller-portal",
+      "destination": "/seller-portal/index.html"
+    },
+    {
+      "source": "/seller-portal/(.*)",
+      "destination": "/seller-portal/index.html"
     }
   ]
 }

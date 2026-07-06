@@ -3,10 +3,13 @@ import {
   useEffect,
   useContext,
   useMemo,
+  useRef,
   type PropsWithChildren,
 } from 'react';
-import { Linking } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 
+import { isUrbanConnectLocalTestMode } from '../config/runtime';
+import { localTestUsers } from '../data/localTestUsers';
 import { seededAdminUsers } from '../data/mockAdmins';
 import { seededUsers } from '../data/mockUsers';
 import { useBusinessDirectory } from './useBusinessDirectory';
@@ -33,7 +36,9 @@ import {
   setRiverParkVerificationInSupabase,
   sendSupabaseSignupVerificationCode,
   signInWithSupabase,
+  signOutSupabase,
   signUpWithSupabase,
+  syncSupabaseSessionProfile,
   updateSupabaseAuthPassword,
   updateSupabaseUserProfile,
   type SupabaseSession,
@@ -43,6 +48,7 @@ import {
 type AuthContextValue = {
   user: AppUser | null;
   users: AppUser[];
+  supabaseAccessToken?: string;
   demoAccounts: AppUser[];
   adminUser: AdminUser | null;
   adminUsers: AdminUser[];
@@ -193,7 +199,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   } = useBusinessDirectory();
   const [rawStoredUsers, setStoredUsers] = usePersistentState<StoredUser[]>(
     'urbanconnect.users.v2',
-    seededUsers,
+    isUrbanConnectLocalTestMode ? localTestUsers : seededUsers,
   );
   const [storedAdminUsers, setStoredAdminUsers] = usePersistentState<StoredAdminUser[]>(
     'urbanconnect.adminUsers.v1',
@@ -208,6 +214,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     'urbanconnect.supabaseSession.v1',
     null,
   );
+  const oauthCallbackHandledRef = useRef(false);
+  const syncedProfileSessionRef = useRef<string | null>(null);
   const [userProfileOverrides, setUserProfileOverrides] = usePersistentState<
     Record<string, UserProfileOverride>
   >('urbanconnect.userProfileOverrides.v1', {});
@@ -356,18 +364,47 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   useEffect(() => {
+    const accessToken = supabaseSession?.accessToken;
+
+    if (
+      !isSupabaseConfigured ||
+      !accessToken ||
+      !rawUser ||
+      syncedProfileSessionRef.current === accessToken
+    ) {
+      return;
+    }
+
+    syncedProfileSessionRef.current = accessToken;
+    syncSupabaseSessionProfile(accessToken)
+      .then((result) => {
+        cacheStoredUser(result.storedUser);
+        setUser(result.user);
+      })
+      .catch(() => {
+        syncedProfileSessionRef.current = null;
+      });
+  }, [rawUser?.id, supabaseSession?.accessToken]);
+
+  useEffect(() => {
     if (!isSupabaseConfigured) {
       return undefined;
     }
 
     const handleCallbackUrl = (url: string | null) => {
-      if (!url || !url.includes('access_token=')) {
+      if (
+        !url ||
+        !url.includes('access_token=') ||
+        oauthCallbackHandledRef.current
+      ) {
         return;
       }
 
+      oauthCallbackHandledRef.current = true;
       completeSupabaseOAuth(url)
         .then((result) => {
           if (!result) {
+            oauthCallbackHandledRef.current = false;
             return;
           }
 
@@ -375,9 +412,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
           setSupabaseSession(result.session);
           setUser(result.user);
           notifyUserLogin(result.user);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.history.replaceState(
+              null,
+              '',
+              `${window.location.pathname}${window.location.search}`,
+            );
+          }
         })
-        .catch(() => {
-          // Provider setup errors are surfaced by the OAuth page itself.
+        .catch((error) => {
+          oauthCallbackHandledRef.current = false;
+          if (error instanceof Error) {
+            Alert.alert('Login failed', error.message);
+          }
         });
     };
 
@@ -388,6 +435,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     Linking.getInitialURL()
       .then(handleCallbackUrl)
       .catch(() => undefined);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      handleCallbackUrl(window.location.href);
+    }
 
     return () => {
       subscription.remove();
@@ -397,10 +447,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const notifyUserLogin = (loggedInUser: AppUser) => {
     const title = securitySettings.loginAnnouncementEnabled
       ? securitySettings.loginAnnouncementTitle
-      : 'Welcome back to UrbanConnect';
+      : 'Welcome back to View2Connect';
     const body = securitySettings.loginAnnouncementEnabled
       ? securitySettings.loginAnnouncementBody
-      : 'Welcome back to UrbanConnect. You can shop products, find services, and contact customer care inside River Park.';
+      : 'Welcome back to View2Connect. You can shop products, food, and local services.';
 
     appendNotification({
       userId: loggedInUser.id,
@@ -416,15 +466,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const signIn = async (values: SignInFormValues) => {
     if (securitySettings.maintenanceMode) {
-      throw new Error('Customer login is temporarily paused while the marketplace is in maintenance mode.');
+      const requestedRole = values.accountRole;
+      const roleLabel =
+        requestedRole === 'businessOwner'
+          ? 'Store owner'
+          : requestedRole === 'dispatch'
+            ? 'Dispatch'
+            : 'Customer';
+      throw new Error(
+        `${roleLabel} login is temporarily paused while the marketplace is in maintenance mode.`,
+      );
     }
 
     const normalizedIdentifier = normalizeSignInIdentifier(values.identifier);
+    const requestedRole = values.accountRole;
     let remoteLoginError: unknown;
 
     if (isSupabaseConfigured) {
       try {
-        const remoteLogin = await signInWithSupabase(normalizedIdentifier, values.password);
+        const remoteLogin = await signInWithSupabase(
+          normalizedIdentifier,
+          values.password,
+          requestedRole,
+        );
 
         if (!isUserActive(remoteLogin.user.status)) {
           throw new Error('This account is currently suspended or deleted.');
@@ -452,7 +516,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const matchesIdentity =
         normalizedEmail === normalizedIdentifier || normalizedPhone === normalizedIdentifier;
 
-      return matchesIdentity && item.password === values.password;
+      return (
+        matchesIdentity &&
+        item.password === values.password &&
+        (!requestedRole || item.role === requestedRole)
+      );
     });
 
     if (!matchedUser) {
@@ -460,6 +528,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
         throw remoteLoginError instanceof Error
           ? remoteLoginError
           : new Error('Unable to sign in with Supabase right now.');
+      }
+
+      if (requestedRole) {
+        const roleLabel =
+          requestedRole === 'businessOwner'
+            ? 'store owner'
+            : requestedRole === 'dispatch'
+              ? 'dispatch'
+              : 'customer';
+        throw new Error(`No ${roleLabel} account matched those login details.`);
       }
 
       throw new Error('Incorrect email, phone number, or password.');
@@ -508,7 +586,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return 'admin';
     }
 
-    throw new Error('No UrbanConnect account was found for that email or phone number.');
+    throw new Error('No View2Connect account was found for that email or phone number.');
   };
 
   const changePassword = async (currentPassword: string, nextPassword: string) => {
@@ -581,7 +659,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       recipientEmail: user.email,
       audience: user.role,
       title: 'Password changed',
-      body: 'Your UrbanConnect login password was changed from Settings. If this was not you, contact customer care immediately.',
+      body: 'Your View2Connect login password was changed from Settings. If this was not you, contact support immediately.',
       contextType: 'general',
       contextId: `password-change-${user.id}-${Date.now()}`,
     });
@@ -706,11 +784,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         userName: remoteSignup.user.fullName,
         recipientEmail: remoteSignup.user.email,
         audience: remoteSignup.user.role,
-        title: 'Welcome to UrbanConnect',
+        title: 'Welcome to View2Connect',
         body:
           remoteSignup.user.role === 'businessOwner'
-            ? 'Your business owner account has been created. Check your notifications for River Park verification and listing next steps.'
-            : 'Your resident account has been created. You can now shop River Park products, find services, and contact customer care.',
+            ? 'Your email is verified and your seller dashboard is ready. Your store application is waiting for admin review.'
+            : 'Your customer account has been created. You can now shop products, find services, and contact customer care.',
         contextType: 'general',
         contextId: `signup-${remoteSignup.user.id}`,
         createdAt: new Date().toISOString(),
@@ -727,6 +805,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const signOut = () => {
+    const accessToken = supabaseSession?.accessToken;
+
+    if (isSupabaseConfigured && accessToken) {
+      void signOutSupabase(accessToken).catch(() => undefined);
+    }
+
     setSupabaseSession(null);
     setUser(null);
   };
@@ -762,7 +846,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const setAdminAccountActive = (
     adminId: string,
     isActive: boolean,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AdminUser['role'] = 'owner',
   ) => {
     if (!canAdminEditSensitiveData(actorRole)) {
@@ -795,7 +879,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       email: string;
       password: string;
     },
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AdminUser['role'] = 'owner',
   ) => {
     if (!canAdminEditSensitiveData(actorRole)) {
@@ -848,7 +932,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const updateAdminPassword = (
     adminId: string,
     nextPassword: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AdminUser['role'] = 'owner',
     actorAdminId?: string,
   ) => {
@@ -888,7 +972,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const setUserStatus = (
     userId: string,
     status: UserStatus,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AdminUser['role'] = 'owner',
   ) => {
     if (!canAdminEditSensitiveData(actorRole)) {
@@ -928,7 +1012,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const setUserRiverParkVerification = (
     userId: string,
     verified: boolean,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AdminUser['role'] = 'owner',
   ) => {
     if (!canAdminEditSensitiveData(actorRole)) {
@@ -963,8 +1047,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       appendAuditLog(
         actorName,
         actorRole,
-        verified ? 'User River Park verified' : 'User River Park verification revoked',
-        `${matchedUser.fullName} was marked ${verified ? 'verified' : 'pending'} for River Park residency.`,
+        verified ? 'User account verified' : 'User verification revoked',
+        `${matchedUser.fullName} was marked ${verified ? 'verified' : 'pending'} for marketplace access.`,
       );
 
       if (matchedUser.role === 'businessOwner') {
@@ -975,8 +1059,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
           audience: 'businessOwner',
           title: verified ? 'Account verified' : 'Account verification pending',
           body: verified
-            ? 'Your River Park account has been verified. You can now submit listings for customer care approval.'
-            : 'Your River Park verification was moved back to pending. Please contact customer care for more information.',
+            ? 'Your seller account has been verified. You can now submit listings for customer care approval.'
+            : 'Your seller verification was moved back to pending. Please contact customer care for more information.',
           contextType: 'general',
           contextId: matchedUser.id,
         });
@@ -1000,6 +1084,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     () => ({
       user,
       users: storedUsers.map(toAppUser),
+      ...(supabaseSession?.accessToken
+        ? { supabaseAccessToken: supabaseSession.accessToken }
+        : {}),
       demoAccounts: storedUsers
         .filter((storedUser) => storedUser.password === RANDOM_SIGNUP_PASSWORD)
         .slice(0, 6)
@@ -1026,7 +1113,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       findUserById,
       hasAdminPermission,
     }),
-    [adminUser, adminUsers, securitySettings, storedUsers, user, userSecurityPreference],
+    [
+      adminUser,
+      adminUsers,
+      securitySettings,
+      storedUsers,
+      supabaseSession?.accessToken,
+      user,
+      userSecurityPreference,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

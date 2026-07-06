@@ -26,7 +26,7 @@ type CheckoutPayload = {
 
 const defaultPaymentOptions = ['card', 'account', 'banktransfer'];
 const flutterwavePaymentsEndpoint = 'https://api.flutterwave.com/v3/payments';
-const defaultSiteUrl = 'https://urbanconnectstore.com';
+const defaultSiteUrl = 'https://www.view2connect.ng';
 const flutterwaveCheckoutReturnPath = '/payments/flutterwave/return';
 
 const corsHeaders = {
@@ -320,9 +320,9 @@ Deno.serve(async (request: Request) => {
       ...(customerPhone ? { phonenumber: customerPhone } : {}),
     },
     customizations: {
-      title: payload.title?.trim() || 'UrbanConnect payment',
+      title: payload.title?.trim() || 'View2Connect payment',
       description:
-        payload.description?.trim() || 'Complete your UrbanConnect payment with Flutterwave.',
+        payload.description?.trim() || 'Complete your View2Connect payment with Flutterwave.',
     },
     meta: {
       source: 'urbanconnect',

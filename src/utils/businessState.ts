@@ -53,9 +53,14 @@ export function isPublicBusiness(
 export function getBusinessPriorityScore(
   business: Pick<Business, 'subscriptionStatus' | 'subscriptionCycle' | 'verifiedAmount' | 'createdAt'>,
 ) {
+  const hasPaidPlacement = (business.verifiedAmount ?? 0) > 0;
   const paidScore =
-    business.subscriptionStatus === 'paid' || business.subscriptionStatus === 'active' ? 1000 : 0;
-  const planScore = business.subscriptionCycle === 'monthly' ? 200 : 80;
+    business.subscriptionStatus === 'paid'
+      ? 1000
+      : business.subscriptionStatus === 'active' && hasPaidPlacement
+        ? 900
+        : 0;
+  const planScore = hasPaidPlacement ? (business.subscriptionCycle === 'monthly' ? 200 : 80) : 0;
   const amountScore = Math.min(500, Math.round((business.verifiedAmount ?? 0) / 1000));
   const recencyScore = Math.max(0, 100 - Math.floor((Date.now() - new Date(business.createdAt).getTime()) / 86400000));
 

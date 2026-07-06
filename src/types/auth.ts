@@ -1,6 +1,6 @@
 import type { RiverParkCluster } from './business';
 
-export const userRoles = ['resident', 'businessOwner'] as const;
+export const userRoles = ['resident', 'businessOwner', 'dispatch'] as const;
 export type UserRole = (typeof userRoles)[number];
 
 export const userStatuses = ['active', 'suspended'] as const;
@@ -60,6 +60,7 @@ export type StoredAdminUser = AdminUser & {
 export type SignInFormValues = {
   identifier: string;
   password: string;
+  accountRole?: UserRole;
 };
 
 export type AdminSignInFormValues = {

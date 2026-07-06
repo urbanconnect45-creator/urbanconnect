@@ -1,10 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { AppButton } from '../components/AppButton';
+import { AuthPageBackground } from '../components/AuthPageBackground';
+import { AuthVisualPanel } from '../components/AuthVisualPanel';
 import { FormField } from '../components/FormField';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
+import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import {
   privacyPolicySections,
   privacyPolicyTitle,
@@ -17,6 +30,7 @@ import type { LoginScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import type { UserRole } from '../types/auth';
 
 type LoginMode = 'email' | 'phone';
 type PasswordResetState = {
@@ -31,7 +45,7 @@ type PasswordResetAccount = {
   identifier: string;
   recipientEmail: string;
   recipientName: string;
-  recipientType: 'buyer' | 'owner' | 'admin' | 'customerCare';
+  recipientType: 'buyer' | 'owner' | 'admin' | 'customerCare' | 'dispatch';
   accountType: 'user' | 'admin';
 };
 
@@ -53,11 +67,47 @@ function generateVerificationCode() {
   return String(Math.floor(10000000 + Math.random() * 90000000));
 }
 
-export function LoginScreen({ navigation }: LoginScreenProps) {
+type RoleLoginScreenProps = LoginScreenProps & {
+  accountRole?: Extract<UserRole, 'resident' | 'dispatch'>;
+};
+
+function accountCopy(role: Extract<UserRole, 'resident' | 'dispatch'>) {
+  if (role === 'dispatch') {
+    return {
+      title: 'Dispatch login',
+      helper: 'Use your dispatch email or phone number to continue.',
+      visualTitle: 'Delivery work, orders, and confirmations in one place.',
+      visualSubtitle: 'Accept assigned jobs and keep delivery progress organized.',
+      maintenance: 'Dispatch login is paused while the owner keeps the marketplace in maintenance mode.',
+      accountLabel: 'dispatch',
+      createLabel: 'Create dispatch account',
+    };
+  }
+
+  return {
+    title: 'Welcome back',
+    helper: 'Use your email or phone number to continue.',
+    visualTitle: 'Everything nearby, connected in one place.',
+    visualSubtitle: 'Discover products, food, and trusted local sellers from one marketplace.',
+    maintenance: 'Resident login is paused while the owner keeps the marketplace in maintenance mode.',
+    accountLabel: 'customer',
+    createLabel: 'Create user account',
+  };
+}
+
+export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginScreenProps) {
   const { resetPassword, signIn, users } = useAuth();
   const { appendEmailLog, securitySettings } = useBusinessDirectory();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
+  const { width } = useWindowDimensions();
+  const isWideWeb = Platform.OS === 'web' && width >= 900;
+  const isPublicStoreWeb =
+    Platform.OS === 'web' &&
+    ((globalThis as { location?: { pathname?: string } }).location?.pathname ?? '').replace(
+      /\/+$/,
+      '',
+    ) === '';
   const [loginMode, setLoginMode] = useState<LoginMode>('email');
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -72,6 +122,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   const [showAgreement, setShowAgreement] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const copy = accountCopy(accountRole);
 
   const currentIdentifier = loginMode === 'email' ? email.trim() : phoneNumber.trim();
 
@@ -87,7 +138,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
   const validateLoginFields = () => {
     if (securitySettings.maintenanceMode) {
-      return 'Resident login is paused while the owner keeps the marketplace in maintenance mode.';
+      return copy.maintenance;
     }
 
     if (loginMode === 'email' && !looksLikeEmail(currentIdentifier)) {
@@ -116,7 +167,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     try {
       setError(null);
       setIsLoading(true);
-      await signIn({ identifier: currentIdentifier, password });
+      await signIn({ identifier: currentIdentifier, password, accountRole });
     } catch (loginError) {
       const message =
         loginError instanceof Error ? loginError.message : 'Unable to sign in right now.';
@@ -134,18 +185,24 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
     const matchedUser = users.find(
       (account) =>
-        account.email.trim().toLowerCase() === normalizedEmail ||
-        normalizePhone(account.phoneNumber) === normalizedPhone,
+        account.role === accountRole &&
+        (account.email.trim().toLowerCase() === normalizedEmail ||
+          normalizePhone(account.phoneNumber) === normalizedPhone),
     );
 
     if (matchedUser) {
-      return {
-        identifier: matchedUser.email,
-        recipientEmail: matchedUser.email,
-        recipientName: matchedUser.fullName,
-        recipientType: matchedUser.role === 'businessOwner' ? 'owner' : 'buyer',
-        accountType: 'user',
-      };
+        return {
+          identifier: matchedUser.email,
+          recipientEmail: matchedUser.email,
+          recipientName: matchedUser.fullName,
+          recipientType:
+            matchedUser.role === 'businessOwner'
+              ? 'owner'
+              : matchedUser.role === 'dispatch'
+                ? 'dispatch'
+                : 'buyer',
+          accountType: 'user',
+        };
     }
 
     return undefined;
@@ -155,14 +212,14 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     const trimmedIdentifier = resetIdentifier.trim();
 
     if (!looksLikeEmail(trimmedIdentifier) && !looksLikePhone(trimmedIdentifier)) {
-      setResetError('Enter the email or phone number on your UrbanConnect account.');
+      setResetError('Enter the email or phone number on your View2Connect account.');
       return;
     }
 
     const matchedAccount = findPasswordResetAccount(trimmedIdentifier);
 
     if (!matchedAccount) {
-      setResetError('No UrbanConnect account was found for that email or phone number.');
+      setResetError('No View2Connect account was found for that email or phone number.');
       return;
     }
 
@@ -183,8 +240,8 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       recipientType: matchedAccount.recipientType,
       recipientName: matchedAccount.recipientName,
       recipientEmail: matchedAccount.recipientEmail,
-      subject: 'UrbanConnect password reset code',
-      body: `Your UrbanConnect password reset code is ${code}. It expires in 10 minutes.`,
+      subject: 'View2Connect password reset code',
+      body: `Your View2Connect password reset code is ${code}. It expires in 10 minutes.`,
     });
 
     Alert.alert(
@@ -240,124 +297,156 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.hero}>
-        <View style={styles.heroGlowOne} />
-        <View style={styles.heroGlowTwo} />
-        <View style={styles.launchPill}>
-          <Text style={styles.launchPillText}>River Park launch</Text>
-        </View>
-        <Text style={styles.eyebrow}>UrbanConnect</Text>
-        <Text style={styles.title}>Sign in to shop River Park.</Text>
-        <Text style={styles.subtitle}>
-          Buy products, find services, message customer care, and track orders inside the estate.
-        </Text>
-      </View>
-
-      <View style={styles.formCard}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.sectionTitle}>Welcome back</Text>
-          <Text style={styles.helperText}>Use your email or phone number to continue.</Text>
-        </View>
-
-        {securitySettings.maintenanceMode ? (
-          <View style={styles.noticeCard}>
-            <Text style={styles.noticeTitle}>Maintenance mode is active</Text>
-            <Text style={styles.noticeText}>
-              Customer login is temporarily paused. Use the private admin portal on desktop.
-            </Text>
+    <AuthPageBackground
+      contentContainerStyle={[styles.container, isWideWeb && styles.containerWide]}
+    >
+      {isWideWeb ? (
+        <AuthVisualPanel
+          subtitle={copy.visualSubtitle}
+          title={copy.visualTitle}
+          wide
+        />
+      ) : (
+        <View style={styles.mobileBrand}>
+          <UrbanConnectLogo />
+          <View style={styles.mobileCacBadge}>
+            <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
+            <Text style={styles.mobileCacText}>CAC registered</Text>
           </View>
-        ) : null}
-
-        <View style={styles.switchShell}>
-          {(['email', 'phone'] as LoginMode[]).map((mode) => {
-            const isActive = loginMode === mode;
-
-            return (
-              <Pressable
-                key={mode}
-                onPress={() => {
-                  setLoginMode(mode);
-                  setError(null);
-
-                  if (mode === 'email') {
-                    setPhoneNumber('');
-                  } else {
-                    setEmail('');
-                  }
-                }}
-                style={({ pressed }) => [
-                  styles.switchButton,
-                  isActive && styles.switchButtonActive,
-                  pressed && styles.switchButtonPressed,
-                ]}
-              >
-                <Ionicons
-                  color={isActive ? colors.white : colors.primary}
-                  name={mode === 'email' ? 'mail-outline' : 'call-outline'}
-                  size={17}
-                />
-                <Text style={[styles.switchText, isActive && styles.switchTextActive]}>
-                  {mode === 'email' ? 'Email' : 'Phone'}
-                </Text>
-              </Pressable>
-            );
-          })}
         </View>
-        {loginMode === 'email' ? (
-          <FormField
-            autoCapitalize="none"
-            keyboardType="email-address"
-            label="Email"
-            onChangeText={(value) => {
-              setEmail(value);
-            }}
-            placeholder="email@example.com"
-            value={email}
-          />
-        ) : (
-          <FormField
-            keyboardType="phone-pad"
-            label="Phone number"
-            onChangeText={(value) => {
-              setPhoneNumber(value);
-            }}
-            placeholder="+2348000000000"
-            value={phoneNumber}
-          />
-        )}
-        <FormField
-          label="Password"
-          onChangeText={setPassword}
-          placeholder="Enter your password"
-          secureTextEntry
-          value={password}
-        />
+      )}
 
-        <Pressable
-          onPress={() => {
-            setResetIdentifier(currentIdentifier);
-            setShowPasswordReset(true);
-            setResetError(null);
-          }}
-          style={({ pressed }) => [styles.inlineLink, pressed && styles.inlineLinkPressed]}
+      <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
+        <View
+          style={[
+            styles.formCard,
+            !isWideWeb && styles.formCardMobile,
+            isWideWeb && styles.formCardWide,
+          ]}
         >
-          <Text style={styles.inlineLinkText}>Forgot password?</Text>
-        </Pressable>
+          <View style={styles.cardHeader}>
+            <Text style={styles.sectionTitle}>{copy.title}</Text>
+            <Text style={styles.helperText}>{copy.helper}</Text>
+          </View>
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        <AppButton
-          disabled={securitySettings.maintenanceMode}
-          label="Login"
-          loading={isLoading}
-          onPress={() => void handleLogin()}
-        />
-        <Pressable onPress={() => setShowAgreement(true)}>
-          <Text style={styles.agreementText}>
-            By continuing, you agree to the UrbanConnect user agreement and privacy policy.
+          {securitySettings.maintenanceMode ? (
+            <View style={styles.noticeCard}>
+              <Text style={styles.noticeTitle}>Maintenance mode is active</Text>
+              <Text style={styles.noticeText}>
+                Customer login is temporarily paused. Use the private admin portal on desktop.
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={styles.switchShell}>
+            {(['email', 'phone'] as LoginMode[]).map((mode) => {
+              const isActive = loginMode === mode;
+
+              return (
+                <Pressable
+                  key={mode}
+                  onPress={() => {
+                    setLoginMode(mode);
+                    setError(null);
+
+                    if (mode === 'email') {
+                      setPhoneNumber('');
+                    } else {
+                      setEmail('');
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.switchButton,
+                    isActive && styles.switchButtonActive,
+                    pressed && styles.switchButtonPressed,
+                  ]}
+                >
+                  <Ionicons
+                    color={isActive ? colors.white : colors.primary}
+                    name={mode === 'email' ? 'mail-outline' : 'call-outline'}
+                    size={17}
+                  />
+                  <Text style={[styles.switchText, isActive && styles.switchTextActive]}>
+                    {mode === 'email' ? 'Email' : 'Phone'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {loginMode === 'email' ? (
+            <FormField
+              autoCapitalize="none"
+              keyboardType="email-address"
+              label="Email"
+              onChangeText={(value) => {
+                setEmail(value);
+              }}
+              placeholder="email@example.com"
+              value={email}
+            />
+          ) : (
+            <FormField
+              keyboardType="phone-pad"
+              label="Phone number"
+              onChangeText={(value) => {
+                setPhoneNumber(value);
+              }}
+              placeholder="+2348000000000"
+              value={phoneNumber}
+            />
+          )}
+          <FormField
+            label="Password"
+            onChangeText={setPassword}
+            placeholder="Enter your password"
+            secureTextEntry
+            value={password}
+          />
+
+          <Pressable
+            onPress={() => {
+              setResetIdentifier(currentIdentifier);
+              setShowPasswordReset(true);
+              setResetError(null);
+            }}
+            style={({ pressed }) => [styles.inlineLink, pressed && styles.inlineLinkPressed]}
+          >
+            <Text style={styles.inlineLinkText}>Forgot password?</Text>
+          </Pressable>
+
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <AppButton
+            disabled={securitySettings.maintenanceMode}
+            label="Login"
+            loading={isLoading}
+            onPress={() => void handleLogin()}
+          />
+          <Pressable onPress={() => setShowAgreement(true)}>
+            <Text style={styles.agreementText}>
+              By continuing, you agree to the View2Connect user agreement and privacy policy.
+            </Text>
+          </Pressable>
+          <SocialAuthButtons />
+        </View>
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Need an account?</Text>
+          <AppButton
+            label={copy.createLabel}
+            onPress={() => navigation.navigate('Signup')}
+            variant="ghost"
+          />
+          {isPublicStoreWeb ? (
+            <AppButton
+              label="Continue shopping"
+              onPress={() => navigation.navigate('Dashboard')}
+              variant="secondary"
+            />
+          ) : null}
+          <Text style={styles.copyright}>
+            Copyright © 2026 View2Connect. CAC registered. All rights reserved.
           </Text>
-        </Pressable>
-        <SocialAuthButtons />
+        </View>
       </View>
 
       <Modal
@@ -458,86 +547,106 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
         </View>
       </Modal>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Need an account?</Text>
-        <AppButton
-          label="Create account"
-          onPress={() => navigation.navigate('Signup')}
-          variant="ghost"
-        />
-      </View>
-    </ScrollView>
+    </AuthPageBackground>
   );
 }
 
 function createStyles(colors: AppColors) {
   return StyleSheet.create({
     container: {
-      gap: spacing.xl,
-      padding: spacing.lg,
-      paddingTop: spacing.xxl,
+      flexGrow: 1,
+      gap: spacing.md,
+      padding: spacing.md,
+      paddingTop: spacing.lg,
       paddingBottom: spacing.xxl,
     },
-    hero: {
-      position: 'relative',
+    containerWide: {
+      width: '100%',
+      maxWidth: 1240,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      justifyContent: 'center',
+      gap: 0,
+      minHeight: 700,
+      marginVertical: spacing.xl,
+      borderRadius: 14,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.78)',
+      backgroundColor: colors.surface,
+      padding: 0,
       overflow: 'hidden',
-      gap: spacing.sm,
-      borderRadius: radii.xl,
-      backgroundColor: colors.overlay,
-      borderWidth: 1,
-      borderColor: colors.overlayMuted,
-      padding: spacing.xl,
       ...shadows.card,
     },
-    heroGlowOne: {
-      position: 'absolute',
-      top: -30,
-      right: -10,
-      height: 140,
-      width: 140,
-      borderRadius: 999,
-      backgroundColor: 'rgba(224, 122, 71, 0.3)',
+    formColumn: {
+      gap: spacing.md,
+      width: '100%',
+      maxWidth: 540,
+      alignSelf: 'center',
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.82)',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      padding: spacing.md,
+      ...shadows.card,
     },
-    heroGlowTwo: {
-      position: 'absolute',
-      bottom: -40,
-      left: -20,
-      height: 160,
-      width: 160,
-      borderRadius: 999,
-      backgroundColor: 'rgba(26, 106, 82, 0.34)',
-    },
-    eyebrow: {
-      ...typography.eyebrow,
-      color: '#D7EAE2',
-    },
-    launchPill: {
-      alignSelf: 'flex-start',
-      borderRadius: radii.pill,
-      backgroundColor: colors.overlayMuted,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
-    },
-    launchPillText: {
-      ...typography.caption,
-      color: colors.white,
-    },
-    title: {
-      ...typography.title,
-      color: colors.white,
-    },
-    subtitle: {
-      ...typography.body,
-      color: '#D6DFE2',
+    formColumnWide: {
+      flex: 1,
+      width: 'auto',
+      maxWidth: 620,
+      minWidth: 0,
+      justifyContent: 'center',
+      alignSelf: 'stretch',
+      borderWidth: 0,
+      borderRadius: 0,
+      backgroundColor: colors.surface,
+      padding: spacing.lg,
+      shadowOpacity: 0,
+      elevation: 0,
     },
     formCard: {
       gap: spacing.md,
-      borderRadius: radii.xl,
-      backgroundColor: colors.surface,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      padding: 0,
+    },
+    formCardWide: {
+      justifyContent: 'center',
+      borderWidth: 0,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      padding: 0,
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    formCardMobile: {
+      borderRadius: 0,
+      padding: 0,
+    },
+    mobileBrand: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.xs,
+    },
+    mobileCacBadge: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.lg,
-      ...shadows.card,
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+      paddingHorizontal: spacing.sm,
+    },
+    mobileCacText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
     },
     cardHeader: {
       gap: 4,
@@ -723,6 +832,12 @@ function createStyles(colors: AppColors) {
     footerText: {
       ...typography.body,
       color: colors.textMuted,
+    },
+    copyright: {
+      ...typography.caption,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginTop: spacing.sm,
     },
   });
 }

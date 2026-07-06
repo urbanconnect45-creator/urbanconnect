@@ -1,9 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { AppButton } from '../components/AppButton';
+import { AuthPageBackground } from '../components/AuthPageBackground';
+import { AuthVisualPanel } from '../components/AuthVisualPanel';
 import { FormField } from '../components/FormField';
+import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import { estates } from '../data/estates';
 import {
   privacyPolicySections,
@@ -17,9 +30,8 @@ import type { SignupScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import type { SignUpFormValues, UserRole } from '../types/auth';
-import { riverParkClusters, type RiverParkCluster } from '../types/business';
-import { createRandomSignupForm } from '../utils/randomSignup';
+import type { SignUpFormValues } from '../types/auth';
+import { riverParkClusters } from '../types/business';
 
 function isValidEmail(value: string) {
   return /\S+@\S+\.\S+/.test(value);
@@ -46,48 +58,26 @@ function initialForm(): SignUpFormValues {
   };
 }
 
-type RoleCardProps = {
-  active: boolean;
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
-  helper: string;
-};
-
 type SignupVerificationState = {
   email: string;
   recipientName: string;
   expiresAt: number;
 };
 
-function RoleCard({ active, helper, icon, label, onPress }: RoleCardProps) {
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.roleCard,
-        active && styles.roleCardActive,
-        pressed && styles.roleCardPressed,
-      ]}
-    >
-      <View style={[styles.roleIconShell, active && styles.roleIconShellActive]}>
-        <Ionicons color={active ? colors.white : colors.primary} name={icon} size={20} />
-      </View>
-      <Text style={[styles.roleTitle, active && styles.roleTitleActive]}>{label}</Text>
-      <Text style={[styles.roleHelper, active && styles.roleHelperActive]}>{helper}</Text>
-    </Pressable>
-  );
-}
-
 export function SignupScreen({ navigation }: SignupScreenProps) {
   const { requestSignUpVerification, signUp } = useAuth();
   const { appendEmailLog, securitySettings } = useBusinessDirectory();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const [form, setForm] = useState<SignUpFormValues>(initialForm());
+  const { width } = useWindowDimensions();
+  const isWideWeb = Platform.OS === 'web' && width >= 900;
+  const isPublicStoreWeb =
+    Platform.OS === 'web' &&
+    ((globalThis as { location?: { pathname?: string } }).location?.pathname ?? '').replace(
+      /\/+$/,
+      '',
+    ) === '';
+  const [form, setForm] = useState<SignUpFormValues>(initialForm);
   const [acceptedAgreement, setAcceptedAgreement] = useState(false);
   const [showAgreement, setShowAgreement] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +85,12 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
   const [signupStep, setSignupStep] = useState<'details' | 'verification'>('details');
   const [verification, setVerification] = useState<SignupVerificationState | null>(null);
   const [verificationCodeDraft, setVerificationCodeDraft] = useState('');
+
+  const signupAudienceLabel = 'user';
+  const signupTitle = 'Create your user account.';
+  const signupSubtitle =
+    'Sign up with your personal details to shop approved products, discover food, and track orders.';
+  const verificationTitle = 'Verify your email.';
 
   const updateField = <K extends keyof SignUpFormValues>(key: K, value: SignUpFormValues[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -104,28 +100,14 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
     setError(null);
   };
 
-  const fillRandomAccount = (role: UserRole) => {
-    setForm(createRandomSignupForm(role));
-    setAcceptedAgreement(true);
-    setSignupStep('details');
-    setVerification(null);
-    setVerificationCodeDraft('');
-    setError(null);
-  };
-
-  const signupsAllowedForRole =
-    form.role === 'resident'
-      ? securitySettings.allowResidentSignups
-      : securitySettings.allowBusinessOwnerSignups;
+  const signupsAllowedForRole = securitySettings.allowResidentSignups;
 
   const validateSignupForm = () => {
     if (securitySettings.maintenanceMode) {
       return 'Signup is paused while the marketplace is in maintenance mode.';
     }
     if (!signupsAllowedForRole) {
-      return form.role === 'resident'
-        ? 'Resident signup is currently paused by the owner.'
-        : 'Business owner signup is currently paused by the owner.';
+      return 'User signup is currently paused by the owner.';
     }
     if (!form.firstName.trim()) {
       return 'First name is required.';
@@ -145,11 +127,8 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
     if (form.password !== form.confirmPassword) {
       return 'Passwords do not match.';
     }
-    if (form.role === 'businessOwner' && !form.businessName.trim()) {
-      return 'Business name is required for business owners.';
-    }
     if (!acceptedAgreement) {
-      return 'Please accept the UrbanConnect user agreement to continue.';
+      return 'Please accept the View2Connect user agreement to continue.';
     }
 
     return null;
@@ -179,7 +158,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
         recipientType: form.role === 'businessOwner' ? 'owner' : 'buyer',
         recipientName: fullName,
         recipientEmail: email,
-        subject: 'UrbanConnect signup verification code',
+        subject: 'View2Connect signup verification code',
         body: 'A Supabase one-time signup verification code was sent to this email address. It expires shortly.',
       });
 
@@ -249,154 +228,152 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
 
   if (signupStep === 'verification' && activeVerification) {
     return (
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View style={styles.heroGlowOne} />
-          <View style={styles.heroGlowTwo} />
-          <View style={styles.launchPill}>
-            <Text style={styles.launchPillText}>Email sent</Text>
+      <AuthPageBackground
+        contentContainerStyle={[styles.container, isWideWeb && styles.containerWide]}
+      >
+        {isWideWeb ? (
+          <AuthVisualPanel
+            subtitle="Your account stays protected while you shop, pay, and track every order."
+            title="One quick verification, then you are connected."
+            wide
+          />
+        ) : (
+          <View style={styles.mobileBrand}>
+            <UrbanConnectLogo />
+            <View style={styles.mobileCacBadge}>
+              <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
+              <Text style={styles.mobileCacText}>CAC registered</Text>
+            </View>
           </View>
-          <Text style={styles.eyebrow}>Verify email</Text>
-          <Text style={styles.title}>Enter the code sent to your inbox.</Text>
-          <Text style={styles.subtitle}>
-            {activeVerification.email} must be verified before UrbanConnect creates the account.
-          </Text>
-        </View>
+        )}
 
-        <View style={styles.formCard}>
-          <View style={styles.verificationHeader}>
-            <Ionicons color={colors.primary} name="mail-outline" size={22} />
-            <View style={styles.verificationCopy}>
-              <Text style={styles.noticeTitle}>Signup verification</Text>
-              <Text style={styles.noticeCopy}>
-                The account for {activeVerification.recipientName || activeVerification.email} will
-                only be created after this code is accepted.
-              </Text>
+        <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
+          <View
+            style={[
+              styles.formCard,
+              !isWideWeb && styles.formCardMobile,
+              isWideWeb && styles.formCardWide,
+            ]}
+          >
+            <View style={styles.verificationHeader}>
+              <Ionicons color={colors.primary} name="mail-outline" size={22} />
+              <View style={styles.verificationCopy}>
+                <Text style={styles.sectionTitle}>{verificationTitle}</Text>
+                <Text style={styles.noticeCopy}>
+                  {activeVerification.email} must be verified before View2Connect creates the
+                  account.
+                </Text>
+              </View>
+            </View>
+
+            <FormField
+              helper="Enter exactly the 8 numbers from the email. Do not enter a link or extra characters."
+              keyboardType="number-pad"
+              label="Verification code"
+              maxLength={verificationCodeLength}
+              onChangeText={(value) =>
+                setVerificationCodeDraft(value.replace(/\D/g, '').slice(0, verificationCodeLength))
+              }
+              placeholder="00000000"
+              value={verificationCodeDraft}
+            />
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <AppButton
+              disabled={verificationCodeDraft.trim().length < verificationCodeLength}
+              label="Create account"
+              loading={isLoading}
+              onPress={() => void handleSignup()}
+            />
+
+            <View style={styles.verificationActionRow}>
+              <Pressable
+                onPress={() => void handleRequestVerification()}
+                style={({ pressed }) => [styles.policyLink, pressed && styles.agreementRowPressed]}
+              >
+                <Text style={styles.policyLinkText}>Resend code</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setSignupStep('details');
+                  setError(null);
+                }}
+                style={({ pressed }) => [styles.policyLink, pressed && styles.agreementRowPressed]}
+              >
+                <Text style={styles.policyLinkText}>Edit signup details</Text>
+              </Pressable>
             </View>
           </View>
 
-          <FormField
-            helper="Enter exactly the 8 numbers from the email. Do not enter a link or extra characters."
-            keyboardType="number-pad"
-            label="Verification code"
-            maxLength={verificationCodeLength}
-            onChangeText={(value) =>
-              setVerificationCodeDraft(value.replace(/\D/g, '').slice(0, verificationCodeLength))
-            }
-            placeholder="00000000"
-            value={verificationCodeDraft}
-          />
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-          <AppButton
-            disabled={verificationCodeDraft.trim().length < verificationCodeLength}
-            label="Create account"
-            loading={isLoading}
-            onPress={() => void handleSignup()}
-          />
-
-          <View style={styles.verificationActionRow}>
-            <Pressable
-              onPress={() => void handleRequestVerification()}
-              style={({ pressed }) => [styles.policyLink, pressed && styles.agreementRowPressed]}
-            >
-              <Text style={styles.policyLinkText}>Resend code</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                setSignupStep('details');
-                setError(null);
-              }}
-              style={({ pressed }) => [styles.policyLink, pressed && styles.agreementRowPressed]}
-            >
-              <Text style={styles.policyLinkText}>Edit signup details</Text>
-            </Pressable>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account?</Text>
+            <AppButton label="Back to login" onPress={() => navigation.goBack()} variant="ghost" />
+            {isPublicStoreWeb ? (
+              <AppButton
+                label="Continue shopping"
+                onPress={() => navigation.navigate('Dashboard')}
+                variant="secondary"
+              />
+            ) : null}
+            <Text style={styles.copyright}>
+              Copyright © 2026 View2Connect. CAC registered. All rights reserved.
+            </Text>
           </View>
         </View>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Already have an account?</Text>
-          <AppButton label="Back to login" onPress={() => navigation.goBack()} variant="ghost" />
-        </View>
-      </ScrollView>
+      </AuthPageBackground>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <View style={styles.heroGlowOne} />
-        <View style={styles.heroGlowTwo} />
-        <View style={styles.launchPill}>
-          <Text style={styles.launchPillText}>River Park access</Text>
+    <AuthPageBackground
+      contentContainerStyle={[styles.container, isWideWeb && styles.containerWide]}
+    >
+      {isWideWeb ? (
+        <AuthVisualPanel
+          subtitle="Create one account for products, food, secure checkout, receipts, and delivery updates."
+          title="Join the marketplace built for everyday local shopping."
+          wide
+        />
+      ) : (
+        <View style={styles.mobileBrand}>
+          <UrbanConnectLogo />
+          <View style={styles.mobileCacBadge}>
+            <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
+            <Text style={styles.mobileCacText}>CAC registered</Text>
+          </View>
         </View>
-        <Text style={styles.eyebrow}>Create account</Text>
-        <Text style={styles.title}>Join as a buyer or business owner.</Text>
-        <Text style={styles.subtitle}>
-          Sign up with your personal details first. If you choose the business icon, we also ask
-          for your business name and River Park cluster. Every field is required before the email
-          code is sent.
-        </Text>
-      </View>
+      )}
 
-      <View style={styles.formCard}>
-        <Text style={styles.sectionTitle}>Choose account type</Text>
-        <View style={styles.roleGrid}>
-          <RoleCard
-            active={form.role === 'resident'}
-            helper="Shop products, order delivery, and message customer care."
-            icon="person-outline"
-            label="Resident"
-            onPress={() => updateField('role', 'resident')}
-          />
-          <RoleCard
-            active={form.role === 'businessOwner'}
-            helper="List products or services inside River Park."
-            icon="storefront-outline"
-            label="Business"
-            onPress={() => updateField('role', 'businessOwner')}
-          />
-        </View>
-
-        <View style={styles.randomFillRow}>
-          {[
-            { icon: 'person-add-outline' as const, label: 'Random resident', role: 'resident' as const },
-            { icon: 'briefcase-outline' as const, label: 'Random business', role: 'businessOwner' as const },
-          ].map((option) => (
-            <Pressable
-              key={option.role}
-              onPress={() => fillRandomAccount(option.role)}
-              style={({ pressed }) => [
-                styles.randomFillButton,
-                pressed && styles.randomFillButtonPressed,
-              ]}
-            >
-              <Ionicons color={colors.primary} name={option.icon} size={18} />
-              <Text style={styles.randomFillText}>{option.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>
-            {securitySettings.maintenanceMode
-              ? 'Marketplace maintenance is active'
-              : signupsAllowedForRole
-                ? 'Signup is open for this role'
+      <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
+        <View
+          style={[
+            styles.formCard,
+            !isWideWeb && styles.formCardMobile,
+            isWideWeb && styles.formCardWide,
+          ]}
+        >
+          <View style={styles.signupHeading}>
+            <Text style={styles.sectionTitle}>{signupTitle}</Text>
+            <Text style={styles.noticeCopy}>{signupSubtitle}</Text>
+          </View>
+        {securitySettings.maintenanceMode || !signupsAllowedForRole ? (
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeTitle}>
+              {securitySettings.maintenanceMode
+                ? 'Marketplace maintenance is active'
                 : 'Signup is paused for this role'}
-          </Text>
-          <Text style={styles.noticeCopy}>
-            {securitySettings.maintenanceMode
-              ? 'The owner has temporarily paused signup while system work is being completed.'
-              : signupsAllowedForRole
-                ? `New ${form.role === 'resident' ? 'resident' : 'business owner'} accounts can still be created inside River Park.`
-                : `The owner has temporarily disabled new ${form.role === 'resident' ? 'resident' : 'business owner'} registrations.`}
-          </Text>
-        </View>
+            </Text>
+            <Text style={styles.noticeCopy}>
+              {securitySettings.maintenanceMode
+                ? 'Signup is temporarily paused while system work is completed.'
+                : `New ${signupAudienceLabel} registrations are temporarily disabled.`}
+            </Text>
+          </View>
+        ) : null}
 
-        <View style={styles.inlineFieldRow}>
-          <View style={styles.inlineField}>
+        <View style={styles.signupFieldsGrid}>
+          <View style={styles.signupField}>
             <FormField
               label="First name"
               onChangeText={(value) => updateField('firstName', value)}
@@ -404,7 +381,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               value={form.firstName}
             />
           </View>
-          <View style={styles.inlineField}>
+          <View style={styles.signupField}>
             <FormField
               label="Last name"
               onChangeText={(value) => updateField('lastName', value)}
@@ -412,74 +389,49 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               value={form.lastName}
             />
           </View>
+          <View style={styles.signupField}>
+            <FormField
+              keyboardType="phone-pad"
+              label="Phone number"
+              onChangeText={(value) => updateField('phoneNumber', value)}
+              placeholder="0800 123 4567"
+              value={form.phoneNumber}
+            />
+          </View>
+          <View style={styles.signupField}>
+            <FormField
+              autoCapitalize="none"
+              keyboardType="email-address"
+              label="Email"
+              onChangeText={(value) => updateField('email', value)}
+              placeholder="Email address"
+              value={form.email}
+            />
+          </View>
+          <View style={styles.signupField}>
+            <FormField
+              label="Password"
+              onChangeText={(value) => updateField('password', value)}
+              placeholder="Password"
+              secureTextEntry
+              value={form.password}
+            />
+          </View>
+          <View style={styles.signupField}>
+            <FormField
+              label="Confirm password"
+              onChangeText={(value) => updateField('confirmPassword', value)}
+              placeholder="Repeat"
+              secureTextEntry
+              value={form.confirmPassword}
+            />
+          </View>
         </View>
 
-        <FormField
-          keyboardType="phone-pad"
-          label="Phone number"
-          onChangeText={(value) => updateField('phoneNumber', value)}
-          placeholder="+2348001234567"
-          value={form.phoneNumber}
-        />
-        <FormField
-          autoCapitalize="none"
-          keyboardType="email-address"
-          label="Email"
-          onChangeText={(value) => updateField('email', value)}
-          placeholder="you@example.com"
-          value={form.email}
-        />
-        {form.role === 'businessOwner' ? (
-          <View style={styles.businessSection}>
-            <FormField
-              label="Business name"
-              onChangeText={(value) => updateField('businessName', value)}
-              placeholder="SwiftFix River Park"
-              value={form.businessName}
-            />
-            <View style={styles.clusterWrap}>
-              {riverParkClusters.map((cluster) => {
-                const isActive = form.businessCluster === cluster;
-
-                return (
-                  <Pressable
-                    key={cluster}
-                    onPress={() => updateField('businessCluster', cluster as RiverParkCluster)}
-                    style={({ pressed }) => [
-                      styles.clusterChip,
-                      isActive && styles.clusterChipActive,
-                      pressed && styles.clusterChipPressed,
-                    ]}
-                  >
-                    <Text style={[styles.clusterChipText, isActive && styles.clusterChipTextActive]}>
-                      {cluster}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
-        <FormField
-          label="Password"
-          onChangeText={(value) => updateField('password', value)}
-          placeholder="Create a password"
-          secureTextEntry
-          value={form.password}
-        />
-        <FormField
-          label="Confirm password"
-          onChangeText={(value) => updateField('confirmPassword', value)}
-          placeholder="Repeat your password"
-          secureTextEntry
-          value={form.confirmPassword}
-        />
-
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>{estates[0]?.name ?? 'River Park Estate'}</Text>
+          <Text style={styles.noticeTitle}>{estates[0]?.name ?? 'View2Connect Marketplace'}</Text>
           <Text style={styles.noticeCopy}>
-            Signups are still limited to River Park while the marketplace rollout stays focused.
+            Your customer account can be used to browse stores, place orders, and track delivery.
           </Text>
         </View>
 
@@ -498,7 +450,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
             ) : null}
           </View>
           <Text style={styles.agreementText}>
-            I agree to the UrbanConnect user agreement, privacy policy, and marketplace rules.
+            I agree to the View2Connect user agreement, privacy policy, and marketplace rules.
           </Text>
         </Pressable>
         <Pressable
@@ -515,6 +467,22 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
           loading={isLoading}
           onPress={() => void handleRequestVerification()}
         />
+        </View>
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Already have an account?</Text>
+          <AppButton label="Back to login" onPress={() => navigation.goBack()} variant="ghost" />
+          {isPublicStoreWeb ? (
+            <AppButton
+              label="Continue shopping"
+              onPress={() => navigation.navigate('Dashboard')}
+              variant="secondary"
+            />
+          ) : null}
+          <Text style={styles.copyright}>
+            Copyright © 2026 View2Connect. CAC registered. All rights reserved.
+          </Text>
+        </View>
       </View>
 
       <Modal
@@ -550,142 +518,149 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
         </View>
       </Modal>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Already have an account?</Text>
-        <AppButton label="Back to login" onPress={() => navigation.goBack()} variant="ghost" />
-      </View>
-    </ScrollView>
+    </AuthPageBackground>
   );
 }
 
 function createStyles(colors: AppColors) {
   return StyleSheet.create({
     container: {
-      gap: spacing.xl,
-      padding: spacing.lg,
-      paddingTop: spacing.xxl,
+      flexGrow: 1,
+      gap: spacing.md,
+      padding: spacing.md,
+      paddingTop: spacing.lg,
       paddingBottom: spacing.xxl,
     },
-    header: {
-      position: 'relative',
+    containerWide: {
+      width: '100%',
+      maxWidth: 1240,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      justifyContent: 'center',
+      gap: 0,
+      minHeight: 700,
+      marginVertical: spacing.xl,
+      borderRadius: 14,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.78)',
+      backgroundColor: colors.surface,
+      padding: 0,
       overflow: 'hidden',
-      gap: spacing.sm,
-      borderRadius: radii.xl,
-      backgroundColor: colors.overlay,
-      borderWidth: 1,
-      borderColor: colors.overlayMuted,
-      padding: spacing.xl,
       ...shadows.card,
     },
-    heroGlowOne: {
-      position: 'absolute',
-      top: -28,
-      right: -10,
-      height: 144,
-      width: 144,
-      borderRadius: 999,
-      backgroundColor: 'rgba(240, 132, 92, 0.28)',
+    formColumn: {
+      width: '100%',
+      maxWidth: 620,
+      alignSelf: 'center',
+      gap: spacing.md,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.82)',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      padding: spacing.md,
+      ...shadows.card,
     },
-    heroGlowTwo: {
-      position: 'absolute',
-      bottom: -46,
-      left: -16,
-      height: 156,
-      width: 156,
-      borderRadius: 999,
-      backgroundColor: 'rgba(58, 144, 158, 0.24)',
-    },
-    launchPill: {
-      alignSelf: 'flex-start',
-      borderRadius: radii.pill,
-      backgroundColor: colors.overlayMuted,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
-    },
-    launchPillText: {
-      ...typography.caption,
-      color: colors.white,
-    },
-    eyebrow: {
-      ...typography.eyebrow,
-      color: '#D7EAE2',
-    },
-    title: {
-      ...typography.title,
-      color: colors.white,
-    },
-    subtitle: {
-      ...typography.body,
-      color: '#D6DFE2',
+    formColumnWide: {
+      flex: 1,
+      width: 'auto',
+      maxWidth: 620,
+      minWidth: 0,
+      justifyContent: 'center',
+      alignSelf: 'stretch',
+      borderWidth: 0,
+      borderRadius: 0,
+      backgroundColor: colors.surface,
+      padding: spacing.lg,
+      shadowOpacity: 0,
+      elevation: 0,
     },
     formCard: {
       gap: spacing.md,
-      borderRadius: radii.xl,
-      backgroundColor: colors.surface,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      padding: 0,
+    },
+    formCardWide: {
+      justifyContent: 'center',
+      borderWidth: 0,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+      padding: 0,
+      shadowOpacity: 0,
+      elevation: 0,
+      gap: spacing.md,
+    },
+    formCardMobile: {
+      borderRadius: 0,
+      gap: spacing.md,
+      padding: 0,
+    },
+    mobileBrand: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.xs,
+    },
+    mobileCacBadge: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.lg,
-      ...shadows.card,
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+      paddingHorizontal: spacing.sm,
+    },
+    mobileCacText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
+    },
+    signupHeading: {
+      gap: 4,
     },
     sectionTitle: {
       ...typography.section,
       color: colors.text,
     },
-    roleGrid: {
+    signupTypeBanner: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
+      alignItems: 'flex-start',
       gap: spacing.md,
-    },
-    roleCard: {
-      flex: 1,
-      minWidth: 180,
-      gap: spacing.sm,
       borderRadius: radii.xl,
       borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      padding: spacing.md,
-    },
-    roleCardActive: {
       borderColor: colors.primary,
       backgroundColor: colors.primarySoft,
+      padding: spacing.md,
     },
-    roleCardPressed: {
-      opacity: 0.92,
-    },
-    roleIconShell: {
+    signupTypeIcon: {
       alignItems: 'center',
       justifyContent: 'center',
-      height: 44,
-      width: 44,
-      borderRadius: 22,
-      backgroundColor: colors.surface,
-    },
-    roleIconShellActive: {
+      height: 46,
+      width: 46,
+      borderRadius: 23,
       backgroundColor: colors.primary,
     },
-    roleTitle: {
-      ...typography.subtitle,
-      color: colors.text,
+    signupTypeCopy: {
+      flex: 1,
+      gap: 4,
     },
-    roleTitleActive: {
-      color: colors.primary,
-    },
-    roleHelper: {
-      ...typography.caption,
-      color: colors.textMuted,
-    },
-    roleHelperActive: {
-      color: colors.primary,
-    },
-    inlineFieldRow: {
+    signupFieldsGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      gap: spacing.md,
+      columnGap: spacing.md,
+      rowGap: spacing.lg,
     },
-    inlineField: {
-      flex: 1,
-      minWidth: 180,
+    signupField: {
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: '45%',
+      minWidth: '45%',
     },
     randomFillRow: {
       flexDirection: 'row',
@@ -713,41 +688,6 @@ function createStyles(colors: AppColors) {
     randomFillText: {
       ...typography.bodyStrong,
       color: colors.primary,
-    },
-    businessSection: {
-      gap: spacing.md,
-      borderRadius: radii.xl,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.md,
-    },
-    clusterWrap: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.sm,
-    },
-    clusterChip: {
-      borderRadius: radii.pill,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-    },
-    clusterChipActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primary,
-    },
-    clusterChipPressed: {
-      opacity: 0.92,
-    },
-    clusterChipText: {
-      ...typography.bodyStrong,
-      color: colors.text,
-    },
-    clusterChipTextActive: {
-      color: colors.white,
     },
     noticeCard: {
       gap: spacing.xs,
@@ -885,6 +825,12 @@ function createStyles(colors: AppColors) {
     footerText: {
       ...typography.body,
       color: colors.textMuted,
+    },
+    copyright: {
+      ...typography.caption,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginTop: spacing.sm,
     },
   });
 }

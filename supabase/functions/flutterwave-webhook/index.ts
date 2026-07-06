@@ -624,5 +624,5 @@ serve(async (request) => {
     );
   }
 
-  return jsonResponse({ status: 'ignored', reference, reason: 'No matching UrbanConnect payment.' });
+  return jsonResponse({ status: 'ignored', reference, reason: 'No matching View2Connect payment.' });
 });

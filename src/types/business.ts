@@ -19,12 +19,13 @@ export type PaymentPlan = {
 };
 
 export const productCategories = [
-  'Food & Drinks',
-  'Groceries',
+  'Food',
+  'Drinks',
   'Electronics',
   'Beauty',
   'Fashion',
   'Home Essentials',
+  'Infant',
 ] as const;
 
 export const professionCategories = [
@@ -149,6 +150,22 @@ export type BusinessProfileFormValues = {
   galleryImages: string;
   galleryVideos: string;
   services: string;
+  foodAllergies: string;
+  foodExtras: string;
+  preparationTime: string;
+  portionSize: string;
+};
+
+export type CentralCatalogProductValues = {
+  name: string;
+  category: BusinessCategory;
+  price: string;
+  description: string;
+  image: string;
+  hasBarcode: boolean;
+  barcode: string;
+  hasSize: boolean;
+  size: string;
 };
 
 export type OwnerBusinessProfileValues = {
@@ -176,7 +193,25 @@ export type OwnerBusinessProfile = OwnerBusinessProfileValues & {
   subscriptionNextBillingAt?: string;
   subscriptionItemCount?: number;
   riverParkVerified?: boolean;
+  payoutBankCode?: string;
+  payoutBankName?: string;
+  payoutAccountNumber?: string;
+  payoutAccountName?: string;
+  payoutVerifiedAt?: string;
   updatedAt: string;
+};
+
+export type FlutterwaveBank = {
+  code: string;
+  name: string;
+};
+
+export type VerifiedSellerPayoutAccount = {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  verifiedAt: string;
 };
 
 export type SubscriptionPaymentStatus = 'pending' | 'paid' | 'failed';
@@ -198,14 +233,20 @@ export type SubscriptionPayment = {
   updatedAt: string;
 };
 
-export type SupportSenderRole = 'resident' | 'businessOwner' | 'customerCare' | 'owner' | 'system';
+export type SupportSenderRole =
+  | 'resident'
+  | 'businessOwner'
+  | 'dispatch'
+  | 'customerCare'
+  | 'owner'
+  | 'system';
 
 export type SupportMessage = {
   id: string;
   conversationId: string;
   userId: string;
   userName: string;
-  userRole: 'resident' | 'businessOwner';
+  userRole: 'resident' | 'businessOwner' | 'dispatch';
   senderName: string;
   senderRole: SupportSenderRole;
   text: string;
@@ -219,12 +260,12 @@ export type SupportConversation = {
   id: string;
   userId: string;
   userName: string;
-  userRole: 'resident' | 'businessOwner';
+  userRole: 'resident' | 'businessOwner' | 'dispatch';
   messages: SupportMessage[];
   lastMessage: SupportMessage;
 };
 
-export type AppNotificationAudience = 'resident' | 'businessOwner';
+export type AppNotificationAudience = 'resident' | 'businessOwner' | 'dispatch';
 
 export type AppNotification = {
   id: string;
@@ -324,6 +365,37 @@ export type Order = {
   inventoryRestoredAt?: string;
 };
 
+export type DispatchDeliveryJobStatus =
+  | 'available'
+  | 'accepted'
+  | 'pickedUp'
+  | 'awaitingBuyerConfirmation'
+  | 'completed'
+  | 'cancelled';
+
+export type DispatchDeliveryJob = {
+  id: string;
+  orderId: string;
+  sellerKey: string;
+  sellerUserId?: string | null;
+  sellerName: string;
+  sellerType: 'storeOwner' | 'individualSeller';
+  pickupAddress: string;
+  deliveryAddress: string;
+  itemSubtotal: number;
+  deliveryFee: number;
+  status: DispatchDeliveryJobStatus;
+  riderUserId?: string | null;
+  sellerReleaseStatus: 'held' | 'available' | 'payoutPending' | 'paid';
+  acceptedAt?: string | null;
+  pickedUpAt?: string | null;
+  riderConfirmedAt?: string | null;
+  buyerConfirmedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type OrderProgressSettings = {
   code: string;
   updatedAt: string;
@@ -362,7 +434,7 @@ export type SecuritySettings = {
 
 export type AuditActorRole = 'system' | 'owner' | 'customerCare' | 'businessOwner';
 
-export type AutomatedEmailRecipient = 'buyer' | 'owner' | 'admin' | 'customerCare';
+export type AutomatedEmailRecipient = 'buyer' | 'owner' | 'dispatch' | 'admin' | 'customerCare';
 export type AutomatedEmailStatus = 'queued' | 'sent';
 
 export type AutomatedEmailLog = {
@@ -413,7 +485,7 @@ export type DynamicDepositAccount = {
   userId: string;
   userName: string;
   userEmail: string;
-  userRole: 'resident' | 'businessOwner';
+  userRole: 'resident' | 'businessOwner' | 'dispatch';
   provider: VirtualAccountProvider;
   providerReference: string;
   bankName: string;

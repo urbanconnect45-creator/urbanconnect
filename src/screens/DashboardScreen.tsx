@@ -18,6 +18,8 @@ import type { MainTabsScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { productCategories } from '../types/business';
+import { normalizeProductCategory } from '../utils/category';
 import { formatNumber } from '../utils/format';
 import { getBusinessPriorityScore, isPublicBusiness } from '../utils/businessState';
 
@@ -25,32 +27,38 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
   const { user } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { businesses, currentEstateId, estates, addToCart, isBusinessOwnedByUser } =
-    useBusinessDirectory();
+  const { businesses, addToCart, isBusinessOwnedByUser } = useBusinessDirectory();
   const { width } = useWindowDimensions();
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const isMobile = width < 780;
 
-  const selectedEstate = estates.find((estate) => estate.id === currentEstateId) ?? estates[0];
   const productListings = useMemo(
     () =>
       businesses
         .filter(
           (business) =>
-            business.estateId === selectedEstate?.id &&
             business.listingType === 'product' &&
             isPublicBusiness(business),
         )
+        .map((business) => ({
+          ...business,
+          category: normalizeProductCategory(
+            business.category,
+            business.name,
+            business.description,
+            business.longDescription,
+          ),
+        }))
         .sort(
           (leftBusiness, rightBusiness) =>
             getBusinessPriorityScore(rightBusiness) - getBusinessPriorityScore(leftBusiness),
         ),
-    [businesses, selectedEstate?.id],
+    [businesses],
   );
   const availableCategories = useMemo(
-    () => ['All', ...new Set(productListings.map((business) => business.category))],
-    [productListings],
+    () => ['All', ...productCategories],
+    [],
   );
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -70,9 +78,7 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
             business.name,
             business.description,
             business.category,
-            business.ownerName,
             business.address,
-            business.cluster,
           ]
             .join(' ')
             .toLowerCase()
@@ -90,26 +96,24 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No products match that search yet.</Text>
             <Text style={styles.emptyText}>
-              Try another category or search by seller, cluster, or item name.
+              Try another category or search by item name.
             </Text>
           </View>
         }
         ListHeaderComponent={
           <View style={styles.headerContent}>
-            <View style={styles.hero}>
-              <View style={styles.heroOrbOne} />
-              <View style={styles.heroOrbTwo} />
-              <Text style={styles.eyebrow}>River Park shop</Text>
-              <Text style={styles.title}>
+            <View style={[styles.hero, isMobile && styles.heroMobile]}>
+              <Text style={styles.eyebrow}>View2Connect marketplace</Text>
+              <Text style={[styles.title, isMobile && styles.titleMobile]}>
                 {user?.fullName
-                  ? `Shop River Park, ${user.fullName.split(' ')[0]}.`
-                  : 'Shop approved products inside River Park.'}
+                  ? `Shop local stores, ${user.fullName.split(' ')[0]}.`
+                  : 'Shop products from trusted local stores.'}
               </Text>
-              <Text style={styles.subtitle}>
-                Find approved items, add them to cart, and let customer care coordinate pickup and
-                delivery inside the estate.
+              <Text style={[styles.subtitle, isMobile && styles.subtitleMobile]}>
+                Find approved items, add them to cart, and follow each order through pickup and
+                delivery.
               </Text>
-              <View style={styles.heroStats}>
+              <View style={[styles.heroStats, isMobile && styles.heroStatsMobile]}>
                 <View style={styles.heroStat}>
                   <Ionicons color={colors.warning} name="ribbon-outline" size={18} />
                   <Text style={styles.heroStatValue}>{formatNumber(productListings.length)}</Text>
@@ -123,36 +127,34 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
                   <Text style={styles.heroStatLabel}>Categories</Text>
                 </View>
                 <View style={styles.heroStat}>
-                  <Ionicons color={colors.primary} name="headset-outline" size={18} />
-                  <Text style={styles.heroStatValue}>Care</Text>
-                  <Text style={styles.heroStatLabel}>Delivery help</Text>
+                  <Ionicons color={colors.primary} name="restaurant-outline" size={18} />
+                  <Text style={styles.heroStatValue}>Food</Text>
+                  <Text style={styles.heroStatLabel}>Meals and drinks</Text>
                 </View>
               </View>
 
-              <View style={styles.heroActions}>
+              <View style={[styles.heroActions, isMobile && styles.heroActionsMobile]}>
                 <AppButton
-                  label="Browse services"
-                  onPress={() => navigation.navigate('Professions')}
+                  label="Browse food"
+                  onPress={() => navigation.navigate('Food')}
                   variant="secondary"
                 />
-                {user?.role === 'businessOwner' ? (
-                  <AppButton
-                    label="Create listing"
-                    onPress={() => navigation.navigate('RegisterBusiness')}
-                    variant="ghost"
-                  />
-                ) : null}
+                <AppButton
+                  label="Browse categories"
+                  onPress={() => navigation.navigate('Professions')}
+                  variant="ghost"
+                />
               </View>
             </View>
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Search items</Text>
-              <View style={styles.sectionPanel}>
+              <View style={[styles.sectionPanel, isMobile && styles.sectionPanelMobile]}>
                 <View style={styles.searchShell}>
                   <Ionicons color={colors.textMuted} name="search-outline" size={18} />
                   <TextInput
                     onChangeText={setSearchQuery}
-                    placeholder="Search items, sellers, clusters, or categories"
+                    placeholder="Search items or categories"
                     placeholderTextColor={colors.textMuted}
                     style={styles.searchInput}
                     value={searchQuery}
@@ -163,7 +165,7 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Filter by category</Text>
-              <View style={styles.sectionPanel}>
+              <View style={[styles.sectionPanel, isMobile && styles.sectionPanelMobile]}>
                 <ScrollView
                   horizontal
                   nestedScrollEnabled
@@ -188,7 +190,7 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
             </View>
 
             <View style={styles.listIntro}>
-              <Text style={styles.sectionTitle}>Products in River Park</Text>
+              <Text style={styles.sectionTitle}>Products from local stores</Text>
               <Text style={styles.listSubtitle}>
                 Open an item for details or add it straight to cart.
               </Text>
@@ -209,9 +211,21 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
               addDisabled={isOwnListing}
               addLabel={isOwnListing ? 'Own' : 'Add'}
               business={item}
-              onAddToCart={() => addToCart(item.id)}
+              onAddToCart={() => {
+                if (!user) {
+                  navigation.navigate('AuthPrompt');
+                  return;
+                }
+
+                addToCart(item.id);
+              }}
               onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
               onProfilePress={() => {
+                if (!user) {
+                  navigation.navigate('AuthPrompt');
+                  return;
+                }
+
                 if (item.ownerUserId) {
                   navigation.navigate('SellerProfile', { userId: item.ownerUserId });
                 }
@@ -253,6 +267,11 @@ function createStyles(colors: AppColors) {
       padding: spacing.xl,
       ...shadows.card,
     },
+    heroMobile: {
+      gap: spacing.sm,
+      borderRadius: 8,
+      padding: spacing.lg,
+    },
     heroOrbOne: {
       position: 'absolute',
       top: -30,
@@ -279,20 +298,34 @@ function createStyles(colors: AppColors) {
       ...typography.title,
       color: colors.white,
     },
+    titleMobile: {
+      fontSize: 25,
+      lineHeight: 31,
+    },
     subtitle: {
       ...typography.body,
       color: '#D6DFE2',
       maxWidth: 720,
+    },
+    subtitleMobile: {
+      fontSize: 14,
+      lineHeight: 21,
     },
     heroActions: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
     },
+    heroActionsMobile: {
+      gap: spacing.xs,
+    },
     heroStats: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
+    },
+    heroStatsMobile: {
+      display: 'none',
     },
     heroStat: {
       flexGrow: 1,
@@ -327,6 +360,10 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       padding: spacing.md,
       ...shadows.soft,
+    },
+    sectionPanelMobile: {
+      borderRadius: 8,
+      padding: spacing.sm,
     },
     searchShell: {
       minHeight: 56,

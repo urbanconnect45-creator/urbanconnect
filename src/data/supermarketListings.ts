@@ -64,7 +64,7 @@ export const supermarketListingTemplates: SupermarketListingTemplate[] = [
     category: 'Groceries',
     shortDescription: 'A sealed 10kg bag of long grain rice for family meals and bulk restock.',
     longDescription:
-      'This rice bag is suitable for jollof rice, fried rice, white rice, and weekly home cooking. It is listed with clear stock counts so River Park residents can order a full pantry restock without guessing quantity.',
+      'This rice bag is suitable for jollof rice, fried rice, white rice, and weekly home cooking. It is listed with clear stock counts so customers can order a full pantry restock without guessing quantity.',
     price: 18500,
     stockQuantity: 42,
     reorderLevel: 8,
@@ -162,7 +162,7 @@ export const supermarketListingTemplates: SupermarketListingTemplate[] = [
     category: 'Food & Drinks',
     shortDescription: 'Twelve 50cl bottled waters for home, visitors, school, and work.',
     longDescription:
-      'A ready-to-carry water pack for daily hydration, gatherings, school bags, and office use. Customer care can coordinate doorstep delivery inside River Park.',
+      'A ready-to-carry water pack for daily hydration, gatherings, school bags, and office use. Customer care can coordinate doorstep delivery.',
     price: 3000,
     stockQuantity: 60,
     reorderLevel: 15,

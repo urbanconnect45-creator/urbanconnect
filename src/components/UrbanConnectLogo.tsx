@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { AppColors } from '../theme';
-import { radii, spacing, typography } from '../theme';
+import { spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 type UrbanConnectLogoProps = {
@@ -17,15 +17,14 @@ export function UrbanConnectLogo({ compact = false, inverted = false }: UrbanCon
   return (
     <View style={styles.logoShell}>
       <View style={styles.mark}>
-        <View style={styles.markAccent} />
-        <Text style={styles.markText}>UC</Text>
-        <Ionicons color={colors.white} name="location" size={compact ? 11 : 12} style={styles.markPin} />
+        <Ionicons color={colors.white} name="bag-handle-outline" size={compact ? 25 : 27} />
+        <Text style={styles.markText}>2</Text>
         <View style={styles.routeDot} />
       </View>
       {compact ? null : (
         <View style={styles.copy}>
-          <Text style={styles.name}>UrbanConnect</Text>
-          <Text style={styles.tagline}>River Park marketplace</Text>
+          <Text style={styles.name}>View2Connect</Text>
+          <Text style={styles.tagline}>Buy. Sell. Connect.</Text>
         </View>
       )}
     </View>
@@ -46,29 +45,19 @@ function createStyles(colors: AppColors, inverted: boolean) {
       height: 48,
       width: 48,
       borderRadius: 16,
-      backgroundColor: inverted ? '#2B2B2B' : colors.primary,
+      backgroundColor: inverted ? '#211144' : '#5B2BCB',
       borderWidth: 1,
-      borderColor: inverted ? 'rgba(255,255,255,0.18)' : colors.primarySoft,
-    },
-    markAccent: {
-      position: 'absolute',
-      left: 8,
-      right: 8,
-      bottom: 9,
-      height: 11,
-      borderRadius: radii.pill,
-      backgroundColor: inverted ? colors.primary : colors.secondary,
+      borderColor: inverted ? 'rgba(255,255,255,0.2)' : '#D8CBF7',
     },
     markText: {
-      ...typography.bodyStrong,
-      color: colors.white,
-      fontSize: 17,
-      lineHeight: 22,
-    },
-    markPin: {
+      ...typography.caption,
       position: 'absolute',
-      top: 7,
-      right: 8,
+      top: 6,
+      right: 7,
+      color: colors.white,
+      fontSize: 10,
+      lineHeight: 12,
+      fontWeight: '800',
     },
     routeDot: {
       position: 'absolute',
@@ -77,9 +66,9 @@ function createStyles(colors: AppColors, inverted: boolean) {
       height: 10,
       width: 10,
       borderRadius: 5,
-      backgroundColor: colors.accent,
+      backgroundColor: '#F06038',
       borderWidth: 2,
-      borderColor: inverted ? '#2B2B2B' : colors.primary,
+      borderColor: inverted ? '#211144' : '#5B2BCB',
     },
     copy: {
       gap: 1,

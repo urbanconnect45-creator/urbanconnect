@@ -230,7 +230,7 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
     <>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Settings</Text>
-        <Text style={styles.title}>Control your UrbanConnect app.</Text>
+        <Text style={styles.title}>Control your View2Connect app.</Text>
         <Text style={styles.subtitle}>
           Theme, privacy, agreement, account security, and app lock controls live here.
         </Text>
@@ -304,7 +304,7 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
           </View>
         </Pressable>
 
-        {user?.role === 'businessOwner' ? (
+        {user ? (
           <Pressable
             accessibilityRole="button"
             onPress={() => navigation.navigate('Withdrawal')}
@@ -315,7 +315,7 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
             </View>
             <View style={styles.copy}>
               <Text style={styles.rowTitle}>Withdrawal</Text>
-              <Text style={styles.rowMeta}>Withdraw seller earnings. BVN or NIN is required only here.</Text>
+              <Text style={styles.rowMeta}>Withdraw available wallet funds. BVN or NIN is required only here.</Text>
             </View>
             <Ionicons color={colors.textMuted} name="chevron-forward-outline" size={20} />
           </Pressable>

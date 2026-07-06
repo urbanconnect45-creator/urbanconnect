@@ -3,8 +3,8 @@ import { riverParkClusters, type Estate } from '../types/business';
 export const estates: Estate[] = [
   {
     id: 'river-park',
-    name: 'River Park Estate',
-    city: 'Abuja',
+    name: 'View2Connect Marketplace',
+    city: 'Nigeria',
     residents: 12680,
     businessesLive: 48,
     averageResponseTime: '12 mins',
@@ -25,7 +25,7 @@ export const estates: Estate[] = [
       {
         id: 'amenity-gym',
         title: 'Fitness studio',
-        description: 'Cardio, weights, and guided classes for River Park members.',
+        description: 'Cardio, weights, and guided classes from local fitness providers.',
         icon: 'barbell-outline',
       },
       {

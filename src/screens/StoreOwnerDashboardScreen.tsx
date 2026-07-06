@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -24,6 +24,7 @@ import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import {
   fetchFlutterwaveNigerianBanks,
   isSupabaseConfigured,
+  saveVerifiedSellerPayoutAccountToSupabase,
   uploadMediaUriToSupabaseStorage,
   verifySellerPayoutAccount,
 } from '../services/supabaseApi';
@@ -66,7 +67,10 @@ type ProductDraft = {
   price: string;
   stockQuantity: string;
   reorderLevel: string;
+  hasBarcode: boolean;
   identifier: string;
+  hasSize: boolean;
+  size: string;
   area: string;
   pickupAddress: string;
   shortDescription: string;
@@ -88,6 +92,8 @@ type ImportedProductRow = ProductDraft & {
   rowNumber: number;
 };
 
+type ProductImportField = Exclude<keyof ProductDraft, 'hasBarcode' | 'hasSize'>;
+
 const fallbackProductImage =
   'https://images.unsplash.com/photo-1607083206968-13611e3d76db?auto=format&fit=crop&w=900&q=80';
 
@@ -108,12 +114,12 @@ const categoryFallbackImages: Record<string, string> = {
     'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=900&q=80',
 };
 
-const sampleProductImportCsv = `itemName,category,price,stockQuantity,reorderLevel,identifier,area,pickupAddress,shortDescription,details
-Jollof Rice and Chicken,Food,3500,12,3,,Wuse 2,"Shop 12 Banex Plaza, Wuse 2","Freshly prepared meal","Contains chicken and spices."
-Orange Juice 50cl,Drinks,900,40,10,6154000031290,Gwarinpa,"Local Test Store, 3rd Avenue","Chilled orange drink","Serve cold."
-Morning Fresh Dishwashing Liquid 500ml,Home Essentials,1200,8,2,NAFDAC-A8-2345,Lekki Phase 1,"Adeniran Ogunsanya Street","Dishwashing liquid 500ml","Household cleaning product ready for pickup."`;
+const sampleProductImportCsv = `itemName,category,price,stockQuantity,reorderLevel,identifier,size,area,pickupAddress,shortDescription,details
+Jollof Rice and Chicken,Food,3500,12,3,,Plate,Wuse 2,"Shop 12 Banex Plaza, Wuse 2","Freshly prepared meal","Contains chicken and spices."
+Orange Juice 50cl,Drinks,900,40,10,6154000031290,50cl,Gwarinpa,"Local Test Store, 3rd Avenue","Chilled orange drink","Serve cold."
+Morning Fresh Dishwashing Liquid 500ml,Home Essentials,1200,8,2,NAFDAC-A8-2345,500ml,Lekki Phase 1,"Adeniran Ogunsanya Street","Dishwashing liquid 500ml","Household cleaning product ready for pickup."`;
 
-const importHeaderAliases: Record<string, keyof ProductDraft> = {
+const importHeaderAliases: Record<string, ProductImportField> = {
   item: 'itemName',
   itemname: 'itemName',
   name: 'itemName',
@@ -131,6 +137,9 @@ const importHeaderAliases: Record<string, keyof ProductDraft> = {
   barcode: 'identifier',
   nafdac: 'identifier',
   sku: 'identifier',
+  size: 'size',
+  pack: 'size',
+  measurement: 'size',
   area: 'area',
   city: 'area',
   pickupaddress: 'pickupAddress',
@@ -168,7 +177,10 @@ function initialDraft(userName = ''): ProductDraft {
     price: '',
     stockQuantity: '1',
     reorderLevel: '1',
+    hasBarcode: false,
     identifier: '',
+    hasSize: false,
+    size: '',
     area: '',
     pickupAddress: '',
     shortDescription: '',
@@ -371,7 +383,7 @@ function parseProductImportText(text: string) {
     (header) => importHeaderAliases[normalizeImportHeader(header)],
   );
   const missingRequiredHeaders = ['itemName', 'price', 'stockQuantity', 'pickupAddress', 'shortDescription'].filter(
-    (requiredHeader) => !mappedHeaders.includes(requiredHeader as keyof ProductDraft),
+    (requiredHeader) => !mappedHeaders.includes(requiredHeader as ProductImportField),
   );
 
   if (missingRequiredHeaders.length > 0) {
@@ -397,6 +409,8 @@ function parseProductImportText(text: string) {
     row.category = category ?? productCategories[0];
     row.stockQuantity = row.stockQuantity.trim() || '1';
     row.reorderLevel = row.reorderLevel.trim() || '1';
+    row.hasBarcode = Boolean(row.identifier.trim());
+    row.hasSize = Boolean(row.size.trim());
     row.details = row.details.trim() || row.shortDescription.trim();
 
     const price = Number(row.price);
@@ -476,6 +490,15 @@ function getOwnedOrderTotal(order: Order, ownerKeys: string[]) {
   return getOwnedOrderItems(order, ownerKeys).reduce((total, item) => total + item.lineTotal, 0);
 }
 
+function escapeReceiptHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function businessPublicStatus(business: Business) {
   if (business.verified && business.riverParkVerified) {
     return 'Live';
@@ -500,6 +523,52 @@ function buildProfileValues(userName: string, userEmail: string): OwnerBusinessP
     coverImage: '',
     galleryImages: '',
     galleryVideos: '',
+  };
+}
+
+
+type ResolvedPayoutAccount = {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  verifiedAt: string;
+};
+
+function getRecordValue(record: Record<string, unknown> | undefined, key: string) {
+  const value = record?.[key];
+
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeVerifiedPayoutAccount(
+  response: unknown,
+  selectedBank: FlutterwaveBank,
+  accountNumber: string,
+): ResolvedPayoutAccount {
+  const root = response && typeof response === 'object' ? response as Record<string, unknown> : undefined;
+  const data = root?.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : undefined;
+
+  const accountName =
+    getRecordValue(root, 'accountName') ||
+    getRecordValue(root, 'account_name') ||
+    getRecordValue(data, 'accountName') ||
+    getRecordValue(data, 'account_name');
+
+  if (!accountName) {
+    throw new Error('Flutterwave did not return an account name for this bank account. Please confirm the bank and account number.');
+  }
+
+  return {
+    bankCode: getRecordValue(root, 'bankCode') || getRecordValue(root, 'account_bank') || selectedBank.code,
+    bankName: getRecordValue(root, 'bankName') || selectedBank.name,
+    accountNumber:
+      getRecordValue(root, 'accountNumber') ||
+      getRecordValue(root, 'account_number') ||
+      getRecordValue(data, 'account_number') ||
+      accountNumber,
+    accountName,
+    verifiedAt: getRecordValue(root, 'verifiedAt') || new Date().toISOString(),
   };
 }
 
@@ -569,19 +638,24 @@ export function StoreOwnerDashboardScreen() {
   const [editDraft, setEditDraft] = useState<ListingEditDraft | null>(null);
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [payoutBankListError, setPayoutBankListError] = useState<string | null>(null);
+  const [payoutBankError, setPayoutBankError] = useState<string | null>(null);
   const [payoutBanks, setPayoutBanks] = useState<FlutterwaveBank[]>([]);
   const [payoutBankSearch, setPayoutBankSearch] = useState('');
   const [selectedPayoutBankCode, setSelectedPayoutBankCode] = useState('');
   const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
+  const [resolvedPayoutAccount, setResolvedPayoutAccount] = useState<ResolvedPayoutAccount | null>(null);
   const [isLoadingPayoutBanks, setIsLoadingPayoutBanks] = useState(false);
   const [payoutBanksRequested, setPayoutBanksRequested] = useState(false);
   const [isVerifyingPayoutAccount, setIsVerifyingPayoutAccount] = useState(false);
+  const [isSavingPayoutAccount, setIsSavingPayoutAccount] = useState(false);
   const [kycType, setKycType] = useState<WithdrawalKycType>('bvn');
   const [kycNumber, setKycNumber] = useState('');
   const [idDocumentUri, setIdDocumentUri] = useState('');
   const [idDocumentName, setIdDocumentName] = useState('');
   const [draftImageUri, setDraftImageUri] = useState('');
   const [draftImageName, setDraftImageName] = useState('');
+  const [draftImageError, setDraftImageError] = useState<string | null>(null);
   const [isVerifyingKyc, setIsVerifyingKyc] = useState(false);
   const [withdrawalAmount, setWithdrawalAmount] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -619,14 +693,19 @@ export function StoreOwnerDashboardScreen() {
 
   const ownerProfile = getOwnerBusinessProfile(user);
   const catalogAccessGranted = Boolean(user && hasCatalogManagementAccess(user.id));
-  const selectedPayoutBank = payoutBanks.find(
-    (bank) => bank.code === selectedPayoutBankCode,
-  );
+  const normalizedPayoutBankSearch = payoutBankSearch.trim().toLowerCase();
+  const selectedPayoutBank =
+    payoutBanks.find((bank) => bank.code === selectedPayoutBankCode) ??
+    (normalizedPayoutBankSearch
+      ? payoutBanks.find((bank) => bank.name.toLowerCase() === normalizedPayoutBankSearch)
+      : undefined);
   const visiblePayoutBanks = payoutBanks
     .filter((bank) =>
-      bank.name.toLowerCase().includes(payoutBankSearch.trim().toLowerCase()),
+      normalizedPayoutBankSearch
+        ? bank.name.toLowerCase().includes(normalizedPayoutBankSearch)
+        : true,
     )
-    .slice(0, 12);
+    .slice(0, 10);
   const payoutAccountVerified = Boolean(
     ownerProfile?.payoutBankCode &&
       ownerProfile.payoutAccountNumber &&
@@ -636,6 +715,40 @@ export function StoreOwnerDashboardScreen() {
   const [profileDraft, setProfileDraft] = useState<OwnerBusinessProfileValues>(() =>
     buildProfileValues(user?.businessName ?? user?.fullName ?? '', user?.email ?? ''),
   );
+
+  const formatPayoutBankError = useCallback((error: unknown) => {
+    const message =
+      error instanceof Error ? error.message : 'Unable to load banks right now.';
+    const normalized = message.toLowerCase();
+
+    console.error('Flutterwave bank flow error:', error);
+
+    if (
+      normalized.includes('secret key') ||
+      normalized.includes('credentials') ||
+      normalized.includes('not configured')
+    ) {
+      return 'Bank list could not be loaded because Flutterwave secret key or backend configuration is missing.';
+    }
+
+    if (
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network') ||
+      normalized.includes('load banks')
+    ) {
+      return 'Unable to load banks. Please check your connection or try again.';
+    }
+
+    if (
+      normalized.includes('flutterwave') ||
+      normalized.includes('nigerian banks') ||
+      normalized.includes('api')
+    ) {
+      return 'Bank list could not be loaded because Flutterwave API is not responding.';
+    }
+
+    return message;
+  }, []);
 
   useEffect(() => {
     if (!user) {
@@ -658,9 +771,38 @@ export function StoreOwnerDashboardScreen() {
   }, [ownerProfile, user]);
 
   useEffect(() => {
+    if (!ownerProfile?.payoutBankCode || !ownerProfile.payoutBankName) {
+      return;
+    }
+
+    setSelectedPayoutBankCode((current) => current || ownerProfile.payoutBankCode || '');
+    setPayoutBankSearch((current) => current || ownerProfile.payoutBankName || '');
+  }, [ownerProfile?.payoutBankCode, ownerProfile?.payoutBankName]);
+
+  const loadPayoutBanks = useCallback(async () => {
+    if (!supabaseAccessToken) {
+      setPayoutBankListError('Sign in again before loading banks.');
+      return;
+    }
+
+    try {
+      setIsLoadingPayoutBanks(true);
+      setPayoutBanksRequested(true);
+      setPayoutBankListError(null);
+      const banks = await fetchFlutterwaveNigerianBanks(supabaseAccessToken);
+      const sortedBanks = [...banks].sort((left, right) => left.name.localeCompare(right.name));
+      setPayoutBanks(sortedBanks);
+    } catch (error) {
+      setPayoutBanks([]);
+      setPayoutBankListError(formatPayoutBankError(error));
+    } finally {
+      setIsLoadingPayoutBanks(false);
+    }
+  }, [formatPayoutBankError, supabaseAccessToken]);
+
+  useEffect(() => {
     if (
       activePage !== 'payments' ||
-      !supabaseAccessToken ||
       payoutBanks.length > 0 ||
       isLoadingPayoutBanks ||
       payoutBanksRequested
@@ -668,41 +810,43 @@ export function StoreOwnerDashboardScreen() {
       return;
     }
 
-    setPayoutBanksRequested(true);
-    setIsLoadingPayoutBanks(true);
-    fetchFlutterwaveNigerianBanks(supabaseAccessToken)
-      .then((banks) => {
-        setPayoutBanks(banks);
-        setPaymentError(null);
-      })
-      .catch((error) => {
-        setPaymentError(
-          error instanceof Error
-            ? error.message
-            : 'Unable to load the Flutterwave bank list.',
-        );
-      })
-      .finally(() => setIsLoadingPayoutBanks(false));
+    void loadPayoutBanks();
   }, [
     activePage,
     isLoadingPayoutBanks,
+    loadPayoutBanks,
     payoutBanks.length,
     payoutBanksRequested,
-    supabaseAccessToken,
   ]);
 
-  useEffect(() => {
-    if (selectedPayoutBankCode || payoutBanks.length === 0) {
-      return;
-    }
 
-    const [firstBank] = payoutBanks;
-    if (!firstBank) {
-      return;
-    }
+  const clearPayoutVerification = () => {
+    setResolvedPayoutAccount(null);
+    setPayoutBankError(null);
+  };
 
-    setSelectedPayoutBankCode(firstBank.code);
-  }, [payoutBanks, selectedPayoutBankCode]);
+  const handlePayoutAccountNumberChange = (value: string) => {
+    setPayoutAccountNumber(value.replace(/[^\d]/g, '').slice(0, 10));
+    clearPayoutVerification();
+  };
+
+  const handlePayoutBankSearchChange = (value: string) => {
+    setPayoutBankSearch(value);
+    setSelectedPayoutBankCode('');
+    clearPayoutVerification();
+  };
+
+  const selectPayoutBank = (bank: FlutterwaveBank) => {
+    setSelectedPayoutBankCode(bank.code);
+    setPayoutBankSearch(bank.name);
+    clearPayoutVerification();
+  };
+
+  const clearSelectedPayoutBank = () => {
+    setSelectedPayoutBankCode('');
+    setPayoutBankSearch('');
+    clearPayoutVerification();
+  };
 
   const ownerKeys = useMemo(
     () =>
@@ -809,6 +953,12 @@ export function StoreOwnerDashboardScreen() {
     if (!draft.reorderLevel.trim() || !Number.isFinite(reorderLevel) || reorderLevel <= 0) {
       nextErrors.reorderLevel = 'Enter a valid reorder level.';
     }
+    if (draft.hasBarcode && !draft.identifier.trim()) {
+      nextErrors.identifier = 'Enter the barcode, NAFDAC number, or SKU, or choose No.';
+    }
+    if (draft.hasSize && !draft.size.trim()) {
+      nextErrors.size = 'Enter the size or pack measurement, or choose No.';
+    }
 
     return nextErrors;
   };
@@ -836,12 +986,15 @@ export function StoreOwnerDashboardScreen() {
     productImageUri?: string,
   ): Promise<BusinessProfileFormValues> => {
     const itemName = product.itemName.trim();
-    const identifierLine = product.identifier.trim()
+    const identifierLine = product.hasBarcode && product.identifier.trim()
       ? `\n\nIdentifier: ${product.identifier.trim()}`
       : '';
+    const sizeLine = product.hasSize && product.size.trim() ? `\nSize: ${product.size.trim()}` : '';
     const areaLine = product.area.trim() ? `\nArea: ${product.area.trim()}` : '';
-    const details = `${product.details.trim() || product.shortDescription.trim()}${identifierLine}${areaLine}`;
-    const normalizedIdentifier = normalizeProductIdentity(product.identifier);
+    const details = `${product.details.trim() || product.shortDescription.trim()}${identifierLine}${sizeLine}${areaLine}`;
+    const normalizedIdentifier = normalizeProductIdentity(
+      product.hasBarcode ? product.identifier : '',
+    );
     const normalizedName = normalizeProductIdentity(product.itemName);
     const catalogMatch = centralCatalogProducts.find(
       (catalogProduct) =>
@@ -880,7 +1033,10 @@ export function StoreOwnerDashboardScreen() {
       galleryVideos: '',
       services: [
         product.category,
-        product.identifier.trim() ? `Code: ${product.identifier.trim()}` : '',
+        product.hasBarcode && product.identifier.trim()
+          ? `Code: ${product.identifier.trim()}`
+          : '',
+        product.hasSize && product.size.trim() ? `Size: ${product.size.trim()}` : '',
         product.area.trim() ? `Area: ${product.area.trim()}` : '',
       ]
         .filter(Boolean)
@@ -939,7 +1095,7 @@ export function StoreOwnerDashboardScreen() {
           .split(',')
           .map((item) => item.trim())
           .filter(Boolean),
-        sku: product.identifier,
+        sku: product.hasBarcode ? product.identifier : '',
         price: Number(values.price),
         stockQuantity: Number(values.stockQuantity),
         reorderLevel: Number(values.reorderLevel),
@@ -956,20 +1112,26 @@ export function StoreOwnerDashboardScreen() {
     }
 
     const nextErrors = validateDraft();
+    const nextImageError = draftImageUri.trim()
+      ? null
+      : 'Attach the real product image from your gallery before posting.';
 
-    if (Object.keys(nextErrors).length > 0) {
+    if (Object.keys(nextErrors).length > 0 || nextImageError) {
       setErrors(nextErrors);
+      setDraftImageError(nextImageError);
       return;
     }
 
     try {
       setIsSubmittingItem(true);
+      setDraftImageError(null);
       const values = await createBusinessValuesFromProduct(draft, draftImageUri);
       await registerBusiness(values, user);
       Alert.alert('Product added', 'The product has been added to your catalog for View2Connect review.');
       setDraft(initialDraft(user.fullName));
       setDraftImageUri('');
       setDraftImageName('');
+      setDraftImageError(null);
       setErrors({});
     } catch (error) {
       Alert.alert(
@@ -1181,40 +1343,81 @@ export function StoreOwnerDashboardScreen() {
     }
   };
 
-  const verifyAndSavePayoutAccount = async () => {
-    if (!user || !supabaseAccessToken || !selectedPayoutBank) {
-      setPaymentError('Choose your bank and sign in again before verification.');
+  const verifyPayoutAccount = async () => {
+    if (!user || !supabaseAccessToken) {
+      setPayoutBankError('Sign in again before verifying this account.');
       return;
     }
 
     if (payoutAccountNumber.length !== 10) {
-      setPaymentError('Enter a valid 10-digit account number.');
+      setPayoutBankError('Enter a valid 10-digit account number.');
+      return;
+    }
+
+    if (!selectedPayoutBank) {
+      setPayoutBankError('Select the bank from the list before verifying the account.');
       return;
     }
 
     try {
       setIsVerifyingPayoutAccount(true);
-      setPaymentError(null);
-      const verifiedAccount = await verifySellerPayoutAccount(supabaseAccessToken, {
+      setPayoutBankError(null);
+      const verifiedAccountResponse = await verifySellerPayoutAccount(supabaseAccessToken, {
         ownerUserId: user.id,
         bankCode: selectedPayoutBank.code,
         bankName: selectedPayoutBank.name,
         accountNumber: payoutAccountNumber,
       });
-      setVerifiedSellerPayoutAccount(user, verifiedAccount);
-      setPayoutAccountNumber('');
-      Alert.alert(
-        'Bank account verified',
-        `${verifiedAccount.accountName} was confirmed by Flutterwave and saved for payouts.`,
+      const verifiedAccount = normalizeVerifiedPayoutAccount(
+        verifiedAccountResponse,
+        selectedPayoutBank,
+        payoutAccountNumber,
       );
+      setResolvedPayoutAccount(verifiedAccount);
+      Alert.alert('Account verified', `${verifiedAccount.accountName} was confirmed by Flutterwave.`);
     } catch (error) {
-      setPaymentError(
+      console.error('Flutterwave account verification failed:', error);
+      setResolvedPayoutAccount(null);
+      setPayoutBankError(
         error instanceof Error
           ? error.message
           : 'Flutterwave could not verify this bank account.',
       );
     } finally {
       setIsVerifyingPayoutAccount(false);
+    }
+  };
+
+  const saveResolvedPayoutAccount = async () => {
+    if (!user || !supabaseAccessToken || !resolvedPayoutAccount) {
+      setPayoutBankError('Verify the account first before saving.');
+      return;
+    }
+
+    try {
+      setIsSavingPayoutAccount(true);
+      setPayoutBankError(null);
+      const savedAccount = await saveVerifiedSellerPayoutAccountToSupabase(supabaseAccessToken, {
+        ownerUserId: user.id,
+        ...resolvedPayoutAccount,
+      });
+      setVerifiedSellerPayoutAccount(user, savedAccount);
+      setSelectedPayoutBankCode(savedAccount.bankCode);
+      setPayoutBankSearch(savedAccount.bankName);
+      setPayoutAccountNumber(savedAccount.accountNumber);
+      setResolvedPayoutAccount(savedAccount);
+      Alert.alert(
+        'Bank account saved',
+        `${savedAccount.accountName} was saved for seller payouts.`,
+      );
+    } catch (error) {
+      setPayoutBankError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to save the verified bank account right now.',
+      );
+    } finally {
+      setIsSavingPayoutAccount(false);
     }
   };
 
@@ -1375,6 +1578,7 @@ export function StoreOwnerDashboardScreen() {
     const asset = result.assets[0];
     setDraftImageUri(asset.uri);
     setDraftImageName(asset.fileName ?? `product-image-${Date.now()}.jpg`);
+    setDraftImageError(null);
   };
 
   const pickIdDocument = async () => {
@@ -1437,7 +1641,7 @@ export function StoreOwnerDashboardScreen() {
         <Ionicons color={colors.secondary} name="alert-circle-outline" size={34} />
         <Text style={styles.sectionTitle}>Store owner account required</Text>
         <Text style={styles.mutedText}>
-          Use the same verified account, then complete seller registration and admin review.
+          Sign in with a verified store owner account, then complete seller registration and admin review.
         </Text>
         <AppButton label="Sign out" onPress={signOut} variant="secondary" />
       </View>
@@ -1458,6 +1662,96 @@ export function StoreOwnerDashboardScreen() {
       <Text style={styles.metricLabel}>{label}</Text>
     </View>
   );
+
+  const printSellerReceipt = (order: Order, ownedItems: OrderItem[]) => {
+    const sellerTotal = ownedItems.reduce((total, item) => total + item.lineTotal, 0);
+    const sellerName = ownerProfile?.accountName ?? user.businessName ?? user.fullName;
+    const receiptLines = [
+      `Seller receipt: ${order.id}`,
+      `Store: ${sellerName}`,
+      `Customer: ${order.userName}`,
+      `Date: ${formatDateTime(order.createdAt)}`,
+      `Delivery: ${order.deliveryAddress}`,
+      `Payment: ${order.paymentStatus}`,
+      '',
+      ...ownedItems.map(
+        (item) =>
+          `${item.businessName} - ${formatNumber(item.quantity)} x ${formatCurrency(
+            item.unitPrice,
+          )} = ${formatCurrency(item.lineTotal)}`,
+      ),
+      '',
+      `Seller total: ${formatCurrency(sellerTotal)}`,
+    ];
+
+    if (Platform.OS === 'web') {
+      const browserWindow = globalThis as unknown as {
+        open?: (
+          url?: string,
+          target?: string,
+          features?: string,
+        ) => {
+          document?: {
+            write: (html: string) => void;
+            close: () => void;
+          };
+          focus?: () => void;
+          print?: () => void;
+        } | null;
+      };
+      const receiptWindow = browserWindow.open?.('', '_blank', 'width=420,height=680');
+
+      if (receiptWindow?.document) {
+        const rows = ownedItems
+          .map(
+            (item) => `
+              <tr>
+                <td>${escapeReceiptHtml(item.businessName)}</td>
+                <td>${escapeReceiptHtml(item.quantity)}</td>
+                <td>${escapeReceiptHtml(formatCurrency(item.unitPrice))}</td>
+                <td>${escapeReceiptHtml(formatCurrency(item.lineTotal))}</td>
+              </tr>`,
+          )
+          .join('');
+        receiptWindow.document.write(`
+          <!doctype html>
+          <html>
+            <head>
+              <title>${escapeReceiptHtml(order.id)} receipt</title>
+              <style>
+                body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+                h1 { font-size: 20px; margin: 0 0 8px; }
+                p { margin: 4px 0; font-size: 13px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                th, td { border-bottom: 1px solid #E5E7EB; padding: 8px 4px; text-align: left; font-size: 12px; }
+                .total { margin-top: 16px; font-weight: 700; font-size: 15px; }
+              </style>
+            </head>
+            <body>
+              <h1>Seller receipt</h1>
+              <p><strong>Order:</strong> ${escapeReceiptHtml(order.id)}</p>
+              <p><strong>Store:</strong> ${escapeReceiptHtml(sellerName)}</p>
+              <p><strong>Customer:</strong> ${escapeReceiptHtml(order.userName)}</p>
+              <p><strong>Date:</strong> ${escapeReceiptHtml(formatDateTime(order.createdAt))}</p>
+              <p><strong>Delivery:</strong> ${escapeReceiptHtml(order.deliveryAddress)}</p>
+              <p><strong>Payment:</strong> ${escapeReceiptHtml(order.paymentStatus)}</p>
+              <table>
+                <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+              <p class="total">Seller total: ${escapeReceiptHtml(formatCurrency(sellerTotal))}</p>
+            </body>
+          </html>
+        `);
+        receiptWindow.document.close();
+        receiptWindow.focus?.();
+        receiptWindow.print?.();
+        return;
+      }
+    }
+
+    Alert.alert('Seller receipt', receiptLines.join('\n'));
+  };
 
   const renderOrderCard = (order: Order) => {
     const ownedItems = getOwnedOrderItems(order, ownerKeys);
@@ -1489,6 +1783,12 @@ export function StoreOwnerDashboardScreen() {
         <Text style={styles.mutedText}>
           Delivery: {order.deliveryAddress} - Payment: {order.paymentStatus}
         </Text>
+        <AppButton
+          label="Receipt"
+          onPress={() => printSellerReceipt(order, ownedItems)}
+          style={styles.receiptButton}
+          variant="ghost"
+        />
       </View>
     );
   };
@@ -1721,6 +2021,13 @@ export function StoreOwnerDashboardScreen() {
       return renderItemEditor();
     }
 
+    const draftPreviewPrice = Number.parseFloat(draft.price);
+    const hasDraftPreviewImage = Boolean(draftImageUri.trim());
+    const previewDescription =
+      draft.shortDescription.trim() ||
+      draft.details.trim() ||
+      'Description preview';
+
     return (
       <View style={styles.workspaceGrid}>
       <View style={styles.panelFull}>
@@ -1753,15 +2060,32 @@ export function StoreOwnerDashboardScreen() {
                   <AppButton
                     label="Use product"
                     onPress={() => {
+                      const sizeTag = catalogProduct.tags.find((tag) =>
+                        /^size:/i.test(tag.trim()),
+                      );
+                      const barcodeTag = catalogProduct.tags.find((tag) =>
+                        /^barcode:/i.test(tag.trim()),
+                      );
+                      const barcode =
+                        barcodeTag?.replace(/^barcode:\s*/i, '').trim() ??
+                        (catalogProduct.sku?.startsWith('CAT-') ? '' : catalogProduct.sku ?? '');
+                      const size = sizeTag?.replace(/^size:\s*/i, '').trim() ?? '';
+
                       setDraft((current) => ({
                         ...current,
                         itemName: catalogProduct.name,
                         category: catalogProduct.category,
-                        identifier: '',
+                        hasBarcode: Boolean(barcode),
+                        identifier: barcode,
+                        hasSize: Boolean(size),
+                        size,
                         price: String(catalogProduct.price || ''),
                         shortDescription: catalogProduct.description,
                         details: '',
                       }));
+                      setDraftImageUri(catalogProduct.imageUrl);
+                      setDraftImageName(catalogProduct.name);
+                      setDraftImageError(null);
                       setErrors({});
                     }}
                     variant="secondary"
@@ -1797,7 +2121,7 @@ export function StoreOwnerDashboardScreen() {
           <Text style={styles.rowTitle}>Required columns</Text>
           <Text style={styles.mutedText}>
             itemName, price, stockQuantity, pickupAddress, shortDescription. Optional columns:
-            category, reorderLevel, barcode/NAFDAC/SKU, area, details.
+            category, reorderLevel, barcode/NAFDAC/SKU, size, area, details.
           </Text>
           <Text style={styles.mutedText}>
             Images are automatic: barcode match first, product-name match second, category image
@@ -1899,12 +2223,89 @@ export function StoreOwnerDashboardScreen() {
           })}
         </View>
         <FormField error={errors.shortDescription} label="Short description" onChangeText={(value) => updateDraft('shortDescription', value)} placeholder="Small pack available for quick delivery" value={draft.shortDescription} />
-        <FormField label="Barcode, NAFDAC, or SKU" onChangeText={(value) => updateDraft('identifier', value)} placeholder="Optional" value={draft.identifier} />
+        <Text style={styles.label}>Does this item have a barcode, NAFDAC number, or SKU?</Text>
+        <View style={styles.categoryGrid}>
+          {[
+            { label: 'Yes', value: true },
+            { label: 'No', value: false },
+          ].map((option) => {
+            const isActive = draft.hasBarcode === option.value;
+
+            return (
+              <Pressable
+                key={`barcode-${option.label}`}
+                onPress={() => {
+                  updateDraft('hasBarcode', option.value);
+                  if (!option.value) {
+                    updateDraft('identifier', '');
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.categoryChip,
+                  isActive && styles.categoryChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {draft.hasBarcode ? (
+          <FormField
+            error={errors.identifier}
+            label="Barcode, NAFDAC number, or SKU"
+            onChangeText={(value) => updateDraft('identifier', value)}
+            placeholder="Enter the number or code"
+            value={draft.identifier}
+          />
+        ) : null}
+        <Text style={styles.label}>Does this item have a size or pack measurement?</Text>
+        <View style={styles.categoryGrid}>
+          {[
+            { label: 'Yes', value: true },
+            { label: 'No', value: false },
+          ].map((option) => {
+            const isActive = draft.hasSize === option.value;
+
+            return (
+              <Pressable
+                key={`size-${option.label}`}
+                onPress={() => {
+                  updateDraft('hasSize', option.value);
+                  if (!option.value) {
+                    updateDraft('size', '');
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.categoryChip,
+                  isActive && styles.categoryChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {draft.hasSize ? (
+          <FormField
+            error={errors.size}
+            label="Size or pack measurement"
+            onChangeText={(value) => updateDraft('size', value)}
+            placeholder="50cl, 500ml, medium, pack of 6"
+            value={draft.size}
+          />
+        ) : null}
         <View style={styles.infoBox}>
           <Text style={styles.rowTitle}>Product image</Text>
           <Text style={styles.mutedText}>
-            Use a photo to attach the exact item image. If you do not upload one, we will pick
-            the best match from barcode, product name, or category.
+            Attach the real item photo from your gallery. Manual posts cannot be submitted
+            without a product image.
           </Text>
         </View>
         <MediaPickerField
@@ -1914,19 +2315,75 @@ export function StoreOwnerDashboardScreen() {
               : []
           }
           buttonLabel={draftImageUri ? 'Change product image' : 'Attach product image'}
-          helper="Optional. Upload one product photo from your gallery."
+          helper="Required. Upload one product photo from your gallery."
           kind="image"
           label="Product image"
           onClear={() => {
             setDraftImageUri('');
             setDraftImageName('');
+            setDraftImageError('Attach the real product image from your gallery before posting.');
           }}
           onPick={() => void pickProductImage()}
         />
+        {draftImageError ? <Text style={styles.errorText}>{draftImageError}</Text> : null}
         <FormField error={errors.pickupAddress} label="Pickup address" onChangeText={(value) => updateDraft('pickupAddress', value)} placeholder="Shop, street, estate, or landmark" value={draft.pickupAddress} />
         <FormField label="Area" onChangeText={(value) => updateDraft('area', value)} placeholder="Gwarinpa, Wuse 2, Lekki Phase 1" value={draft.area} />
         <FormField label="Details" multiline onChangeText={(value) => updateDraft('details', value)} placeholder="Pack size, brand, freshness, preparation note, or pickup condition" value={draft.details} />
         <AppButton label="Add product to catalog" loading={isSubmittingItem} onPress={() => void submitItem()} />
+      </View>
+
+      <View style={styles.previewPanel}>
+        <View style={styles.panelHeader}>
+          <Text style={styles.sectionTitle}>Live product preview</Text>
+          <Text style={styles.mutedText}>Updates as you type</Text>
+        </View>
+        <View style={styles.marketplacePreviewCard}>
+          {hasDraftPreviewImage ? (
+            <Image
+              resizeMode="cover"
+              source={{ uri: draftImageUri }}
+              style={styles.marketplacePreviewImage}
+            />
+          ) : (
+            <View style={styles.previewPlaceholder}>
+              <Ionicons color={colors.textMuted} name="image-outline" size={34} />
+              <Text style={styles.previewPlaceholderTitle}>Product image preview</Text>
+              <Text style={styles.previewPlaceholderText}>
+                Attach a real product photo from your gallery to see it here.
+              </Text>
+            </View>
+          )}
+          <View style={styles.marketplacePreviewBody}>
+            <Text style={styles.previewCategory}>{draft.category || 'Category preview'}</Text>
+            <Text numberOfLines={2} style={styles.marketplacePreviewTitle}>
+              {draft.itemName.trim() || 'Product name preview'}
+            </Text>
+            <Text style={styles.marketplacePreviewPrice}>
+              {Number.isFinite(draftPreviewPrice) && draftPreviewPrice > 0
+                ? formatCurrency(draftPreviewPrice)
+                : 'Price preview'}
+            </Text>
+            <Text style={styles.marketplacePreviewDescription}>{previewDescription}</Text>
+            <View style={styles.previewMetaRow}>
+              <Text style={styles.previewMeta}>Stock {draft.stockQuantity || '0'}</Text>
+              {draft.hasSize && draft.size.trim() ? (
+                <Text style={styles.previewMeta}>{draft.size.trim()}</Text>
+              ) : null}
+              {draft.hasBarcode && draft.identifier.trim() ? (
+                <Text style={styles.previewMeta}>Code {draft.identifier.trim()}</Text>
+              ) : null}
+              {draft.area.trim() ? <Text style={styles.previewMeta}>{draft.area.trim()}</Text> : null}
+            </View>
+            <View style={styles.previewInfoStack}>
+              <Text style={styles.mutedText}>
+                Pickup: {draft.pickupAddress.trim() || 'Pickup address preview'}
+              </Text>
+              <Text style={styles.mutedText}>
+                Details: {draft.details.trim() || 'Extra product details appear here.'}
+              </Text>
+            </View>
+          </View>
+        </View>
       </View>
 
       <View style={styles.panelWide}>
@@ -2001,81 +2458,151 @@ export function StoreOwnerDashboardScreen() {
               {ownerProfile?.payoutBankName} - {ownerProfile?.payoutAccountNumber}
             </Text>
             <Text style={styles.mutedText}>
-              Verified by Flutterwave {formatDateTime(ownerProfile?.payoutVerifiedAt ?? '')}
+              Verified {formatDateTime(ownerProfile?.payoutVerifiedAt ?? '')}
             </Text>
           </View>
         ) : (
           <View style={styles.infoBox}>
-            <Text style={styles.rowTitle}>No verified payout bank</Text>
+            <Text style={styles.rowTitle}>Add payout account</Text>
             <Text style={styles.mutedText}>
-              Choose a Nigerian bank. Flutterwave must return the real account name before
-              it can be saved.
+              Enter your account number, select your bank, verify the account name, then save it.
             </Text>
           </View>
         )}
-        <FormField
-          label="Find bank"
-          onChangeText={setPayoutBankSearch}
-          placeholder={isLoadingPayoutBanks ? 'Loading Flutterwave banks...' : 'Search bank name'}
-          value={payoutBankSearch}
-        />
-        {payoutBanksRequested && !isLoadingPayoutBanks && payoutBanks.length === 0 ? (
-          <AppButton
-            label="Retry bank list"
-            onPress={() => {
-              setPaymentError(null);
-              setPayoutBanksRequested(false);
-            }}
-            variant="secondary"
+        <View style={styles.payoutFlowCard}>
+          <View style={styles.payoutStepHeader}>
+            <View style={styles.payoutStepBadge}>
+              <Ionicons color={colors.primary} name="business-outline" size={18} />
+            </View>
+            <View style={styles.previewCopy}>
+              <Text style={styles.rowTitle}>Bank account</Text>
+              <Text style={styles.mutedText}>Verify the real account name before saving payout details.</Text>
+            </View>
+          </View>
+
+          <FormField
+            keyboardType="numeric"
+            label="Account number"
+            onChangeText={handlePayoutAccountNumberChange}
+            placeholder="Enter 10-digit account number"
+            value={payoutAccountNumber}
           />
-        ) : null}
-        <View style={styles.categoryGrid}>
-          {visiblePayoutBanks.map((bank) => (
-            <Pressable
-              key={`${bank.code}-${bank.name}`}
-              onPress={() => {
-                setSelectedPayoutBankCode(bank.code);
-                setPayoutBankSearch(bank.name);
-                setPaymentError(null);
-              }}
-              style={[
-                styles.categoryChip,
-                selectedPayoutBankCode === bank.code && styles.categoryChipActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.categoryText,
-                  selectedPayoutBankCode === bank.code && styles.categoryTextActive,
-                ]}
-              >
-                {bank.name}
+
+          <FormField
+            label="Bank"
+            onChangeText={handlePayoutBankSearchChange}
+            placeholder={isLoadingPayoutBanks ? 'Loading banks...' : 'Search or select bank'}
+            value={payoutBankSearch}
+          />
+
+          {isLoadingPayoutBanks ? <Text style={styles.mutedText}>Loading Nigerian banks...</Text> : null}
+
+          {payoutBankListError ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{payoutBankListError}</Text>
+              <AppButton
+                label="Retry loading banks"
+                onPress={() => void loadPayoutBanks()}
+                variant="secondary"
+              />
+            </View>
+          ) : null}
+
+          {!payoutBankListError && visiblePayoutBanks.length > 0 ? (
+            <View style={styles.bankSearchResults}>
+              {visiblePayoutBanks.map((bank) => {
+                const isSelected = selectedPayoutBankCode === bank.code;
+
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    key={`${bank.code}-${bank.name}`}
+                    onPress={() => selectPayoutBank(bank)}
+                    style={({ pressed }) => [
+                      styles.bankOption,
+                      isSelected && styles.bankOptionActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <View style={styles.payoutStepBadge}>
+                      <Ionicons
+                        color={isSelected ? colors.primary : colors.textMuted}
+                        name={isSelected ? 'checkmark-circle' : 'business-outline'}
+                        size={18}
+                      />
+                    </View>
+                    <View style={styles.previewCopy}>
+                      <Text style={styles.bankOptionText}>{bank.name}</Text>
+                      <Text style={styles.bankOptionSubtext}>Bank code: {bank.code}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : !payoutBankListError && payoutBanks.length > 0 && payoutBankSearch.trim() ? (
+            <Text style={styles.mutedText}>
+              No bank matched "{payoutBankSearch.trim()}". Try a shorter bank name.
+            </Text>
+          ) : null}
+
+          {selectedPayoutBank ? (
+            <View style={styles.selectedBankCard}>
+              <Ionicons color={colors.success} name="checkmark-circle" size={22} />
+              <View style={styles.previewCopy}>
+                <Text style={styles.rowTitle}>{selectedPayoutBank.name}</Text>
+                <Text style={styles.mutedText}>Selected bank for verification</Text>
+              </View>
+              <Pressable accessibilityRole="button" onPress={clearSelectedPayoutBank} style={styles.textButton}>
+                <Text style={styles.textButtonText}>Change</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {payoutBankError ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{payoutBankError}</Text>
+            </View>
+          ) : null}
+
+          {resolvedPayoutAccount ? (
+            <View style={styles.verifiedAccountCard}>
+              <Ionicons color={colors.success} name="shield-checkmark-outline" size={28} />
+              <View style={styles.previewCopy}>
+                <Text style={styles.mutedText}>Account name confirmed by Flutterwave</Text>
+                <Text style={styles.verifiedAccountName}>{resolvedPayoutAccount.accountName}</Text>
+                <Text style={styles.mutedText}>
+                  {resolvedPayoutAccount.bankName} - {resolvedPayoutAccount.accountNumber}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.infoBox}>
+              <Text style={styles.rowTitle}>Account name will appear here</Text>
+              <Text style={styles.mutedText}>
+                Enter 10 digits, select the bank from the list, then verify the account.
               </Text>
-            </Pressable>
-          ))}
+            </View>
+          )}
+
+          <View style={styles.buttonRow}>
+            <AppButton
+              disabled={!supabaseAccessToken || !selectedPayoutBank || payoutAccountNumber.length !== 10}
+              label={isVerifyingPayoutAccount ? 'Verifying account...' : 'Verify account'}
+              loading={isVerifyingPayoutAccount}
+              onPress={() => void verifyPayoutAccount()}
+              style={styles.flexButton}
+              variant="primary"
+            />
+            <AppButton
+              disabled={!supabaseAccessToken || !resolvedPayoutAccount}
+              label={isSavingPayoutAccount ? 'Saving payout account...' : 'Save payout account'}
+              loading={isSavingPayoutAccount}
+              onPress={() => void saveResolvedPayoutAccount()}
+              style={styles.flexButton}
+              variant="secondary"
+            />
+          </View>
         </View>
-        <FormField
-          keyboardType="numeric"
-          label="Payout account number"
-          onChangeText={(value) =>
-            setPayoutAccountNumber(value.replace(/[^\d]/g, '').slice(0, 10))
-          }
-          placeholder="0123456789"
-          value={payoutAccountNumber}
-        />
-        <AppButton
-          disabled={!selectedPayoutBank || payoutAccountNumber.length !== 10}
-          label={
-            isVerifyingPayoutAccount
-              ? 'Checking account name...'
-              : payoutAccountVerified
-                ? 'Verify a different account'
-                : 'Verify and save bank account'
-          }
-          loading={isVerifyingPayoutAccount}
-          onPress={() => void verifyAndSavePayoutAccount()}
-          variant={payoutAccountVerified ? 'secondary' : 'primary'}
-        />
         {virtualAccount ? (
           <View style={styles.infoBox}>
             <Text style={styles.rowTitle}>{virtualAccount.accountName}</Text>
@@ -2758,6 +3285,17 @@ function createStyles(colors: AppColors) {
       padding: spacing.lg,
       ...shadows.soft,
     },
+    previewPanel: {
+      flex: 0.9,
+      minWidth: 320,
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.lg,
+      ...shadows.soft,
+    },
     panelFull: {
       width: '100%',
       gap: spacing.md,
@@ -2842,6 +3380,83 @@ function createStyles(colors: AppColors) {
     },
     categoryTextActive: {
       color: colors.white,
+    },
+
+    payoutFlowCard: {
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: spacing.md,
+      ...shadows.soft,
+    },
+    payoutStepHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    payoutStepBadge: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 38,
+      height: 38,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+    },
+    bankSearchResults: {
+      gap: spacing.sm,
+      maxHeight: 320,
+    },
+    bankOption: {
+      minHeight: 56,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: spacing.sm,
+    },
+    bankOptionActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    bankOptionText: {
+      ...typography.bodyStrong,
+      color: colors.text,
+    },
+    bankOptionSubtext: {
+      ...typography.caption,
+      color: colors.textMuted,
+    },
+    selectedBankCard: {
+      minHeight: 64,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.success,
+      backgroundColor: colors.card,
+      padding: spacing.md,
+    },
+    verifiedAccountCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.success,
+      backgroundColor: colors.card,
+      padding: spacing.md,
+    },
+    verifiedAccountName: {
+      fontSize: 22,
+      lineHeight: 28,
+      fontWeight: '900',
+      color: colors.text,
     },
     quickGrid: {
       flexDirection: 'row',
@@ -2936,6 +3551,108 @@ function createStyles(colors: AppColors) {
       ...typography.bodyStrong,
       color: colors.text,
     },
+    previewCard: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: spacing.sm,
+    },
+    previewImage: {
+      width: 116,
+      height: 116,
+      borderRadius: 8,
+      backgroundColor: colors.surfaceMuted,
+    },
+    previewCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: spacing.xs,
+    },
+    previewTitle: {
+      ...typography.bodyStrong,
+      color: colors.text,
+    },
+    previewCategory: {
+      ...typography.caption,
+      color: colors.secondary,
+      fontWeight: '800',
+    },
+    previewPrice: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    previewMetaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+    },
+    previewMeta: {
+      ...typography.caption,
+      color: colors.textMuted,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+    },
+    marketplacePreviewCard: {
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      overflow: 'hidden',
+      ...shadows.soft,
+    },
+    marketplacePreviewImage: {
+      width: '100%',
+      height: 260,
+      backgroundColor: colors.surfaceMuted,
+    },
+    previewPlaceholder: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      width: '100%',
+      height: 260,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.lg,
+    },
+    previewPlaceholderTitle: {
+      ...typography.bodyStrong,
+      color: colors.text,
+    },
+    previewPlaceholderText: {
+      ...typography.caption,
+      color: colors.textMuted,
+      textAlign: 'center',
+    },
+    marketplacePreviewBody: {
+      gap: spacing.sm,
+      padding: spacing.md,
+    },
+    marketplacePreviewTitle: {
+      fontSize: 22,
+      lineHeight: 28,
+      fontWeight: '800',
+      color: colors.text,
+    },
+    marketplacePreviewPrice: {
+      fontSize: 20,
+      lineHeight: 26,
+      fontWeight: '900',
+      color: colors.primary,
+    },
+    marketplacePreviewDescription: {
+      ...typography.body,
+      color: colors.textMuted,
+    },
+    previewInfoStack: {
+      gap: spacing.xs,
+    },
     statusPill: {
       borderRadius: 8,
       backgroundColor: colors.primarySoft,
@@ -2976,6 +3693,10 @@ function createStyles(colors: AppColors) {
     textButtonText: {
       ...typography.bodyStrong,
       color: colors.primary,
+    },
+    receiptButton: {
+      alignSelf: 'flex-start',
+      minWidth: 140,
     },
     editorHeader: {
       flexDirection: 'row',

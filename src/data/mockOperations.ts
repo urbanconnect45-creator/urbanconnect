@@ -17,9 +17,9 @@ export const defaultSecuritySettings: SecuritySettings = {
   sessionTimeoutMinutes: 30,
   maxLoginAttempts: 5,
   loginAnnouncementEnabled: true,
-  loginAnnouncementTitle: 'Welcome to UrbanConnect',
+  loginAnnouncementTitle: 'Welcome to View2Connect',
   loginAnnouncementBody:
-    'River Park marketplace updates, verification notices, and customer care messages will appear in your notifications.',
+    'Marketplace updates, verification notices, and customer care messages will appear in your notifications.',
   subscriptionExemptAccountEmail: 'owner.admin@urbanconnect.com',
 };
 

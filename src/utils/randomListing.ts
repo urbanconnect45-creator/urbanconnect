@@ -33,11 +33,11 @@ const supermarketProductTemplates: ListingTemplate[] = supermarketListingTemplat
 
 const productTemplates: ListingTemplate[] = [
   {
-    name: 'River Park Fresh Basket',
+    name: 'View2Connect Fresh Basket',
     category: 'Groceries',
-    shortDescription: 'Fresh fruit, snacks, and pantry essentials delivered inside River Park.',
+    shortDescription: 'Fresh fruit, snacks, and pantry essentials prepared for local delivery.',
     longDescription:
-      'A curated daily basket with fresh produce, drinks, snacks, and home pantry basics. Orders are prepared quickly for River Park residents with clear pickup or delivery coordination through customer care.',
+      'A curated daily basket with fresh produce, drinks, snacks, and home pantry basics. Orders are prepared quickly with clear pickup or delivery coordination through customer care.',
     price: 18500,
     stockQuantity: 24,
     reorderLevel: 6,
@@ -51,7 +51,7 @@ const productTemplates: ListingTemplate[] = [
   {
     name: 'Estate Breakfast Box',
     category: 'Food & Drinks',
-    shortDescription: 'Ready-to-eat breakfast packs for early River Park mornings.',
+    shortDescription: 'Ready-to-eat breakfast packs for busy mornings.',
     longDescription:
       'A breakfast bundle with pastries, fruit, juice, and light snacks for residents who want quick morning pickup or delivery. Each order is packed fresh and coordinated through customer care.',
     price: 9500,
@@ -83,7 +83,7 @@ const productTemplates: ListingTemplate[] = [
   {
     name: 'Glow Care Beauty Pack',
     category: 'Beauty',
-    shortDescription: 'Skincare and grooming essentials prepared for River Park buyers.',
+    shortDescription: 'Skincare and grooming essentials prepared for local buyers.',
     longDescription:
       'A clean beauty pack with everyday skincare, grooming tools, and refill options. Product details are clearly listed so residents can order confidently and customer care can review the package before approval.',
     price: 26500,
@@ -97,7 +97,7 @@ const productTemplates: ListingTemplate[] = [
     ],
   },
   {
-    name: 'River Park Laundry Bundle',
+    name: 'Home Laundry Bundle',
     category: 'Home Essentials',
     shortDescription: 'Detergent, softener, and cleaning basics for weekly home restock.',
     longDescription:
@@ -117,7 +117,7 @@ const productTemplates: ListingTemplate[] = [
     category: 'Food & Drinks',
     shortDescription: 'Drinks, chips, biscuits, and treats packed for weekend orders.',
     longDescription:
-      'A snack crate for families, visitors, and small gatherings inside River Park. Orders are prepared with clear item counts, fresh stock checks, and customer care coordination.',
+      'A snack crate for families, visitors, and small gatherings. Orders are prepared with clear item counts, fresh stock checks, and customer care coordination.',
     price: 14500,
     stockQuantity: 30,
     reorderLevel: 8,
@@ -164,9 +164,9 @@ const productTemplates: ListingTemplate[] = [
 
 const serviceTemplates: ListingTemplate[] = [
   {
-    name: 'River Park Home Care',
+    name: 'Trusted Home Care',
     category: 'Nurse',
-    shortDescription: 'Trusted home support and wellness visits for River Park residents.',
+    shortDescription: 'Trusted home support and wellness visits for customers.',
     longDescription:
       'A resident-focused service for scheduled home check-ins, wellness support, and practical care coordination. Customer care helps connect residents to the provider and keeps the service request organized.',
     services: ['Home visits', 'Wellness support', 'Fast response'],
@@ -178,7 +178,7 @@ const serviceTemplates: ListingTemplate[] = [
   {
     name: 'SwiftFix Phone Repair',
     category: 'Phone Repair',
-    shortDescription: 'Screen, battery, and device checks coordinated inside River Park.',
+    shortDescription: 'Screen, battery, and device checks coordinated locally.',
     longDescription:
       'A practical phone repair service for residents who need quick diagnosis, battery support, screen replacement, or accessory checks. Customer care coordinates the request before the provider responds.',
     services: ['Screen checks', 'Battery support', 'Accessory advice'],

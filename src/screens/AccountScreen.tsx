@@ -36,11 +36,7 @@ import {
 } from '../utils/deposits';
 import { formatCurrency, formatDateTime, formatNumber } from '../utils/format';
 import { getOrderStatusLabel, getPaymentStatusLabel } from '../utils/order';
-import {
-  getAccountStartingBalance,
-  getAccountWalletBalance,
-  getBuyerWalletSpent,
-} from '../utils/wallet';
+import { getBuyerWalletSpent } from '../utils/wallet';
 
 type ListingView = 'product' | 'profession';
 type DepositStep = 'amount' | 'instructions' | 'details';
@@ -115,6 +111,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     createDynamicDepositAccount,
     deleteBusiness,
     getAvailableStock,
+    getAvailableAccountBalanceForUser,
     getDepositAccountsForUser,
     getOwnerBusinessProfile,
     getOrdersForOwner,
@@ -122,7 +119,6 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     getWithdrawalsForOwner,
     isRiverParkVerifiedForUser,
     startAddFundsFlutterwaveCheckout,
-    subscriptionPayments,
     updateBusinessListing,
   } = useBusinessDirectory();
   const { colors, isDarkMode } = useAppTheme();
@@ -215,7 +211,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     [getOrdersForOwner, user],
   );
   const ownerWithdrawals = useMemo(
-    () => (user?.role === 'businessOwner' ? getWithdrawalsForOwner(user.id) : []),
+    () => (user ? getWithdrawalsForOwner(user.id) : []),
     [getWithdrawalsForOwner, user],
   );
   const depositAccounts = useMemo(
@@ -234,16 +230,6 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     generatedDepositAccount?.amount ??
     (Number.isFinite(enteredDepositAmount) && enteredDepositAmount > 0 ? enteredDepositAmount : 0);
   const buyerSpent = useMemo(() => getBuyerWalletSpent(residentOrders), [residentOrders]);
-  const accountStartingBalance = useMemo(() => getAccountStartingBalance(user), [user]);
-  const ownerSubscriptionPayments = useMemo(
-    () =>
-      user ? subscriptionPayments.filter((payment) => payment.ownerUserId === user.id) : [],
-    [subscriptionPayments, user],
-  );
-  const buyerBalance = useMemo(
-    () => getAccountWalletBalance(user, residentOrders, ownerSubscriptionPayments, depositAccounts),
-    [depositAccounts, ownerSubscriptionPayments, residentOrders, user],
-  );
   const ownerPortfolio = useMemo(() => {
     const totals = ownerOrders.reduce(
       (currentTotals, order) => {
@@ -278,9 +264,13 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     return {
       ...totals,
       withdrawn,
-      available: Math.max(0, totals.available - withdrawn),
+      available: totals.available,
     };
   }, [ownerKeys, ownerOrders, ownerWithdrawals]);
+  const buyerBalance = useMemo(
+    () => (user ? getAvailableAccountBalanceForUser(user) : 0),
+    [getAvailableAccountBalanceForUser, user],
+  );
   const confirmDeleteListing = (business: Business) => {
     if (!user) {
       return;
@@ -490,16 +480,6 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     resetAddFundsFlowToProfile();
   };
 
-  const handleFlutterwaveReturn = () => {
-    const channelLabel = activeFlutterwaveCheckout?.channelLabel ?? 'payment';
-
-    resetAddFundsFlowToProfile();
-    Alert.alert(
-      'Payment submitted',
-      `Flutterwave will update your portfolio after the live ${channelLabel} payment is confirmed.`,
-    );
-  };
-
   const copyDepositDetail = async (label: string, value?: string) => {
     const cleanValue = value?.trim();
 
@@ -633,21 +613,16 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                 Wallet and balance
               </Text>
             </View>
-            {isBusinessOwner ? (
-              <Pressable
-                onPress={() => navigation.navigate('Withdrawal')}
-                style={({ pressed }) => [
-                  styles.portfolioIconShell,
-                  pressed && styles.itemRowPressed,
-                ]}
-              >
-                <Ionicons color={portfolioInkColor} name="ellipsis-horizontal" size={22} />
-              </Pressable>
-            ) : (
-              <View style={[styles.portfolioIconShell, styles.portfolioIconShellDisabled]}>
-                <Ionicons color={portfolioInkColor} name="wallet-outline" size={22} />
-              </View>
-            )}
+            <Pressable
+              accessibilityLabel="Open withdrawal"
+              onPress={() => navigation.navigate('Withdrawal')}
+              style={({ pressed }) => [
+                styles.portfolioIconShell,
+                pressed && styles.itemRowPressed,
+              ]}
+            >
+              <Ionicons color={portfolioInkColor} name="cash-outline" size={22} />
+            </Pressable>
           </View>
 
           <View style={styles.portfolioGrid}>
@@ -700,14 +675,12 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
               style={styles.portfolioActionButton}
               variant="secondary"
             />
-            {isBusinessOwner ? (
-              <AppButton
-                label="Withdraw"
-                onPress={() => navigation.navigate('Withdrawal')}
-                style={styles.portfolioActionButton}
-                variant="ghost"
-              />
-            ) : null}
+            <AppButton
+              label="Withdraw"
+              onPress={() => navigation.navigate('Withdrawal')}
+              style={styles.portfolioActionButton}
+              variant="ghost"
+            />
           </View>
           <Pressable
             onPress={() => navigation.navigate('Transactions')}
@@ -743,7 +716,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           <Text style={styles.eyebrow}>{isBusinessOwner ? 'Business account' : 'My account'}</Text>
           <Text style={styles.title}>{user.businessName ?? user.fullName}</Text>
           <Text style={styles.subtitle}>
-            {user.email} - {user.businessCluster ?? estate?.name ?? 'River Park'}
+            {user.email} - {user.businessCluster ?? estate?.name ?? 'View2Connect'}
           </Text>
           <View style={styles.heroMetaRow}>
             <View style={styles.heroMetaChip}>
@@ -752,7 +725,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
             </View>
             <View style={styles.heroMetaChip}>
               <Ionicons color={colors.white} name="location-outline" size={16} />
-              <Text style={styles.heroMetaText}>River Park only</Text>
+              <Text style={styles.heroMetaText}>Marketplace account</Text>
             </View>
             {isBusinessOwner ? (
               <View
@@ -951,7 +924,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                   );
                 })
               ) : (
-                <Text style={styles.bodyText}>New River Park orders will appear here.</Text>
+                <Text style={styles.bodyText}>New marketplace orders will appear here.</Text>
               )}
             </View>
           </View>
@@ -1035,20 +1008,19 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         <View style={styles.actionStack}>
           <AppButton label="Shop products" onPress={() => navigation.navigate('Dashboard')} />
           <AppButton
-            label="Browse services"
+            label="Browse categories"
             onPress={() => navigation.navigate('Professions')}
             variant="secondary"
           />
-          <AppButton label="Open support" onPress={() => navigation.navigate('Chats')} variant="ghost" />
-          {isBusinessOwner ? (
-            <AppButton
-              label="Create listing"
-              onPress={() => navigation.navigate('RegisterBusiness')}
-              variant="ghost"
-            />
-          ) : (
-            <AppButton label="Open cart" onPress={() => navigation.navigate('Cart')} variant="ghost" />
-          )}
+          <AppButton label="Browse food" onPress={() => navigation.navigate('Food')} variant="ghost" />
+          <AppButton label="Open cart" onPress={() => navigation.navigate('Cart')} variant="ghost" />
+          <AppButton
+            label={isBusinessOwner ? 'Switch to seller workspace' : 'Sell an item'}
+            onPress={() =>
+              navigation.navigate(isBusinessOwner ? 'SellerMode' : 'RegisterBusiness')
+            }
+            variant="secondary"
+          />
           <AppButton label="Sign out" onPress={signOut} variant="ghost" />
         </View>
       </View>
@@ -1540,7 +1512,6 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           activePaymentLabel={activeFlutterwaveCheckout.channelLabel}
           checkoutUrl={activeFlutterwaveCheckout.checkoutUrl}
           onClose={handleCloseFlutterwaveCheckout}
-          onPaymentReturn={handleFlutterwaveReturn}
           reference={activeFlutterwaveCheckout.reference}
           subtitle={activeFlutterwaveCheckout.subtitle}
           title={activeFlutterwaveCheckout.title}

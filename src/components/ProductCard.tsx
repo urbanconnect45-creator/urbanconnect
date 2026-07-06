@@ -12,6 +12,7 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Business } from '../types/business';
+import { normalizeProductCategory } from '../utils/category';
 import { formatCurrency } from '../utils/format';
 
 type ProductCardProps = {
@@ -30,11 +31,16 @@ export function ProductCard({
   business,
   onAddToCart,
   onPress,
-  onProfilePress,
   style,
 }: ProductCardProps) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
+  const displayCategory = normalizeProductCategory(
+    business.category,
+    business.name,
+    business.description,
+    business.longDescription,
+  );
   const isGoldListing =
     (business.subscriptionStatus === 'paid' || business.subscriptionStatus === 'active') &&
     (!business.subscriptionNextBillingAt ||
@@ -54,11 +60,8 @@ export function ProductCard({
       <Image resizeMode="cover" source={{ uri: business.imageUrl }} style={styles.image} />
 
       <View style={styles.badgeRow}>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{business.cluster}</Text>
-        </View>
         <View style={[styles.badge, styles.categoryBadge]}>
-          <Text style={styles.badgeText}>{business.category}</Text>
+          <Text style={styles.badgeText}>{displayCategory}</Text>
         </View>
         {isGoldListing ? (
           <View style={[styles.badge, styles.goldBadge]}>
@@ -78,19 +81,6 @@ export function ProductCard({
       </View>
 
       <View style={styles.footer}>
-        <Pressable
-          onPress={(event) => {
-            event.stopPropagation();
-            onProfilePress?.();
-          }}
-          style={({ pressed }) => [styles.profileChip, pressed && styles.profileChipPressed]}
-        >
-          <Image resizeMode="cover" source={{ uri: business.imageUrl }} style={styles.avatar} />
-          <Text numberOfLines={1} style={styles.profileText}>
-            {business.ownerName}
-          </Text>
-        </Pressable>
-
         <Pressable
           disabled={addDisabled}
           onPress={(event) => {
@@ -185,30 +175,10 @@ function createStyles(colors: AppColors) {
     footer: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'flex-end',
       gap: spacing.sm,
       padding: spacing.md,
       paddingTop: spacing.sm,
-    },
-    profileChip: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-      minWidth: 0,
-    },
-    profileChipPressed: {
-      opacity: 0.88,
-    },
-    avatar: {
-      height: 34,
-      width: 34,
-      borderRadius: 17,
-    },
-    profileText: {
-      ...typography.caption,
-      color: colors.text,
-      flex: 1,
     },
     actionButton: {
       borderRadius: radii.pill,

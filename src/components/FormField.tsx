@@ -1,4 +1,5 @@
 import {
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -46,7 +47,7 @@ function createStyles(colors: AppColors) {
       letterSpacing: 0.3,
     },
     input: {
-      minHeight: 58,
+      minHeight: 52,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: colors.border,
@@ -55,10 +56,11 @@ function createStyles(colors: AppColors) {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.md,
       ...typography.body,
+      fontSize: Platform.OS === 'web' ? 16 : typography.body.fontSize,
       ...shadows.soft,
     },
     multilineInput: {
-      minHeight: 132,
+      minHeight: 112,
       paddingVertical: spacing.md,
     },
     inputError: {

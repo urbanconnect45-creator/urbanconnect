@@ -76,8 +76,8 @@ export function AdminLoginScreen({ navigation }: AdminLoginScreenProps) {
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.loginCard}>
-        <Text style={styles.eyebrow}>Admin</Text>
-        <Text style={styles.title}>Local admin login</Text>
+        <Text style={styles.eyebrow}>Private administration</Text>
+        <Text style={styles.title}>View2Connect Admin Portal</Text>
         <Text style={styles.subtitle}>
           Owner controls everything. Customer care stays limited and can be activated or deactivated by the owner.
         </Text>

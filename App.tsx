@@ -1,4 +1,5 @@
 import { Platform, StatusBar, StyleSheet, View } from 'react-native';
+import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -11,6 +12,27 @@ import { colors } from './src/theme';
 
 function AppFrame() {
   const { colors: themeColors, isDarkMode } = useAppTheme();
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      try {
+        const existing = document.querySelector('meta[name="viewport"]');
+
+        const content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0';
+
+        if (existing) {
+          existing.setAttribute('content', content);
+        } else {
+          const m = document.createElement('meta');
+          m.name = 'viewport';
+          m.content = content;
+          document.head.appendChild(m);
+        }
+      } catch {
+        // ignore errors manipulating the document
+      }
+    }
+  }, []);
 
   return (
     <View style={[styles.root, { backgroundColor: themeColors.background }]}>

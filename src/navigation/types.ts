@@ -1,6 +1,10 @@
 export type MainTabParamList = {
   Dashboard: undefined;
+  DispatchMode: undefined;
+  Stores: undefined;
   Professions: undefined;
+  Food: undefined;
+  SellerMode: undefined;
   RegisterBusiness: undefined;
   Subscription: undefined;
   Chats: undefined;
@@ -10,6 +14,7 @@ export type MainTabParamList = {
 };
 
 export type RootStackParamList = {
+  AuthPrompt: undefined;
   Login: undefined;
   Signup: undefined;
   AdminLogin: undefined;
@@ -29,6 +34,7 @@ export type RootStackParamList = {
 };
 
 type AppNavigate = {
+  (screen: 'AuthPrompt'): void;
   (screen: 'Login'): void;
   (screen: 'Signup'): void;
   (screen: 'AdminLogin'): void;

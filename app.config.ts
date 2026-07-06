@@ -2,7 +2,7 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'UrbanConnect',
+  name: 'View2Connect',
   slug: 'urbanconnect',
   version: '1.0.0',
   orientation: 'portrait',
@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     infoPlist: {
       NSFaceIDUsageDescription:
-        'Allow UrbanConnect to use Face ID to unlock your account securely.',
+        'Allow View2Connect to use Face ID to unlock your account securely.',
     },
   },
   android: {
@@ -24,18 +24,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     output: 'single',
   },
   plugins: [
+    'expo-font',
     [
       'expo-local-authentication',
       {
         faceIDPermission:
-          'Allow UrbanConnect to use Face ID to unlock your account securely.',
+          'Allow View2Connect to use Face ID to unlock your account securely.',
       },
     ],
     [
       'expo-image-picker',
       {
         photosPermission:
-          'Allow UrbanConnect to access your photos and videos so you can upload listing media from the gallery.',
+          'Allow View2Connect to access your photos and videos so you can upload listing media from the gallery.',
       },
     ],
   ],

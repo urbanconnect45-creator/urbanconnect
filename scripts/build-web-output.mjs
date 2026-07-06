@@ -1,14 +1,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
+import { loadProjectEnv } from '@expo/env';
+
+import { buildSellerRegistrationHtml } from './seller-registration-template.mjs';
+
+loadProjectEnv(process.cwd(), { silent: true });
 
 const adminPath = 'admin-portal';
+const catalogAdminPath = 'catalog-admin';
 const appPath = 'app';
-const defaultSiteUrl = 'https://urbanconnectstore.com';
-const siteName = 'UrbanConnect';
+const sellerPortalPath = 'seller-portal';
+const defaultSiteUrl = 'https://www.view2connect.ng';
+const siteName = 'View2Connect';
 const siteDescription =
-  'UrbanConnect is the River Park marketplace app for approved products, services, support, payments, receipts, and delivery updates.';
-const supportEmail = 'support@urbanconnectstore.com';
+  'View2Connect is a CAC-registered Nigerian marketplace where customers discover products, food, local stores, secure payments, receipts, and delivery updates.';
+const supportEmail = 'support@view2connect.ng';
+const publicSupabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? '';
+const publicSupabaseKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ?? '';
 const heroCarouselImages = [
   {
     src: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1800&q=85',
@@ -27,24 +36,48 @@ const heroCarouselImages = [
   },
 ];
 
+const socialLinks = [
+  {
+    href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(defaultSiteUrl)}`,
+    icon: 'f',
+    label: 'Share View2Connect on Facebook',
+  },
+  {
+    href: `https://twitter.com/intent/tweet?url=${encodeURIComponent(defaultSiteUrl)}&text=${encodeURIComponent('Shop and sell with View2Connect')}`,
+    icon: 'x',
+    label: 'Share View2Connect on X',
+  },
+  {
+    href: `https://wa.me/?text=${encodeURIComponent(`Shop and sell with View2Connect: ${defaultSiteUrl}`)}`,
+    icon: 'wa',
+    label: 'Share View2Connect on WhatsApp',
+  },
+  {
+    href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(defaultSiteUrl)}`,
+    icon: 'in',
+    label: 'Share View2Connect on LinkedIn',
+  },
+];
+
 const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect</title>
-  <desc id="desc">UrbanConnect UC location mark</desc>
-  <rect width="160" height="160" rx="34" fill="#12372A"/>
-  <path d="M35 105c17-17 33-25 48-25s29 8 42 25" fill="none" stroke="#F2B84B" stroke-width="16" stroke-linecap="round"/>
-  <text x="35" y="82" font-family="Arial, Helvetica, sans-serif" font-size="43" font-weight="900" fill="#FFFFFF">UC</text>
-  <path d="M116 33c-13 0-24 11-24 24 0 18 24 43 24 43s24-25 24-43c0-13-11-24-24-24zm0 34a10 10 0 1 1 0-20 10 10 0 0 1 0 20z" fill="#EF6A4E"/>
+  <title id="title">View2Connect</title>
+  <desc id="desc">View2Connect commerce bag mark</desc>
+  <rect width="160" height="160" rx="34" fill="#5B2BCB"/>
+  <path d="M49 59h62l8 62H41l8-62Z" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M61 62V49c0-14 9-24 21-24s21 10 21 24v13" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round"/>
+  <text x="68" y="105" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="900" fill="#FFFFFF">2</text>
+  <circle cx="120" cy="119" r="14" fill="#F06038" stroke="#5B2BCB" stroke-width="5"/>
 </svg>`;
 
 const assetMap = {
   'urbanconnect-carousel-market.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 760" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect marketplace hero</title>
+  <title id="title">View2Connect marketplace hero</title>
   <desc id="desc">A bright marketplace scene with local shopping, wallet status, and support cards.</desc>
   <rect width="1440" height="760" fill="#EAF3EE"/>
   <rect x="74" y="74" width="1292" height="612" rx="42" fill="#12372A"/>
   <rect x="124" y="128" width="426" height="504" rx="30" fill="#FFFFFF"/>
   <rect x="164" y="168" width="346" height="90" rx="18" fill="#DCEBE3"/>
-  <text x="194" y="210" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="900" fill="#12372A">River Park shop</text>
+  <text x="194" y="210" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="900" fill="#12372A">Local shop</text>
   <text x="194" y="244" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#607168">Approved listings near you</text>
   <rect x="164" y="300" width="150" height="150" rx="22" fill="#EF6A4E"/>
   <rect x="360" y="300" width="150" height="150" rx="22" fill="#2F6F9F"/>
@@ -58,12 +91,12 @@ const assetMap = {
   <path d="M772 608h220" stroke="#EF6A4E" stroke-width="20" stroke-linecap="round"/>
 </svg>`,
   'urbanconnect-carousel-wallet.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 760" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect payment hero</title>
+  <title id="title">View2Connect payment hero</title>
   <desc id="desc">Wallet, card payment, bank transfer, and confirmed receipt cards.</desc>
   <rect width="1440" height="760" fill="#F4F7FA"/>
   <rect x="88" y="88" width="1264" height="584" rx="44" fill="#FFFFFF"/>
   <rect x="148" y="148" width="500" height="464" rx="34" fill="#12372A"/>
-  <text x="204" y="226" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#CFE3D9">UrbanConnect wallet</text>
+  <text x="204" y="226" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#CFE3D9">View2Connect wallet</text>
   <text x="204" y="318" font-family="Arial, Helvetica, sans-serif" font-size="74" font-weight="950" fill="#FFFFFF">Confirmed</text>
   <rect x="204" y="386" width="350" height="82" rx="20" fill="#F2B84B"/>
   <text x="240" y="438" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="950" fill="#12372A">Provider verified</text>
@@ -76,7 +109,7 @@ const assetMap = {
   <rect x="982" y="520" width="100" height="24" rx="12" fill="#FFFFFF" opacity=".56"/>
 </svg>`,
   'urbanconnect-carousel-support.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 760" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect support hero</title>
+  <title id="title">View2Connect support hero</title>
   <desc id="desc">Customer care, admin operations, support messages, and verification workflow.</desc>
   <rect width="1440" height="760" fill="#F8F6F1"/>
   <rect x="86" y="80" width="1268" height="600" rx="44" fill="#12372A"/>
@@ -92,12 +125,12 @@ const assetMap = {
   <path d="M802 592h300" stroke="#EF6A4E" stroke-width="22" stroke-linecap="round"/>
 </svg>`,
   'urbanconnect-screenshot-shop.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 860" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect app shopping screenshot</title>
-  <desc id="desc">Mobile app screen showing River Park shop listings.</desc>
+  <title id="title">View2Connect app shopping screenshot</title>
+  <desc id="desc">Mobile app screen showing local shop listings.</desc>
   <rect width="520" height="860" rx="44" fill="#16261F"/>
   <rect x="24" y="28" width="472" height="804" rx="34" fill="#F6F8F4"/>
   <rect x="54" y="62" width="412" height="126" rx="24" fill="#12372A"/>
-  <text x="86" y="120" font-family="Arial, Helvetica, sans-serif" font-size="29" font-weight="950" fill="#FFFFFF">River Park shop</text>
+  <text x="86" y="120" font-family="Arial, Helvetica, sans-serif" font-size="29" font-weight="950" fill="#FFFFFF">Local shop</text>
   <text x="86" y="154" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" fill="#CFE3D9">Products approved by customer care</text>
   <rect x="54" y="224" width="190" height="210" rx="18" fill="#FFFFFF"/>
   <rect x="276" y="224" width="190" height="210" rx="18" fill="#FFFFFF"/>
@@ -111,7 +144,7 @@ const assetMap = {
   <text x="88" y="662" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="950" fill="#12372A">Receipt emailed</text>
 </svg>`,
   'urbanconnect-screenshot-wallet.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 860" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect wallet screenshot</title>
+  <title id="title">View2Connect wallet screenshot</title>
   <desc id="desc">Mobile app screen showing wallet balance and add funds with Flutterwave.</desc>
   <rect width="520" height="860" rx="44" fill="#16261F"/>
   <rect x="24" y="28" width="472" height="804" rx="34" fill="#F4F7FA"/>
@@ -129,7 +162,7 @@ const assetMap = {
   <text x="88" y="680" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="900" fill="#12372A">All transactions</text>
 </svg>`,
   'urbanconnect-screenshot-support.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 860" role="img" aria-labelledby="title desc">
-  <title id="title">UrbanConnect support screenshot</title>
+  <title id="title">View2Connect support screenshot</title>
   <desc id="desc">Mobile app screen showing customer care support messages.</desc>
   <rect width="520" height="860" rx="44" fill="#16261F"/>
   <rect x="24" y="28" width="472" height="804" rx="34" fill="#F8F6F1"/>
@@ -271,28 +304,19 @@ function drawRoundedRect(rgba, size, color) {
 function createFaviconPng(size) {
   const rgba = Buffer.alloc(size * size * 4);
   const scale = size / 48;
-  const green = [18, 55, 42, 255];
-  const gold = [242, 184, 75, 255];
+  const purple = [91, 43, 203, 255];
   const white = [255, 255, 255, 255];
-  const coral = [239, 106, 78, 255];
+  const coral = [240, 96, 56, 255];
 
-  drawRoundedRect(rgba, size, green);
+  drawRoundedRect(rgba, size, purple);
 
-  for (let x = 8 * scale; x <= 40 * scale; x += Math.max(0.5, scale)) {
-    const normalized = (x / scale - 24) / 16;
-    const y = (35 - 9 * (1 - normalized * normalized)) * scale;
-    drawCircle(rgba, size, x, y, 2.6 * scale, gold);
-  }
-
-  drawRect(rgba, size, 9 * scale, 15 * scale, 4 * scale, 16 * scale, white);
-  drawRect(rgba, size, 19 * scale, 15 * scale, 4 * scale, 16 * scale, white);
-  drawRect(rgba, size, 12 * scale, 29 * scale, 10 * scale, 4 * scale, white);
-  drawRect(rgba, size, 26 * scale, 15 * scale, 15 * scale, 4 * scale, white);
-  drawRect(rgba, size, 26 * scale, 15 * scale, 4 * scale, 18 * scale, white);
-  drawRect(rgba, size, 26 * scale, 29 * scale, 15 * scale, 4 * scale, white);
-
-  drawCircle(rgba, size, 36 * scale, 11 * scale, 6 * scale, coral);
-  drawCircle(rgba, size, 36 * scale, 11 * scale, 2 * scale, white);
+  drawRect(rgba, size, 13 * scale, 18 * scale, 3 * scale, 21 * scale, white);
+  drawRect(rgba, size, 33 * scale, 18 * scale, 3 * scale, 21 * scale, white);
+  drawRect(rgba, size, 13 * scale, 36 * scale, 23 * scale, 3 * scale, white);
+  drawRect(rgba, size, 13 * scale, 18 * scale, 23 * scale, 3 * scale, white);
+  drawCircle(rgba, size, 24 * scale, 15 * scale, 8 * scale, white);
+  drawCircle(rgba, size, 24 * scale, 16 * scale, 5 * scale, purple);
+  drawCircle(rgba, size, 36 * scale, 37 * scale, 6 * scale, coral);
 
   return createPng(size, size, rgba);
 }
@@ -319,6 +343,7 @@ function createIcoFromPng(png, size) {
 const navLinks = [
   { href: '/', label: 'Home' },
   { href: '/how-it-works/', label: 'How it works' },
+  { href: '/business-registration/', label: 'Business registration', mobileHidden: true },
   { href: '/about/', label: 'About' },
   { href: '/contact/', label: 'Contact' },
 ];
@@ -336,7 +361,11 @@ function normalizeBaseUrl(value) {
   const trimmed = value?.trim() || defaultSiteUrl;
   const normalized = trimmed.replace(/\/+$/, '') || defaultSiteUrl;
 
-  if (normalized === 'http://urbanconnectstore.com') {
+  if (
+    normalized === 'http://view2connect.ng' ||
+    normalized === 'http://www.view2connect.ng' ||
+    normalized === 'https://view2connect.ng'
+  ) {
     return defaultSiteUrl;
   }
 
@@ -347,24 +376,51 @@ function jsonLdScript(value) {
   return JSON.stringify(value).replaceAll('<', '\\u003c');
 }
 
+function buildSocialLinks(className = 'social-links') {
+  return `<div class="${className}" aria-label="Share View2Connect">
+    ${socialLinks
+      .map(
+        (link) => `<a
+          aria-label="${escapeHtml(link.label)}"
+          href="${escapeHtml(link.href)}"
+          rel="noopener noreferrer"
+          target="_blank"
+          title="${escapeHtml(link.label)}"
+        ><span aria-hidden="true">${escapeHtml(link.icon)}</span></a>`,
+      )
+      .join('')}
+  </div>`;
+}
+
 function buildHeader(activePath) {
   return `<header class="site-header">
     <a class="brand" href="/">
       <span class="brand-logo" aria-hidden="true">${logoSvg}</span>
       <span>
-        <strong>UrbanConnect</strong>
-        <span>River Park marketplace</span>
+        <strong>View2Connect</strong>
+        <span>CAC-registered marketplace</span>
       </span>
     </a>
-    <nav class="site-nav" aria-label="Main navigation">
-      ${navLinks
-        .map(
-          (link) =>
-            `<a class="${link.href === activePath ? 'active' : ''}" href="${link.href}">${link.label}</a>`,
-        )
-        .join('')}
-    </nav>
-    <button class="nav-cta" type="button" data-store-button="UrbanConnect app">Get the app</button>
+    <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle>
+      <span></span><span></span><span></span>
+    </button>
+    <div class="header-actions" data-header-actions>
+      <nav class="site-nav" aria-label="Main navigation">
+        ${navLinks
+          .map(
+            (link) =>
+              `<a class="${[
+                link.href === activePath ? 'active' : '',
+                link.mobileHidden ? 'mobile-web-hidden' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}" href="${link.href}">${link.label}</a>`,
+          )
+          .join('')}
+      </nav>
+      ${buildSocialLinks('header-social-links')}
+      <button class="nav-cta" type="button" data-store-button="View2Connect app">Get the app</button>
+    </div>
   </header>`;
 }
 
@@ -373,25 +429,29 @@ function buildFooter() {
 
   return `<footer class="footer" id="contact">
     <div>
-      <strong>UrbanConnect</strong>
-      <p>River Park marketplace for approved local shopping, payments, receipts, and customer care.</p>
+      <strong>View2Connect</strong>
+      <p>CAC-registered marketplace for products, food, secure payments, receipts, and delivery.</p>
     </div>
     <div class="footer-links">
       <a href="mailto:${supportEmail}">${supportEmail}</a>
       <a href="/contact/">Contact</a>
       <a href="/about/">About</a>
     </div>
-    <div class="copyright">Copyright ${year} UrbanConnect. All rights reserved.</div>
+    ${buildSocialLinks('footer-social-links')}
+    <div class="copyright">Copyright ${year} View2Connect. CAC registered. All rights reserved.</div>
   </footer>`;
 }
 
 function buildSharedHead({
   canonicalPath,
   description,
+  includeDocumentBasics = true,
   robots = 'index,follow,max-image-preview:large',
   title,
 }) {
-  const siteUrl = normalizeBaseUrl(process.env.URBANCONNECT_SITE_URL);
+  const siteUrl = normalizeBaseUrl(
+    process.env.VIEW2CONNECT_SITE_URL ?? process.env.URBANCONNECT_SITE_URL,
+  );
   const canonicalUrl = `${siteUrl}${canonicalPath}`;
   const previewImageUrl = heroCarouselImages[0].src;
   const organizationJson = {
@@ -399,10 +459,15 @@ function buildSharedHead({
     '@id': `${siteUrl}/#organization`,
     '@type': 'Organization',
     name: siteName,
+    alternateName: 'View 2 Connect',
     url: siteUrl,
-    logo: `${siteUrl}/favicon-96x96.png`,
+    logo: `${siteUrl}/favicon-512x512.png`,
     email: supportEmail,
     description: siteDescription,
+    areaServed: {
+      '@type': 'Country',
+      name: 'Nigeria',
+    },
   };
   const websiteJson = {
     '@context': 'https://schema.org',
@@ -418,7 +483,7 @@ function buildSharedHead({
     name: siteName,
     url: siteUrl,
     image: previewImageUrl,
-    logo: `${siteUrl}/favicon-96x96.png`,
+    logo: `${siteUrl}/favicon-512x512.png`,
     applicationCategory: 'ShoppingApplication',
     operatingSystem: 'iOS, Android',
     description: siteDescription,
@@ -426,11 +491,11 @@ function buildSharedHead({
       '@id': `${siteUrl}/#organization`,
     },
     featureList: [
-      'Approved River Park marketplace listings',
+      'Approved local marketplace listings',
       'Wallet and Flutterwave payments',
       'Receipts and delivery updates',
       'Customer care support',
-      'Business owner tools',
+      'Business registration review',
     ],
     offers: {
       '@type': 'Offer',
@@ -439,9 +504,9 @@ function buildSharedHead({
     },
   };
 
-  return `<meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#12372A" />
+  return `${includeDocumentBasics ? `<meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />` : ''}
+    <meta name="theme-color" content="#5B2BCB" />
     <meta name="robots" content="${escapeHtml(robots)}" />
     <meta name="description" content="${escapeHtml(description)}" />
     <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
@@ -451,6 +516,7 @@ function buildSharedHead({
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="${siteName}" />
     <meta property="og:title" content="${escapeHtml(title)}" />
@@ -471,15 +537,15 @@ function buildStyles() {
   return `<style>
       :root {
         color-scheme: light;
-        --ink: #12201b;
-        --muted: #607168;
-        --paper: #f5f7f1;
+        --ink: #21183a;
+        --muted: #706a7c;
+        --paper: #f8f7fb;
         --card: #ffffff;
-        --line: #dbe3dd;
-        --primary: #12372a;
-        --primary-soft: #dcebe3;
-        --accent: #ef6a4e;
-        --gold: #f2b84b;
+        --line: #d9d2e5;
+        --primary: #5b2bcb;
+        --primary-soft: #eee8fb;
+        --accent: #f06038;
+        --gold: #f5c84c;
         --blue: #2f6f9f;
       }
 
@@ -550,6 +616,31 @@ function buildStyles() {
         line-height: 17px;
         font-weight: 800;
       }
+      .header-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+      .nav-toggle {
+        display: none;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        align-content: center;
+        gap: 5px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 0;
+      }
+      .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        border-radius: 2px;
+        background: var(--primary);
+      }
       .site-nav {
         display: flex;
         align-items: center;
@@ -570,6 +661,34 @@ function buildStyles() {
       .site-nav a:hover {
         background: var(--primary-soft);
         color: var(--primary);
+      }
+      .header-social-links,
+      .footer-social-links {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .header-social-links a,
+      .footer-social-links a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: var(--card);
+        color: var(--primary);
+        text-decoration: none;
+        font-size: 12px;
+        line-height: 1;
+        font-weight: 950;
+        text-transform: uppercase;
+      }
+      .header-social-links a:hover,
+      .footer-social-links a:hover {
+        border-color: var(--primary);
+        background: var(--primary-soft);
       }
       .nav-cta, .store-button, .primary-link {
         display: inline-flex;
@@ -820,6 +939,330 @@ function buildStyles() {
         color: var(--primary);
         font-weight: 900;
       }
+      .application-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.84fr) minmax(340px, 1.16fr);
+        gap: 18px;
+        align-items: start;
+      }
+      .registration-page {
+        position: relative;
+        isolation: isolate;
+        min-height: calc(100vh - 90px);
+        background-image:
+          linear-gradient(rgba(20, 13, 38, 0.76), rgba(20, 13, 38, 0.82)),
+          url("/assets/seller-registration-marketplace.png");
+        background-position: center;
+        background-size: cover;
+        background-attachment: fixed;
+      }
+      .registration-page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: rgba(26, 17, 45, 0.16);
+      }
+      .registration-page .page-hero h1,
+      .registration-page .page-hero .hero-lead {
+        color: #fff;
+      }
+      .registration-page .page-hero .section-kicker {
+        color: #f5c84c;
+      }
+      .registration-page .application-panel {
+        background: rgba(255, 255, 255, 0.97);
+        box-shadow: 0 24px 70px rgba(12, 7, 24, 0.28);
+      }
+      .application-panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        padding: 22px;
+        box-shadow: 0 18px 44px rgba(18, 32, 27, 0.08);
+      }
+      .application-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 20px;
+      }
+      .application-list div {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 14px;
+      }
+      .application-list strong {
+        display: block;
+        color: var(--ink);
+        font-weight: 950;
+      }
+      .application-list span {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 22px;
+        font-weight: 700;
+      }
+      .business-form {
+        display: grid;
+        gap: 16px;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .field {
+        display: grid;
+        gap: 7px;
+      }
+      .field.full {
+        grid-column: 1 / -1;
+      }
+      .field label {
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 18px;
+        font-weight: 950;
+      }
+      .field input,
+      .field select,
+      .field textarea {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+        padding: 12px 13px;
+        font: inherit;
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .field textarea {
+        min-height: 118px;
+        resize: vertical;
+      }
+      .field input:focus,
+      .field select:focus,
+      .field textarea:focus {
+        border-color: var(--primary);
+        outline: 3px solid rgba(18, 55, 42, 0.13);
+      }
+      .form-note,
+      .form-status {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 23px;
+        font-weight: 700;
+      }
+      .form-status {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--primary-soft);
+        padding: 12px;
+        color: var(--primary);
+      }
+      .onboarding-progress {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .progress-step {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 900;
+        text-align: center;
+      }
+      .progress-step.active {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+      .seller-type-grid,
+      .plan-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .seller-type-card,
+      .plan-card {
+        display: grid;
+        gap: 7px;
+        min-height: 132px;
+        border: 2px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 16px;
+        color: var(--ink);
+        text-align: left;
+      }
+      .seller-type-card strong,
+      .plan-card strong {
+        font-size: 18px;
+        line-height: 24px;
+      }
+      .seller-type-card span,
+      .plan-card span {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 20px;
+        font-weight: 700;
+      }
+      .seller-type-card.active,
+      .plan-card:has(input:checked) {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+      }
+      .seller-type-icon {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        background: var(--primary);
+        color: #fff;
+        font-weight: 950;
+      }
+      .plan-card {
+        cursor: pointer;
+      }
+      .plan-card input {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--primary);
+      }
+      .plan-price {
+        color: var(--primary) !important;
+        font-size: 20px !important;
+        line-height: 25px !important;
+        font-weight: 950 !important;
+      }
+      .plan-benefits {
+        display: grid;
+        gap: 7px;
+        margin: 3px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .plan-benefits li {
+        position: relative;
+        padding-left: 20px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 19px;
+        font-weight: 750;
+      }
+      .plan-benefits li::before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: var(--primary);
+        font-weight: 950;
+      }
+      .plan-recommendation {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid var(--primary);
+        border-radius: 8px;
+        background: var(--primary-soft);
+        padding: 12px 14px;
+      }
+      .plan-recommendation strong {
+        color: var(--primary);
+      }
+      .account-summary {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--primary-soft);
+        padding: 14px;
+      }
+      .account-summary span {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 20px;
+        font-weight: 750;
+      }
+      .field input[readonly] {
+        background: #f0edf5;
+        color: var(--muted);
+      }
+      .otp-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(16, 10, 28, 0.76);
+      }
+      .otp-dialog {
+        width: min(440px, 100%);
+        display: grid;
+        gap: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 20px;
+        box-shadow: 0 26px 76px rgba(12, 7, 24, 0.34);
+      }
+      .otp-dialog h2 {
+        font-size: 25px;
+        line-height: 31px;
+      }
+      .otp-code {
+        width: 100%;
+        min-height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+        padding: 10px 14px;
+        font: inherit;
+        font-size: 22px;
+        font-weight: 900;
+        letter-spacing: 0;
+        text-align: center;
+      }
+      .otp-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .button-loading {
+        pointer-events: none;
+        opacity: 0.68;
+      }
+      .form-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .secondary-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        border: 1px solid var(--primary);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--primary);
+        padding: 0 16px;
+        text-decoration: none;
+        font-weight: 900;
+      }
       .footer {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -843,6 +1286,9 @@ function buildStyles() {
         color: var(--primary);
         text-decoration: none;
         font-weight: 900;
+      }
+      .footer-social-links {
+        justify-content: flex-end;
       }
       .copyright {
         grid-column: 1 / -1;
@@ -898,17 +1344,76 @@ function buildStyles() {
       .page-hero .hero-lead {
         color: var(--muted);
       }
+      .desktop-web-only-message {
+        display: none;
+      }
+      .desktop-web-message-card {
+        max-width: 720px;
+        margin: 0 auto;
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+        padding: 24px;
+        box-shadow: 0 16px 40px rgba(18, 55, 42, 0.08);
+      }
+      .desktop-web-message-card h2 {
+        margin: 0;
+        font-size: clamp(28px, 5vw, 34px);
+        line-height: 1.08;
+      }
+      .desktop-web-message-card p {
+        margin: 0;
+        color: var(--muted);
+      }
 
       @media (max-width: 920px) {
         .site-header {
-          align-items: flex-start;
+          align-items: center;
+          flex-direction: row;
+          flex-wrap: wrap;
+        }
+        .nav-toggle {
+          display: grid;
+          margin-left: auto;
+        }
+        .header-actions {
+          display: none;
+          width: 100%;
+          align-items: stretch;
           flex-direction: column;
+          gap: 10px;
+          padding-top: 4px;
+        }
+        .header-social-links {
+          justify-content: center;
+        }
+        .site-header.menu-open .header-actions {
+          display: flex;
         }
         .site-nav {
-          justify-content: flex-start;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          justify-content: stretch;
+        }
+        .site-nav a {
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: #fff;
+          text-align: center;
         }
         .nav-cta {
           width: 100%;
+        }
+        .mobile-web-hidden {
+          display: none !important;
+        }
+        .seller-desktop-only {
+          display: none !important;
+        }
+        .desktop-web-only-message {
+          display: block;
         }
         .hero {
           margin-top: -142px;
@@ -925,10 +1430,20 @@ function buildStyles() {
         .steps-grid,
         .screen-grid,
         .contact-grid,
+        .application-grid,
         .footer {
           grid-template-columns: 1fr;
         }
+        .application-grid > .application-panel:first-child {
+          order: 2;
+        }
+        .application-grid > .application-panel:last-child {
+          order: 1;
+        }
         .footer-links {
+          justify-content: flex-start;
+        }
+        .footer-social-links {
           justify-content: flex-start;
         }
       }
@@ -961,13 +1476,39 @@ function buildStyles() {
         .store-button {
           width: 100%;
         }
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+        .seller-type-grid,
+        .plan-grid {
+          grid-template-columns: 1fr;
+        }
+        .registration-page {
+          background-attachment: scroll;
+          background-position: 38% center;
+        }
+        .registration-page .page-hero {
+          padding: 54px 0 30px;
+        }
+        .registration-page .section {
+          padding-bottom: 42px;
+        }
+        .onboarding-progress {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .application-panel {
+          padding: 16px;
+        }
+        .otp-actions {
+          grid-template-columns: 1fr;
+        }
       }
     </style>`;
 }
 
 function buildLaunchModal() {
   const launchMessage =
-    'UrbanConnect is still in review. App Store and Google Play launch soon.';
+    'View2Connect is still in review. App Store and Google Play launch soon.';
 
   return `<div class="launch-modal" data-launch-modal hidden>
       <div class="launch-dialog" role="dialog" aria-modal="true" aria-labelledby="launch-title">
@@ -1048,6 +1589,28 @@ function buildDocument({
       ${buildFooter()}
     </main>
     ${buildLaunchModal()}
+    <script>
+      (() => {
+        const toggle = document.querySelector('[data-nav-toggle]');
+        const header = toggle?.closest('.site-header');
+        const actions = document.querySelector('[data-header-actions]');
+        if (!toggle || !header || !actions) return;
+
+        toggle.addEventListener('click', () => {
+          const isOpen = header.classList.toggle('menu-open');
+          toggle.setAttribute('aria-expanded', String(isOpen));
+          toggle.setAttribute('aria-label', isOpen ? 'Close navigation' : 'Open navigation');
+        });
+
+        actions.addEventListener('click', (event) => {
+          if (event.target instanceof HTMLAnchorElement) {
+            header.classList.remove('menu-open');
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.setAttribute('aria-label', 'Open navigation');
+          }
+        });
+      })();
+    </script>
   </body>
 </html>`;
 }
@@ -1064,16 +1627,17 @@ function buildHomeHtml() {
         )
         .join('')}
       <div class="hero-content">
-        <div class="eyebrow">Built for River Park residents and business owners</div>
-        <h1 id="hero-title">UrbanConnect</h1>
+        <div class="eyebrow">Built for customers and local businesses</div>
+        <h1 id="hero-title">View2Connect</h1>
         <p class="hero-lead">
-          A mobile-first marketplace for approved listings, wallet and Flutterwave payments,
-          receipts, delivery updates, customer care, and business owner tools.
+          A mobile-first marketplace for approved local listings, wallet and Flutterwave payments,
+          receipts, delivery updates, customer care, and business onboarding.
         </p>
         <div class="store-row">
           <button class="store-button" type="button" data-store-button="App Store">App Store</button>
           <button class="store-button secondary" type="button" data-store-button="Google Play">Google Play</button>
           <a class="store-button web-link" href="/${appPath}/">Web</a>
+          <a class="primary-link mobile-web-hidden" href="/business-registration/">Business registration</a>
           <a class="primary-link" href="/how-it-works/">See how it works</a>
         </div>
         <div class="hero-dots" aria-label="Hero carousel controls">
@@ -1094,10 +1658,10 @@ function buildHomeHtml() {
         <div class="section-header">
           <div>
             <p class="section-kicker">Marketplace</p>
-            <h2>One focused app for local buying inside River Park.</h2>
+            <h2>One focused app for local buying from trusted sellers.</h2>
           </div>
           <p class="section-copy">
-            UrbanConnect keeps public web simple and moves the real customer experience to the mobile app,
+            View2Connect keeps public web simple and moves the real customer experience to the mobile app,
             where identity, wallet, receipts, support, and orders stay connected.
           </p>
         </div>
@@ -1105,7 +1669,7 @@ function buildHomeHtml() {
           <article class="feature-card">
             <span class="feature-icon">01</span>
             <strong>Approved listings</strong>
-            <p>Business owners submit products or services, while customer care and admin review what customers can see.</p>
+          <p>Businesses apply on the website, then customer care and admin review what customers can see.</p>
           </article>
           <article class="feature-card">
             <span class="feature-icon">02</span>
@@ -1134,21 +1698,21 @@ function buildHomeHtml() {
         </div>
         <div class="screen-grid">
           <article class="screen-card">
-            <img src="/assets/urbanconnect-screenshot-shop.svg" alt="UrbanConnect shop screen" />
+            <img src="/assets/urbanconnect-screenshot-shop.svg" alt="View2Connect shop screen" />
             <div class="screen-caption">
-              <strong>Browse River Park listings</strong>
+              <strong>Browse local listings</strong>
               <p>Open the app, choose approved products or services, and view listing details before adding to cart.</p>
             </div>
           </article>
           <article class="screen-card">
-            <img src="/assets/urbanconnect-screenshot-wallet.svg" alt="UrbanConnect wallet screen" />
+            <img src="/assets/urbanconnect-screenshot-wallet.svg" alt="View2Connect wallet screen" />
             <div class="screen-caption">
               <strong>Add funds or pay</strong>
               <p>Use card or bank payment through Flutterwave, then wait for provider-confirmed wallet updates.</p>
             </div>
           </article>
           <article class="screen-card">
-            <img src="/assets/urbanconnect-screenshot-support.svg" alt="UrbanConnect customer care screen" />
+            <img src="/assets/urbanconnect-screenshot-support.svg" alt="View2Connect customer care screen" />
             <div class="screen-caption">
               <strong>Get customer care</strong>
               <p>Use support for orders, payments, receipts, verification, and delivery questions.</p>
@@ -1162,18 +1726,18 @@ function buildHomeHtml() {
       <div class="shell contact-grid">
         <div>
           <p class="section-kicker">Launch status</p>
-          <h2>The mobile app is being prepared for App Store and Google Play.</h2>
+        <h2>The mobile app is being prepared for App Store and Google Play.</h2>
           <p class="section-copy">
             The public website is here for launch information, app previews, and contact details.
             The customer app itself is not available on mobile web.
           </p>
         </div>
         <article class="contact-card">
-          <strong>Contact UrbanConnect</strong>
+          <strong>Contact View2Connect</strong>
           <p>For launch questions, store availability, support, or business owner onboarding, contact customer care.</p>
           <div class="contact-list">
             <a href="mailto:${supportEmail}">${supportEmail}</a>
-            <span>River Park marketplace support</span>
+            <span>View2Connect marketplace support</span>
           </div>
         </article>
       </div>
@@ -1184,7 +1748,7 @@ function buildHomeHtml() {
     body,
     canonicalPath: '/',
     description: siteDescription,
-    title: 'UrbanConnect | River Park Marketplace App',
+    title: 'View2Connect | Local Marketplace App',
   });
 }
 
@@ -1192,14 +1756,14 @@ function buildHowItWorksHtml() {
   const body = `<section class="page-hero">
       <div class="shell">
         <p class="section-kicker">How it works</p>
-        <h1>From listing to receipt, UrbanConnect keeps the flow clear.</h1>
-        <p class="hero-lead">Residents shop, business owners list, customer care supports, and admin keeps the marketplace controlled.</p>
+        <h1>From listing to receipt, View2Connect keeps the flow clear.</h1>
+        <p class="hero-lead">Customers shop in the app, businesses apply through the website, customer care supports, and admin keeps the marketplace controlled.</p>
       </div>
     </section>
     <section class="section tight">
       <div class="shell steps-grid">
-        <article class="card"><strong>1. Create or verify account</strong><p>Residents and business owners use the mobile app with account security, passcode, and biometric unlock where available.</p></article>
-        <article class="card"><strong>2. Browse approved listings</strong><p>Customers choose products or services from River Park listings that have gone through admin review.</p></article>
+        <article class="card"><strong>1. Create user account</strong><p>Customers use the app with account security, passcode, and biometric unlock where available.</p></article>
+        <article class="card"><strong>2. Businesses apply separately</strong><p>Store owners, food vendors, and service providers use the website business registration form before admin review.</p></article>
         <article class="card"><strong>3. Pay and receive updates</strong><p>Payments are confirmed by the provider before receipts, wallet updates, and order progress are shown.</p></article>
       </div>
     </section>
@@ -1215,8 +1779,8 @@ function buildHowItWorksHtml() {
     activePath: '/how-it-works/',
     body,
     canonicalPath: '/how-it-works/',
-    description: 'Learn how UrbanConnect works for River Park shopping, payments, receipts, and customer care.',
-    title: 'How UrbanConnect Works | River Park Marketplace',
+    description: 'Learn how View2Connect works for local shopping, payments, receipts, and delivery updates.',
+    title: 'How View2Connect Works | Local Marketplace',
   });
 }
 
@@ -1224,13 +1788,13 @@ function buildAboutHtml() {
   const body = `<section class="page-hero">
       <div class="shell">
         <p class="section-kicker">About</p>
-        <h1>UrbanConnect is built for controlled local commerce.</h1>
-        <p class="hero-lead">The goal is a practical marketplace for River Park residents and business owners, with admin review and customer care at the center.</p>
+        <h1>View2Connect is built for controlled local commerce.</h1>
+        <p class="hero-lead">The goal is a practical marketplace for customers and business owners, with admin review and customer care at the center.</p>
       </div>
     </section>
     <section class="section tight">
       <div class="shell feature-grid">
-        <article class="feature-card"><span class="feature-icon">A</span><strong>Local focus</strong><p>UrbanConnect keeps discovery tied to River Park so residents can shop from trusted local sellers.</p></article>
+        <article class="feature-card"><span class="feature-icon">A</span><strong>Local focus</strong><p>View2Connect keeps discovery tied to nearby sellers so customers can shop from trusted local businesses.</p></article>
         <article class="feature-card"><span class="feature-icon">B</span><strong>Operational control</strong><p>Admin and customer care tools help manage listings, payments, orders, and support records.</p></article>
         <article class="feature-card"><span class="feature-icon">C</span><strong>Mobile first</strong><p>The public web explains the product. The customer experience belongs in the mobile app.</p></article>
       </div>
@@ -1240,8 +1804,317 @@ function buildAboutHtml() {
     activePath: '/about/',
     body,
     canonicalPath: '/about/',
-    description: 'About UrbanConnect, a River Park marketplace app for local sellers, residents, customer care, and admin operations.',
-    title: 'About UrbanConnect | River Park Marketplace',
+    description: 'About View2Connect, a CAC-registered local marketplace for sellers and customers.',
+    title: 'About View2Connect | Local Marketplace',
+  });
+}
+
+function buildBusinessRegistrationHtml() {
+  const body = `<section class="page-hero">
+      <div class="shell">
+        <p class="section-kicker">Seller onboarding</p>
+        <h1>Create a store owner account after email verification.</h1>
+        <p class="hero-lead">Apply as a customer or store owner, choose Free or Gold, and finish signup only after your email code is confirmed.</p>
+        <div class="store-row">
+          <a class="primary-link" href="/${sellerPortalPath}/">Seller login</a>
+        </div>
+      </div>
+    </section>
+    <section class="section tight">
+      <div class="shell application-grid">
+        <aside class="application-panel">
+          <p class="section-kicker">Before approval</p>
+          <h2>What View2Connect will check.</h2>
+          <p class="section-copy">
+            Every seller can apply, including people selling only a few items. We review identity,
+            pickup details, product readiness, and the ability to fulfil confirmed orders.
+          </p>
+          <div class="application-list">
+            <div><strong>Separate accounts</strong><span>Your customer, store owner, and dispatch accounts stay separate.</span></div>
+            <div><strong>Store owner</strong><span>Register a supermarket, retail store, food business, pharmacy, or established product catalog.</span></div>
+            <div><strong>After approval</strong><span>Sign in to the seller portal and add products manually or import a CSV/Excel catalog.</span></div>
+          </div>
+        </aside>
+        <article class="application-panel">
+          <div class="onboarding-progress">
+            <div class="progress-step active" data-progress-step="1">1. Seller type</div>
+            <div class="progress-step" data-progress-step="2">2. Details</div>
+            <div class="progress-step" data-progress-step="3">3. Plan</div>
+          </div>
+
+          <section class="business-form" data-seller-type-step>
+            <div>
+              <p class="section-kicker">Choose seller type</p>
+              <h2>How would you like to continue?</h2>
+              <p class="form-note">Customer login stays separate. Store owner signup is for sellers only.</p>
+            </div>
+            <div class="seller-type-grid">
+              <button class="seller-type-card" type="button" data-customer-login>
+                <span class="seller-type-icon">I</span>
+                <strong>Customer</strong>
+                <span>Go to the customer login and shopping app.</span>
+              </button>
+              <button class="seller-type-card" type="button" data-seller-type="store">
+                <span class="seller-type-icon">S</span>
+                <strong>Store owner</strong>
+                <span>Bring an existing shop, food business, or product catalog online.</span>
+              </button>
+            </div>
+          </section>
+
+          <form class="business-form" data-business-registration-form hidden>
+            <div>
+              <p class="section-kicker">Application details</p>
+              <h2 data-application-title>Tell us about your store.</h2>
+              <p class="form-note">The email entered here becomes the dedicated store owner login after verification.</p>
+            </div>
+            <input name="sellerType" type="hidden" />
+            <div class="form-grid">
+              <div class="field">
+                <label for="ownerName">Owner full name</label>
+                <input id="ownerName" name="ownerName" autocomplete="name" required />
+              </div>
+              <div class="field">
+                <label for="businessName" data-business-name-label>Business or store name</label>
+                <input id="businessName" name="businessName" required />
+              </div>
+              <div class="field">
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="email" required />
+              </div>
+              <div class="field">
+                <label for="phone">Phone / WhatsApp</label>
+                <input id="phone" name="phone" autocomplete="tel" required />
+              </div>
+              <div class="field" data-store-only>
+                <label for="businessType">Business type</label>
+                <select id="businessType" name="businessType" required>
+                  <option value="">Select type</option>
+                  <option>Supermarket / grocery store</option>
+                  <option>Food vendor / restaurant</option>
+                  <option>Pharmacy / health store</option>
+                  <option>Cosmetics / beauty store</option>
+                  <option>Service provider</option>
+                  <option>Other retail store</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="area">City / area</label>
+                <input id="area" name="area" placeholder="Abuja, Lekki, Wuse 2" required />
+              </div>
+              <div class="field full">
+                <label for="address">Pickup or business address</label>
+                <input id="address" name="address" autocomplete="street-address" required />
+              </div>
+              <div class="field" data-store-only>
+                <label for="cacNumber">CAC number</label>
+                <input id="cacNumber" name="cacNumber" placeholder="Optional during early application" />
+              </div>
+              <div class="field" data-store-only>
+                <label for="posSystem">POS or inventory system</label>
+                <input id="posSystem" name="posSystem" placeholder="Prestige, Excel, manual, none" />
+              </div>
+              <div class="field" data-store-only>
+                <label for="catalogReady">Product list status</label>
+                <select id="catalogReady" name="catalogReady" required>
+                  <option value="">Select status</option>
+                  <option>I can export CSV or Excel</option>
+                  <option>I have a product list but no export</option>
+                  <option>I need help creating a product list</option>
+                  <option>I sell services, not products</option>
+                </select>
+              </div>
+              <div class="field full">
+                <label for="notes">What do you sell?</label>
+                <textarea id="notes" name="notes" required placeholder="Mention your main products, expected stock, food or menu type, and how orders can be collected."></textarea>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="secondary-link" type="button" data-back-to-type>Back</button>
+              <button class="primary-link" type="submit">Continue to plans</button>
+            </div>
+          </form>
+
+          <form class="business-form" data-plan-step hidden>
+            <div>
+              <p class="section-kicker">Launch plan</p>
+              <h2>Select your starting plan.</h2>
+              <p class="form-note">These are introductory launch offers. Payment is requested only after the application is reviewed.</p>
+            </div>
+            <div class="plan-grid">
+              <label class="plan-card" data-plan-audience="individual">
+                <input name="plan" type="radio" value="Individual Free - 3 months" />
+                <strong>Free Starter</strong>
+                <span class="plan-price">Free</span>
+                <span>3 months. Listings are reviewed and use standard placement; paid stores are prioritized first.</span>
+              </label>
+              <label class="plan-card" data-plan-audience="individual">
+                <input name="plan" type="radio" value="Early Seller - 6 months - NGN 5,000" />
+                <strong>Early Seller</strong>
+                <span class="plan-price">₦5,000</span>
+                <span>One introductory fee covering 6 months.</span>
+              </label>
+              <label class="plan-card" data-plan-audience="individual">
+                <input name="plan" type="radio" value="Founding Seller - 12 months - NGN 9,000" />
+                <strong>Founding Seller</strong>
+                <span class="plan-price">₦9,000</span>
+                <span>One introductory fee covering 12 months.</span>
+              </label>
+              <label class="plan-card" data-plan-audience="store">
+                <input name="plan" type="radio" value="Store Launch - 3 months - NGN 15,000" />
+                <strong>Store Launch</strong>
+                <span class="plan-price">₦15,000</span>
+                <span>Three months for a store or food business.</span>
+              </label>
+              <label class="plan-card" data-plan-audience="store">
+                <input name="plan" type="radio" value="Store Growth - 6 months - NGN 25,000" />
+                <strong>Store Growth</strong>
+                <span class="plan-price">₦25,000</span>
+                <span>Six months with catalog import access.</span>
+              </label>
+              <label class="plan-card" data-plan-audience="store">
+                <input name="plan" type="radio" value="Store Pro - 12 months - NGN 45,000" />
+                <strong>Store Pro</strong>
+                <span class="plan-price">₦45,000</span>
+                <span>Twelve months for an established store catalog.</span>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="secondary-link" type="button" data-back-to-details>Back</button>
+              <button class="primary-link" type="submit">Submit application</button>
+            </div>
+            <p class="form-status" data-business-registration-status hidden></p>
+          </form>
+        </article>
+      </div>
+    </section>
+    <script>
+      (() => {
+        const typeStep = document.querySelector('[data-seller-type-step]');
+        const form = document.querySelector('[data-business-registration-form]');
+        const planStep = document.querySelector('[data-plan-step]');
+        const status = document.querySelector('[data-business-registration-status]');
+        const progressSteps = [...document.querySelectorAll('[data-progress-step]')];
+        const typeButtons = [...document.querySelectorAll('[data-seller-type]')];
+        const storeOnlyFields = [...document.querySelectorAll('[data-store-only]')];
+        const planCards = [...document.querySelectorAll('[data-plan-audience]')];
+        let sellerType = '';
+        if (!typeStep || !form || !planStep) return;
+
+        const showProgress = (activeStep) => {
+          progressSteps.forEach((step) => {
+            step.classList.toggle('active', step.dataset.progressStep === String(activeStep));
+          });
+        };
+
+        const chooseSellerType = (nextType) => {
+          sellerType = nextType;
+          form.elements.sellerType.value = nextType;
+          typeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.sellerType === nextType);
+          });
+          storeOnlyFields.forEach((field) => {
+            const control = field.querySelector('input, select');
+            field.hidden = nextType !== 'store';
+            if (control && (control.name === 'businessType' || control.name === 'catalogReady')) {
+              control.required = nextType === 'store';
+            }
+          });
+          const title = document.querySelector('[data-application-title]');
+          const nameLabel = document.querySelector('[data-business-name-label]');
+        if (title) {
+          title.textContent = 'Tell us about your store.';
+        }
+        if (nameLabel) {
+          nameLabel.textContent = 'Business or store name';
+        }
+          typeStep.hidden = true;
+          form.hidden = false;
+          planStep.hidden = true;
+          showProgress(2);
+        };
+
+        typeButtons.forEach((button) => {
+          button.addEventListener('click', () => chooseSellerType(button.dataset.sellerType));
+        });
+
+        document.querySelector('[data-back-to-type]')?.addEventListener('click', () => {
+          typeStep.hidden = false;
+          form.hidden = true;
+          planStep.hidden = true;
+          showProgress(1);
+        });
+
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          if (!form.reportValidity()) return;
+          planCards.forEach((card) => {
+            card.hidden = card.dataset.planAudience !== sellerType;
+            const input = card.querySelector('input');
+            if (input) {
+              input.checked = false;
+              input.required = card.dataset.planAudience === sellerType;
+            }
+          });
+          form.hidden = true;
+          planStep.hidden = false;
+          showProgress(3);
+        });
+
+        document.querySelector('[data-back-to-details]')?.addEventListener('click', () => {
+          form.hidden = false;
+          planStep.hidden = true;
+          showProgress(2);
+        });
+
+        planStep.addEventListener('submit', (event) => {
+          event.preventDefault();
+          if (!planStep.reportValidity()) return;
+          const data = new FormData(form);
+          const planData = new FormData(planStep);
+          const lines = [
+            'View2Connect seller application',
+            '',
+            'Seller type: ' + sellerType,
+            'Selected plan: ' + (planData.get('plan') || ''),
+            'Owner full name: ' + (data.get('ownerName') || ''),
+            'Business / display name: ' + (data.get('businessName') || ''),
+            'Email: ' + (data.get('email') || ''),
+            'Phone / WhatsApp: ' + (data.get('phone') || ''),
+            'Business type: ' + (data.get('businessType') || ''),
+            'City / area: ' + (data.get('area') || ''),
+            'Pickup or business address: ' + (data.get('address') || ''),
+            'CAC number: ' + (data.get('cacNumber') || ''),
+            'POS or inventory system: ' + (data.get('posSystem') || ''),
+            'Product list status: ' + (data.get('catalogReady') || ''),
+            '',
+            'What they sell:',
+            String(data.get('notes') || ''),
+          ];
+          const subject = 'View2Connect seller application - ' + (data.get('businessName') || 'New seller');
+          const mailto = 'mailto:${supportEmail}?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(lines.join('\\n'));
+          if (status) {
+            status.hidden = false;
+            status.textContent = 'Opening your email app. Send the prepared message to submit this application for review.';
+          }
+          window.location.href = mailto;
+        });
+
+        const requestedType = new URLSearchParams(window.location.search).get('sellerType');
+        if (requestedType === 'individual') {
+          window.location.assign('/app/');
+        } else if (requestedType === 'store') {
+          chooseSellerType('store');
+        }
+      })();
+    </script>`;
+
+  return buildDocument({
+    activePath: '/business-registration/',
+    body,
+    canonicalPath: '/business-registration/',
+    description: 'Apply as a store owner, keep customer login separate, and select a View2Connect launch plan.',
+    title: 'Seller Registration | View2Connect',
   });
 }
 
@@ -1249,7 +2122,7 @@ function buildContactHtml() {
   const body = `<section class="page-hero">
       <div class="shell">
         <p class="section-kicker">Contact</p>
-        <h1>Reach UrbanConnect customer care.</h1>
+        <h1>Reach View2Connect customer care.</h1>
         <p class="hero-lead">Use the contact details below for launch questions, support, app availability, and business owner onboarding.</p>
       </div>
     </section>
@@ -1276,17 +2149,17 @@ function buildContactHtml() {
     activePath: '/contact/',
     body,
     canonicalPath: '/contact/',
-    description: 'Contact UrbanConnect customer care for app launch questions, River Park business onboarding, and support.',
-    title: 'Contact UrbanConnect | River Park Marketplace',
+    description: 'Contact View2Connect for app launch questions, business onboarding, and support.',
+    title: 'Contact View2Connect | Local Marketplace',
   });
 }
 
 function buildFlutterwaveReturnHtml(kind) {
   const isCancel = kind === 'cancel';
-  const title = isCancel ? 'Payment cancelled' : 'Returning to UrbanConnect';
+  const title = isCancel ? 'Payment cancelled' : 'Returning to View2Connect';
   const copy = isCancel
-    ? 'This checkout was cancelled. Your UrbanConnect balance will not change unless Flutterwave later confirms a successful payment.'
-    : 'Flutterwave has returned this checkout. Your UrbanConnect app will update after provider confirmation.';
+    ? 'This checkout was cancelled. Your View2Connect balance will not change unless Flutterwave later confirms a successful payment.'
+    : 'Flutterwave has returned this checkout. Your View2Connect app will update after provider confirmation.';
   const deepLink = 'urbanconnect://payments/flutterwave';
   const canonicalPath = isCancel
     ? '/payments/flutterwave/cancel/'
@@ -1297,7 +2170,7 @@ function buildFlutterwaveReturnHtml(kind) {
         <h1>${title}</h1>
         <p class="hero-lead">${copy}</p>
         <div class="store-row">
-          <a class="primary-link" href="${deepLink}">Open UrbanConnect</a>
+          <a class="primary-link" href="${deepLink}">Open View2Connect</a>
           <a class="primary-link ghost" href="/">Back to website</a>
         </div>
       </div>
@@ -1305,9 +2178,20 @@ function buildFlutterwaveReturnHtml(kind) {
     <script>
       (() => {
         const deepLink = '${deepLink}' + window.location.search;
-        window.setTimeout(() => {
+        const webReturn = window.sessionStorage.getItem('view2connect.flutterwave.webReturn');
+        if (webReturn === '1') {
+          window.sessionStorage.removeItem('view2connect.flutterwave.webReturn');
+          const query = window.location.search.replace(/^\\?/, '');
+          window.location.replace('/?paymentReturn=flutterwave' + (query ? '&' + query : ''));
+          return;
+        }
+        const returnToApp = () => {
           window.location.href = deepLink;
-        }, 450);
+        };
+        window.setTimeout(returnToApp, 80);
+        window.addEventListener('pageshow', () => {
+          window.setTimeout(returnToApp, 80);
+        }, { once: true });
       })();
     </script>`;
 
@@ -1315,9 +2199,9 @@ function buildFlutterwaveReturnHtml(kind) {
     activePath: '',
     body,
     canonicalPath,
-    description: 'Private Flutterwave payment return page for UrbanConnect app checkout.',
+    description: 'Private Flutterwave payment return page for View2Connect app checkout.',
     robots: 'noindex,nofollow',
-    title: `${title} | UrbanConnect`,
+    title: `${title} | View2Connect`,
   });
 }
 
@@ -1333,24 +2217,61 @@ async function writePage(distDir, route, html) {
 }
 
 export async function prepareWebOutput(rootDir) {
-  const siteUrl = normalizeBaseUrl(process.env.URBANCONNECT_SITE_URL);
+  const siteUrl = normalizeBaseUrl(
+    process.env.VIEW2CONNECT_SITE_URL ?? process.env.URBANCONNECT_SITE_URL,
+  );
   const distDir = path.join(rootDir, 'dist');
   const indexPath = path.join(distDir, 'index.html');
   const expoIndex = await fs.readFile(indexPath, 'utf8');
+  const brandedExpoIndex = expoIndex
+    .replace(
+      'width=device-width, initial-scale=1, shrink-to-fit=no',
+      'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
+    )
+    .replace(
+      '</head>',
+      '    <style>html, body { background: #f8f7fb; } input, textarea, select { font-size: 16px !important; }</style>\n  </head>',
+    );
   const adminDir = path.join(distDir, adminPath);
+  const catalogAdminDir = path.join(distDir, catalogAdminPath);
   const appDir = path.join(distDir, appPath);
+  const sellerPortalDir = path.join(distDir, sellerPortalPath);
   const assetsDir = path.join(distDir, 'assets');
-  const adminIndex = expoIndex
-    .replace('<title>UrbanConnect</title>', '<title>UrbanConnect Admin</title>')
+  const adminIndex = brandedExpoIndex
+    .replace('<title>View2Connect</title>', '<title>View2Connect Admin</title>')
     .replace('</head>', '    <meta name="robots" content="noindex,nofollow" />\n  </head>');
-  const appIndex = expoIndex
-    .replace('<title>UrbanConnect</title>', '<title>UrbanConnect Login</title>')
+  const catalogAdminIndex = brandedExpoIndex
+    .replace('<title>View2Connect</title>', '<title>View2Connect Catalog Studio</title>')
     .replace('</head>', '    <meta name="robots" content="noindex,nofollow" />\n  </head>');
-  const routes = ['/', '/how-it-works/', '/about/', '/contact/'];
+  const appIndex = brandedExpoIndex
+    .replace('<title>View2Connect</title>', '<title>View2Connect Login</title>')
+    .replace('</head>', '    <meta name="robots" content="noindex,nofollow" />\n  </head>');
+  const sellerPortalIndex = brandedExpoIndex
+    .replace('<title>View2Connect</title>', '<title>View2Connect Store Owner Dashboard</title>')
+    .replace('</head>', '    <meta name="robots" content="noindex,nofollow" />\n  </head>');
+  const storeDescription =
+    'Shop products, food, groceries, and local stores across Nigeria with View2Connect. Customers can browse approved sellers, pay securely, receive receipts, and follow delivery updates.';
+  const storeIndex = brandedExpoIndex
+    .replace(
+      '<title>View2Connect</title>',
+      buildSharedHead({
+        canonicalPath: '/',
+        description: storeDescription,
+        includeDocumentBasics: false,
+        title: 'View2Connect Nigeria | Shop Products, Food and Local Stores',
+      }),
+    )
+    .replace(
+      'You need to enable JavaScript to run this app.',
+      'View2Connect is a Nigerian marketplace for products, food, groceries, local stores, secure payments, receipts, seller onboarding, and delivery updates.',
+    );
+  const routes = ['/', '/how-it-works/', '/business-registration/', '/about/', '/contact/'];
   const lastmod = new Date().toISOString().slice(0, 10);
   const robotsTxt = `User-agent: *
 Allow: /
 Disallow: /${adminPath}
+Disallow: /${catalogAdminPath}
+Disallow: /${sellerPortalPath}
 Sitemap: ${siteUrl}/sitemap.xml
 `;
   const sitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1367,18 +2288,61 @@ ${routes
 `;
 
   await fs.mkdir(adminDir, { recursive: true });
+  await fs.mkdir(catalogAdminDir, { recursive: true });
   await fs.mkdir(appDir, { recursive: true });
+  await fs.mkdir(sellerPortalDir, { recursive: true });
   await fs.mkdir(assetsDir, { recursive: true });
   await fs.writeFile(path.join(adminDir, 'index.html'), adminIndex);
+  await fs.writeFile(path.join(catalogAdminDir, 'index.html'), catalogAdminIndex);
   await fs.writeFile(path.join(appDir, 'index.html'), appIndex);
+  await fs.writeFile(path.join(sellerPortalDir, 'index.html'), sellerPortalIndex);
+  await fs.writeFile(indexPath, storeIndex);
   const favicon48 = createFaviconPng(48);
   const favicon96 = createFaviconPng(96);
+  const favicon180 = createFaviconPng(180);
+  const favicon192 = createFaviconPng(192);
+  const favicon512 = createFaviconPng(512);
   await fs.writeFile(path.join(distDir, 'favicon-48x48.png'), favicon48);
   await fs.writeFile(path.join(distDir, 'favicon-96x96.png'), favicon96);
-  await fs.writeFile(path.join(distDir, 'apple-touch-icon.png'), favicon96);
+  await fs.writeFile(path.join(distDir, 'favicon-192x192.png'), favicon192);
+  await fs.writeFile(path.join(distDir, 'favicon-512x512.png'), favicon512);
+  await fs.writeFile(path.join(distDir, 'apple-touch-icon.png'), favicon180);
   await fs.writeFile(path.join(distDir, 'favicon.ico'), createIcoFromPng(favicon48, 48));
   await fs.writeFile(path.join(distDir, 'favicon.svg'), logoSvg);
+  await fs.writeFile(path.join(assetsDir, 'view2connect-mark.svg'), logoSvg);
   await fs.writeFile(path.join(assetsDir, 'urbanconnect-mark.svg'), logoSvg);
+  await fs.writeFile(
+    path.join(distDir, 'site.webmanifest'),
+    JSON.stringify(
+      {
+        name: siteName,
+        short_name: siteName,
+        description: siteDescription,
+        start_url: '/',
+        display: 'standalone',
+        background_color: '#F8F7FB',
+        theme_color: '#5B2BCB',
+        icons: [
+          {
+            src: '/favicon-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+          },
+          {
+            src: '/favicon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  await fs.copyFile(
+    path.join(rootDir, 'assets', 'seller-registration-marketplace.png'),
+    path.join(assetsDir, 'seller-registration-marketplace.png'),
+  );
   await Promise.all(
     Object.entries(assetMap).map(([filename, svg]) =>
       fs.writeFile(path.join(assetsDir, filename), svg),
@@ -1386,8 +2350,23 @@ ${routes
   );
   await fs.writeFile(path.join(distDir, 'robots.txt'), robotsTxt);
   await fs.writeFile(path.join(distDir, 'sitemap.xml'), sitemapXml);
-  await writePage(distDir, '/', buildHomeHtml());
   await writePage(distDir, '/how-it-works/', buildHowItWorksHtml());
+  await writePage(
+    distDir,
+    '/business-registration/',
+    buildDocument({
+      activePath: '/business-registration/',
+      body: buildSellerRegistrationHtml({
+        publicSupabaseKey,
+        publicSupabaseUrl,
+        sellerPortalPath,
+      }),
+      canonicalPath: '/business-registration/',
+      description:
+        'Apply as a store owner, choose Free or Gold, and create a separate seller account after email verification.',
+      title: 'Seller Registration | View2Connect',
+    }),
+  );
   await writePage(distDir, '/about/', buildAboutHtml());
   await writePage(distDir, '/contact/', buildContactHtml());
   await writePage(distDir, '/payments/flutterwave/return/', buildFlutterwaveReturnHtml('return'));

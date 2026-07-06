@@ -79,7 +79,7 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
           <View style={styles.conversationCopy}>
             <View style={styles.conversationLine}>
               <Text numberOfLines={1} style={styles.conversationTitle}>
-                UrbanConnect customer care
+                View2Connect support
               </Text>
               <Text style={styles.conversationTime}>{chatTime(lastMessage?.createdAt)}</Text>
             </View>
@@ -105,7 +105,7 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
           <Ionicons color={colors.white} name="headset-outline" size={20} />
         </View>
         <View style={styles.conversationCopy}>
-          <Text style={styles.conversationTitle}>UrbanConnect customer care</Text>
+          <Text style={styles.conversationTitle}>View2Connect support</Text>
           <Text style={styles.conversationText}>Replies appear here.</Text>
         </View>
       </View>
@@ -149,7 +149,7 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>Start with customer care</Text>
               <Text style={styles.emptyText}>
-                Ask about an order, subscription, delivery, pickup, listing approval, or River Park
+                Ask about an order, subscription, delivery, pickup, listing approval, or account
                 support.
               </Text>
             </View>

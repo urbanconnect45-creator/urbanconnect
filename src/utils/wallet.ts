@@ -1,5 +1,10 @@
 import type { AppUser } from '../types/auth';
-import type { DynamicDepositAccount, Order, SubscriptionPayment } from '../types/business';
+import type {
+  DynamicDepositAccount,
+  Order,
+  SubscriptionPayment,
+  WithdrawalRequest,
+} from '../types/business';
 
 export const DEMO_WALLET_BALANCE = 0;
 export const BUSINESS_OWNER_DEFAULT_WALLET_BALANCE = 0;
@@ -64,6 +69,15 @@ export function getPaidDepositTotal(
     .reduce((total, deposit) => total + deposit.amount, 0);
 }
 
+export function getPaidWithdrawalTotal(
+  withdrawals: WithdrawalRequest[] = [],
+  user?: AppUser | null,
+) {
+  return withdrawals
+    .filter((withdrawal) => withdrawal.status === 'paid' && (!user || withdrawal.ownerUserId === user.id))
+    .reduce((total, withdrawal) => total + withdrawal.amount, 0);
+}
+
 export function getBuyerWalletBalance(
   orders: Order[],
   subscriptionPayments: SubscriptionPayment[] = [],
@@ -83,12 +97,15 @@ export function getAccountWalletBalance(
   orders: Order[],
   subscriptionPayments: SubscriptionPayment[] = [],
   deposits: DynamicDepositAccount[] = [],
+  withdrawals: WithdrawalRequest[] = [],
 ) {
-  return getBuyerWalletBalance(
+  const balanceBeforeWithdrawals = getBuyerWalletBalance(
     orders,
     subscriptionPayments,
     getAccountStartingBalance(user),
     deposits,
     user,
   );
+
+  return Math.max(0, balanceBeforeWithdrawals - getPaidWithdrawalTotal(withdrawals, user));
 }

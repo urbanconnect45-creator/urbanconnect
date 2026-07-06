@@ -86,8 +86,8 @@ serve(async (request) => {
     return jsonResponse({ error: 'Enter a valid Nigerian phone number for OTP.' }, 400);
   }
 
-  const purpose = payload.purpose?.trim() || 'verify your UrbanConnect account';
-  const messageText = `Your UrbanConnect OTP to ${purpose} is < 123456 >. It expires in 10 minutes.`;
+  const purpose = payload.purpose?.trim() || 'verify your View2Connect account';
+  const messageText = `Your View2Connect OTP to ${purpose} is < 123456 >. It expires in 10 minutes.`;
 
   let termiiResponse: Response;
 

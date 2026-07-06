@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $PayloadPath) {
-  $PayloadPath = Join-Path $PSScriptRoot 'urbanconnect_auth_email_otp_template.json'
+  $PayloadPath = Join-Path $PSScriptRoot 'view2connect_auth_email_otp_template.json'
 }
 
 if (-not (Test-Path -LiteralPath $PayloadPath)) {
@@ -45,4 +45,4 @@ Invoke-RestMethod `
   -ContentType 'application/json' `
   -Body $body
 
-Write-Output "UrbanConnect signup emails now show the 8 digit OTP code for project $ProjectRef."
+Write-Output "View2Connect signup emails now show the branded OTP code for project $ProjectRef."

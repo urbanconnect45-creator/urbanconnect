@@ -2,6 +2,8 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+import { getUrbanConnectStorageKey } from '../config/runtime';
+
 function canUseWebStorage() {
   return Platform.OS === 'web' && typeof window !== 'undefined' && 'localStorage' in window;
 }
@@ -28,7 +30,8 @@ export function usePersistentState<T>(
   key: string,
   initialValue: T,
 ): [T, Dispatch<SetStateAction<T>>] {
-  const [value, setValue] = useState<T>(() => readStoredValue(key, initialValue));
+  const storageKey = getUrbanConnectStorageKey(key);
+  const [value, setValue] = useState<T>(() => readStoredValue(storageKey, initialValue));
   const [isNativeValueLoaded, setIsNativeValueLoaded] = useState(() => canUseWebStorage());
 
   useEffect(() => {
@@ -39,7 +42,7 @@ export function usePersistentState<T>(
 
     let isMounted = true;
 
-    AsyncStorage.getItem(key)
+    AsyncStorage.getItem(storageKey)
       .then((storedValue) => {
         if (!isMounted || !storedValue) {
           return;
@@ -59,7 +62,7 @@ export function usePersistentState<T>(
     return () => {
       isMounted = false;
     };
-  }, [key]);
+  }, [storageKey]);
 
   useEffect(() => {
     if (!canUseWebStorage()) {
@@ -67,18 +70,18 @@ export function usePersistentState<T>(
         return;
       }
 
-      AsyncStorage.setItem(key, JSON.stringify(value)).catch(() => {
+      AsyncStorage.setItem(storageKey, JSON.stringify(value)).catch(() => {
         // Ignore storage write failures so private or restricted storage does not break the UI.
       });
       return;
     }
 
     try {
-      window.localStorage.setItem(key, JSON.stringify(value));
+      window.localStorage.setItem(storageKey, JSON.stringify(value));
     } catch {
       // Ignore storage write failures so native and private browsing still work.
     }
-  }, [isNativeValueLoaded, key, value]);
+  }, [isNativeValueLoaded, storageKey, value]);
 
   return [value, setValue];
 }

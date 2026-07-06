@@ -5,6 +5,7 @@ import type {
   AutomatedEmailLog,
   Business,
   BusinessMedia,
+  DispatchDeliveryJob,
   DynamicDepositAccount,
   FlutterwaveBank,
   FlutterwaveCheckoutSession,
@@ -397,6 +398,29 @@ export type MarketplaceSnapshot = {
   withdrawalRequests: WithdrawalRequest[];
   virtualAccounts: VirtualAccount[];
   dynamicDepositAccounts: DynamicDepositAccount[];
+};
+
+type SupabaseDeliveryJobRow = {
+  id: string;
+  order_id: string;
+  seller_key: string;
+  seller_user_id?: string | null;
+  seller_name: string;
+  seller_type: 'storeOwner' | 'individualSeller';
+  pickup_address: string;
+  delivery_address: string;
+  item_subtotal: number | string;
+  delivery_fee: number | string;
+  status: DispatchDeliveryJob['status'];
+  rider_user_id?: string | null;
+  seller_release_status: DispatchDeliveryJob['sellerReleaseStatus'];
+  accepted_at?: string | null;
+  picked_up_at?: string | null;
+  rider_confirmed_at?: string | null;
+  buyer_confirmed_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export class SupabaseApiError extends Error {
@@ -1371,6 +1395,7 @@ function parseAuthCallbackParams(url: string) {
 export async function completeSupabaseOAuth(url: string) {
   const params = parseAuthCallbackParams(url);
   const accessToken = params.get('access_token');
+  const requestedRole = params.get('oauthRole');
 
   if (!accessToken) {
     return undefined;
@@ -1383,6 +1408,23 @@ export async function completeSupabaseOAuth(url: string) {
     accessToken,
   });
   const user = await getOrCreateProfile(authUser, accessToken);
+
+  if (requestedRole && user.role !== requestedRole) {
+    await signOutSupabase(accessToken).catch(() => undefined);
+
+    if (requestedRole === 'dispatch') {
+      throw new SupabaseApiError(
+        'This account is not registered as a dispatch account.',
+        403,
+      );
+    }
+
+    throw new SupabaseApiError(
+      'This account is not registered for this portal.',
+      403,
+    );
+  }
+
   const parsedExpiresIn = expiresIn ? Number(expiresIn) : undefined;
   const hasExpiresIn =
     typeof parsedExpiresIn === 'number' && Number.isFinite(parsedExpiresIn);
@@ -1407,17 +1449,25 @@ export function getSupabaseOAuthUrl(
   webRedirectPath = '/auth/callback',
 ) {
   const encodedProvider = encodeURIComponent(provider);
+  const [redirectPath = '/auth/callback', redirectQuery] = webRedirectPath.split('?');
 
   let redirect = 'urbanconnect://auth/callback';
+
+  if (redirectQuery) {
+    redirect = `${redirect}?${redirectQuery}`;
+  }
 
   try {
     if (typeof window !== 'undefined' && (window as any).location?.origin) {
       // Use a web-friendly redirect when running in a browser so the OAuth
       // flow returns to the web app instead of the native deep link.
-      const normalizedPath = webRedirectPath.startsWith('/')
-        ? webRedirectPath
-        : `/${webRedirectPath}`;
-      redirect = `${(window as any).location.origin}${normalizedPath}`;
+      const normalizedPath = redirectPath.startsWith('/')
+        ? redirectPath
+        : `/${redirectPath}`;
+      const normalizedRedirect = redirectQuery
+        ? `${normalizedPath}?${redirectQuery}`
+        : normalizedPath;
+      redirect = `${(window as any).location.origin}${normalizedRedirect}`;
     }
   } catch {
     // ignore and fall back to deep link
@@ -1863,6 +1913,34 @@ export async function verifySellerPayoutAccount(
     accessToken,
     body: {
       action: 'resolve',
+      ownerUserId: values.ownerUserId,
+      bankCode: values.bankCode,
+      bankName: values.bankName,
+      accountNumber: values.accountNumber,
+    },
+  });
+
+  if (!response.account?.accountName) {
+    throw new SupabaseApiError(
+      'Flutterwave did not return the verified account name.',
+      502,
+    );
+  }
+
+  return response.account;
+}
+
+export async function saveVerifiedSellerPayoutAccountToSupabase(
+  accessToken: string,
+  values: VerifiedSellerPayoutAccount & { ownerUserId: string },
+) {
+  const response = await supabaseRequest<{
+    account?: VerifiedSellerPayoutAccount;
+  }>('/functions/v1/verify-seller-bank-account', {
+    method: 'POST',
+    accessToken,
+    body: {
+      action: 'save',
       ownerUserId: values.ownerUserId,
       bankCode: values.bankCode,
       bankName: values.bankName,
@@ -2641,6 +2719,31 @@ function supportRowToMessage(row: SupabaseSupportMessageRow): SupportMessage {
   };
 }
 
+function deliveryJobRowToJob(row: SupabaseDeliveryJobRow): DispatchDeliveryJob {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    sellerKey: row.seller_key,
+    ...(row.seller_user_id ? { sellerUserId: row.seller_user_id } : {}),
+    sellerName: row.seller_name,
+    sellerType: row.seller_type,
+    pickupAddress: row.pickup_address,
+    deliveryAddress: row.delivery_address,
+    itemSubtotal: Number(row.item_subtotal),
+    deliveryFee: Number(row.delivery_fee),
+    status: row.status,
+    ...(row.rider_user_id ? { riderUserId: row.rider_user_id } : {}),
+    sellerReleaseStatus: row.seller_release_status,
+    ...(row.accepted_at ? { acceptedAt: row.accepted_at } : {}),
+    ...(row.picked_up_at ? { pickedUpAt: row.picked_up_at } : {}),
+    ...(row.rider_confirmed_at ? { riderConfirmedAt: row.rider_confirmed_at } : {}),
+    ...(row.buyer_confirmed_at ? { buyerConfirmedAt: row.buyer_confirmed_at } : {}),
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function groupSupportMessages(messages: SupportMessage[]) {
   return messages.reduce<Record<string, SupportMessage[]>>((accumulator, message) => {
     accumulator[message.conversationId] = [
@@ -2719,6 +2822,54 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     virtualAccounts: virtualAccountRows.map(virtualAccountRowToVirtualAccount),
     dynamicDepositAccounts: dynamicDepositRows.map(dynamicDepositRowToDeposit),
   };
+}
+
+export async function fetchDispatchDeliveryJobs(accessToken: string) {
+  const jobs = await supabaseRequest<SupabaseDeliveryJobRow[]>(
+    '/rest/v1/delivery_jobs?select=*&order=created_at.desc&limit=30',
+    { accessToken },
+  );
+
+  return jobs.map(deliveryJobRowToJob);
+}
+
+export async function acceptDispatchDeliveryJob(accessToken: string, targetJobId: string) {
+  const job = await supabaseRequest<SupabaseDeliveryJobRow>('/rest/v1/rpc/rider_accept_delivery_job', {
+    method: 'POST',
+    accessToken,
+    body: {
+      target_job_id: targetJobId,
+    },
+  });
+
+  return deliveryJobRowToJob(job);
+}
+
+export async function markDispatchDeliveryPickedUp(
+  accessToken: string,
+  targetJobId: string,
+) {
+  const job = await supabaseRequest<SupabaseDeliveryJobRow>('/rest/v1/rpc/rider_mark_delivery_picked_up', {
+    method: 'POST',
+    accessToken,
+    body: {
+      target_job_id: targetJobId,
+    },
+  });
+
+  return deliveryJobRowToJob(job);
+}
+
+export async function markDispatchDeliveryArrived(accessToken: string, targetJobId: string) {
+  const job = await supabaseRequest<SupabaseDeliveryJobRow>('/rest/v1/rpc/rider_mark_delivery_arrived', {
+    method: 'POST',
+    accessToken,
+    body: {
+      target_job_id: targetJobId,
+    },
+  });
+
+  return deliveryJobRowToJob(job);
 }
 
 export function isRecoverableSupabaseSetupError(error: unknown) {

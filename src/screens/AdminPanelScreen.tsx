@@ -19,6 +19,10 @@ import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import {
+  fetchSupabaseUserProfiles,
+  isSupabaseConfigured,
+} from '../services/supabaseApi';
+import {
   privacyPolicySections,
   privacyPolicyTitle,
   userAgreementSections,
@@ -48,7 +52,7 @@ import type {
 import { downloadCsv } from '../utils/csv';
 import { getDepositStatusLabel } from '../utils/deposits';
 import { formatCurrency, formatDateTime, formatNumber } from '../utils/format';
-import { getAccountStartingBalance, getAccountWalletBalance } from '../utils/wallet';
+import { getAccountStartingBalance } from '../utils/wallet';
 import {
   getOrderStatusLabel,
   getPaymentMethodLabel,
@@ -65,6 +69,8 @@ type AdminSectionKey =
   | 'codes'
   | 'emails'
   | 'users'
+  | 'applications'
+  | 'managedCatalogs'
   | 'listings'
   | 'chats'
   | 'customerCare'
@@ -77,7 +83,7 @@ type AdminPinPrompt = {
   action: () => void;
 };
 
-const userRoleOptions = ['All', 'resident', 'businessOwner'] as const;
+const userRoleOptions = ['All', 'resident', 'businessOwner', 'dispatch'] as const;
 const userStatusOptions = ['All', 'active', 'suspended'] as const;
 const listingTypeOptions = ['All', 'product', 'profession'] as const;
 const listingStatusOptions = ['All', 'active'] as const;
@@ -113,6 +119,8 @@ const adminSections: Array<{
   { key: 'payments', label: 'Payments', icon: 'card-outline' },
   { key: 'codes', label: 'Codes', icon: 'keypad-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
+  { key: 'applications', label: 'Store applications', icon: 'clipboard-outline' },
+  { key: 'managedCatalogs', label: 'Managed catalogs', icon: 'albums-outline' },
   { key: 'listings', label: 'Listings', icon: 'storefront-outline' },
   { key: 'chats', label: 'Support', icon: 'headset-outline' },
   { key: 'customerCare', label: 'Customer care', icon: 'shield-outline' },
@@ -202,6 +210,22 @@ function buildAdminSubscriptionDurationOptions(
 type AdminPanelScreenProps = {
   onReturnToApp: () => void;
 };
+
+function userRoleLabel(role: (typeof userRoleOptions)[number] | AppUser['role']) {
+  if (role === 'resident') {
+    return 'customer';
+  }
+
+  if (role === 'businessOwner') {
+    return 'store owner';
+  }
+
+  if (role === 'dispatch') {
+    return 'dispatch';
+  }
+
+  return role;
+}
 
 function SectionPanel({ action, children, subtitle, title }: SectionPanelProps) {
   const { colors } = useAppTheme();
@@ -454,15 +478,20 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const { width } = useWindowDimensions();
   const {
     auditLogs,
+    appendAuditLog,
+    appendEmailLog,
+    appendNotification,
     businesses,
     dynamicDepositAccounts,
     estates,
     emailLogs,
+    getAvailableAccountBalanceForUser,
     getAvailableStock,
     getSupportConversations,
     orders,
     orderProgressSettings,
     ownerBusinessProfiles,
+    notifications,
     paymentPlans,
     subscriptionPayments,
     updatePaymentPlan,
@@ -494,6 +523,13 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const [userRoleFilter, setUserRoleFilter] = useState<(typeof userRoleOptions)[number]>('All');
   const [userStatusFilter, setUserStatusFilter] =
     useState<(typeof userStatusOptions)[number]>('All');
+  const [liveUserProfiles, setLiveUserProfiles] = useState<AppUser[]>([]);
+  const [applicationMessageDrafts, setApplicationMessageDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [userSyncState, setUserSyncState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle',
+  );
   const [listingTypeFilter, setListingTypeFilter] =
     useState<(typeof listingTypeOptions)[number]>('All');
   const [listingStatusFilter, setListingStatusFilter] =
@@ -602,9 +638,100 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     [estates],
   );
 
+  const refreshAdminUsers = async () => {
+    if (!isSupabaseConfigured) {
+      setUserSyncState('error');
+      return;
+    }
+
+    try {
+      setUserSyncState('loading');
+      const remoteUsers = await fetchSupabaseUserProfiles();
+      setLiveUserProfiles(remoteUsers);
+      setUserSyncState('ready');
+    } catch {
+      setUserSyncState('error');
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection !== 'users') {
+      return undefined;
+    }
+
+    void refreshAdminUsers();
+    const refreshInterval = setInterval(() => {
+      void refreshAdminUsers();
+    }, 5000);
+
+    return () => clearInterval(refreshInterval);
+  }, [activeSection]);
+
+  const adminVisibleUsers = useMemo(() => {
+    const usersById = new Map(users.map((user) => [user.id, user] as const));
+
+    liveUserProfiles.forEach((profile) => {
+      usersById.set(profile.id, profile);
+    });
+
+    return Array.from(usersById.values());
+  }, [liveUserProfiles, users]);
+
+  const storeApplications = useMemo(
+    () =>
+      adminVisibleUsers
+        .filter((profile) => profile.role === 'businessOwner')
+        .sort(
+          (leftProfile, rightProfile) =>
+            new Date(rightProfile.createdAt).getTime() -
+            new Date(leftProfile.createdAt).getTime(),
+        ),
+    [adminVisibleUsers],
+  );
+
+  const catalogManagedStores = useMemo(
+    () =>
+      adminVisibleUsers
+        .filter((profile) => profile.role === 'businessOwner')
+        .filter((profile) => {
+          const latestDecision = notifications
+            .filter(
+              (notification) =>
+                notification.userId === profile.id &&
+                notification.contextType === 'general' &&
+                notification.contextId === `catalog-management-${profile.id}`,
+            )
+            .sort(
+              (leftNotification, rightNotification) =>
+                new Date(rightNotification.createdAt).getTime() -
+                new Date(leftNotification.createdAt).getTime(),
+            )[0];
+
+          return latestDecision?.title === 'Catalog management access granted';
+        })
+        .sort((leftProfile, rightProfile) =>
+          (leftProfile.businessName ?? leftProfile.fullName).localeCompare(
+            rightProfile.businessName ?? rightProfile.fullName,
+          ),
+        ),
+    [adminVisibleUsers, notifications],
+  );
+
+  const openManagedCatalog = (ownerUserId: string) => {
+    const browserLocation = (globalThis as { location?: { origin?: string } }).location;
+    const baseUrl =
+      Platform.OS === 'web' && browserLocation?.origin
+        ? browserLocation.origin
+        : 'https://www.view2connect.ng';
+
+    void Linking.openURL(
+      `${baseUrl}/catalog-admin/?owner=${encodeURIComponent(ownerUserId)}`,
+    );
+  };
+
   const filteredUsers = useMemo(
     () =>
-      [...users]
+      [...adminVisibleUsers]
         .filter((user) => {
           const matchesRole = userRoleFilter === 'All' ? true : user.role === userRoleFilter;
           const matchesStatus =
@@ -631,7 +758,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
           (leftUser, rightUser) =>
             new Date(rightUser.createdAt).getTime() - new Date(leftUser.createdAt).getTime(),
         ),
-    [normalizedSearch, userRoleFilter, userStatusFilter, users],
+    [adminVisibleUsers, normalizedSearch, userRoleFilter, userStatusFilter],
   );
 
   const filteredListings = useMemo(
@@ -1365,7 +1492,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const ownerListingsForUser = (userId: string) =>
     businesses.filter((business) => {
       const profile = ownerProfileForUser(userId);
-      const matchedUser = users.find((item) => item.id === userId);
+      const matchedUser = adminVisibleUsers.find((item) => item.id === userId);
       const ownerKeys = [
         userId,
         matchedUser?.email,
@@ -1387,13 +1514,131 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const isRiverParkVerifiedForUser = (userId: string) => {
     const profile = ownerProfileForUser(userId);
     const listing = ownerListingsForUser(userId)[0];
-    const matchedUser = users.find((item) => item.id === userId);
+    const matchedUser = adminVisibleUsers.find((item) => item.id === userId);
 
     if (matchedUser || profile) {
       return Boolean(matchedUser?.riverParkVerified || profile?.riverParkVerified);
     }
 
     return Boolean(listing?.riverParkVerified);
+  };
+
+  const storeApplicationStatus = (applicant: AppUser) => {
+    const latestDecision = notifications
+      .filter(
+        (notification) =>
+          notification.userId === applicant.id &&
+          notification.contextType === 'general' &&
+          notification.contextId === `store-application-${applicant.id}`,
+      )
+      .sort(
+        (leftNotification, rightNotification) =>
+          new Date(rightNotification.createdAt).getTime() -
+          new Date(leftNotification.createdAt).getTime(),
+      )[0];
+
+    if (latestDecision?.title === 'Store application rejected') {
+      return 'Rejected';
+    }
+
+    if (latestDecision?.title === 'Store application changes requested') {
+      return 'Changes requested';
+    }
+
+    if (latestDecision?.title === 'Store application approved') {
+      return 'Approved';
+    }
+
+    if ((applicant.status ?? 'active') === 'suspended') {
+      return 'Rejected';
+    }
+
+    return isRiverParkVerifiedForUser(applicant.id) ? 'Approved' : 'Pending';
+  };
+
+  const reviewStoreApplication = (
+    applicant: AppUser,
+    decision: 'approved' | 'rejected' | 'changesRequested',
+  ) => {
+    if (!isOwnerAdmin) {
+      return;
+    }
+
+    const requestedMessage = applicationMessageDrafts[applicant.id]?.trim();
+    const decisionCopy =
+      decision === 'approved'
+        ? {
+            title: 'Store application approved',
+            body:
+              requestedMessage ||
+              'Your store application has been approved. You can submit products for listing review.',
+          }
+        : decision === 'rejected'
+          ? {
+              title: 'Store application rejected',
+              body:
+                requestedMessage ||
+                'Your store application was not approved. Contact customer care before applying again.',
+            }
+          : {
+              title: 'Store application changes requested',
+              body:
+                requestedMessage ||
+                'Admin needs more information about your store. Update your seller details or contact customer care.',
+            };
+
+    runAdminChange(
+      'Admin PIN',
+      `Enter the PIN to mark ${applicant.businessName ?? applicant.fullName} as ${decisionCopy.title.toLowerCase()}.`,
+      () => {
+        const approved = decision === 'approved';
+        setUserStatus(
+          applicant.id,
+          decision === 'rejected' ? 'suspended' : 'active',
+          adminUser.fullName,
+          adminUser.role,
+        );
+        setUserRiverParkVerification(
+          applicant.id,
+          approved,
+          adminUser.fullName,
+          adminUser.role,
+        );
+        setOwnerRiverParkVerification(
+          applicant.id,
+          approved,
+          adminUser.fullName,
+          adminUser.role,
+        );
+        appendNotification({
+          userId: applicant.id,
+          userName: applicant.fullName,
+          recipientEmail: applicant.email,
+          audience: 'businessOwner',
+          title: decisionCopy.title,
+          body: decisionCopy.body,
+          contextType: 'general',
+          contextId: `store-application-${applicant.id}`,
+        });
+        appendEmailLog({
+          recipientType: 'owner',
+          recipientName: applicant.fullName,
+          recipientEmail: applicant.email,
+          subject: `View2Connect: ${decisionCopy.title}`,
+          body: decisionCopy.body,
+        });
+        appendAuditLog(
+          adminUser.fullName,
+          adminUser.role,
+          decisionCopy.title,
+          `${applicant.businessName ?? applicant.fullName}: ${decisionCopy.body}`,
+        );
+        setApplicationMessageDrafts((currentDrafts) => ({
+          ...currentDrafts,
+          [applicant.id]: '',
+        }));
+      },
+    );
   };
 
   const subscriptionStatusForUser = (userId: string) => {
@@ -1411,12 +1656,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   };
 
   const accountBalanceForUser = (targetUser: AppUser) =>
-    getAccountWalletBalance(
-      targetUser,
-      orders.filter((order) => order.userId === targetUser.id),
-      subscriptionPayments.filter((payment) => payment.ownerUserId === targetUser.id),
-      dynamicDepositAccounts.filter((deposit) => deposit.userId === targetUser.id),
-    );
+    getAvailableAccountBalanceForUser(targetUser);
 
   const listingVerificationSummaryForUser = (userId: string) => {
     const listings = ownerListingsForUser(userId);
@@ -1833,9 +2073,17 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     <>
     <View style={styles.screen}>
       <View style={[styles.adminShell, !isWideLayout && styles.adminShellStacked]}>
-        <View style={[styles.sidebar, !isWideLayout && styles.sidebarStacked]}>
+        <ScrollView
+          style={[styles.sidebar, !isWideLayout && styles.sidebarStacked]}
+          contentContainerStyle={styles.sidebarContent}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.brandBlock}>
             <UrbanConnectLogo inverted />
+            <View style={styles.adminBrandBadge}>
+              <Ionicons color={colors.white} name="shield-checkmark-outline" size={15} />
+              <Text style={styles.adminBrandBadgeText}>ADMIN PORTAL</Text>
+            </View>
           </View>
 
           <View style={styles.sidebarList}>
@@ -1871,7 +2119,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
               Owner has full control. Customer care stays limited to support-safe monitoring.
             </Text>
           </View>
-        </View>
+        </ScrollView>
 
         <View style={styles.mainStage}>
           <View style={styles.topBar}>
@@ -2106,7 +2354,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
                   <SectionPanel
                     title="Cluster coverage"
-                    subtitle="Listings are still focused on River Park clusters."
+                    subtitle="Review seller listings, service areas, and marketplace visibility."
                   >
                     <View style={styles.clusterStack}>
                       {clusterBars.map((entry) => {
@@ -2224,6 +2472,20 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                 subtitle="Track fulfillment, payment state, and customer deliveries from one view."
                 action={<Text style={styles.panelCount}>{formatNumber(filteredOrders.length)} orders</Text>}
               >
+                <View style={styles.inlineActionRow}>
+                  <Text style={styles.recordMeta}>
+                    {userSyncState === 'loading'
+                      ? 'Refreshing users from Supabase...'
+                      : userSyncState === 'error'
+                        ? 'Live user sync failed. Press Refresh users to retry.'
+                        : `Live Supabase profiles: ${liveUserProfiles.length}`}
+                  </Text>
+                  <MonoButton
+                    dark={false}
+                    label="Refresh users"
+                    onPress={() => void refreshAdminUsers()}
+                  />
+                </View>
                 <View style={styles.filterWrap}>
                   {orderStatusOptions.map((status) => {
                     const isActive = orderStatusFilter === status;
@@ -3273,7 +3535,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
             {activeSection === 'users' ? (
               <SectionPanel
                 title="Users"
-                subtitle="Search residents and business owners across the estate."
+                subtitle="Search customers, store owners, and dispatch accounts across the estate."
                 action={<Text style={styles.panelCount}>{formatNumber(filteredUsers.length)} users</Text>}
               >
                 <View style={styles.filterWrap}>
@@ -3288,14 +3550,14 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                           isActive && styles.filterChipActive,
                           pressed && styles.filterChipPressed,
                         ]}
-                      >
+                        >
                         <Text
                           style={[
                             styles.filterChipText,
                             isActive && styles.filterChipTextActive,
                           ]}
                         >
-                          {role === 'All' ? 'All roles' : role}
+                          {role === 'All' ? 'All roles' : userRoleLabel(role)}
                         </Text>
                       </Pressable>
                     );
@@ -3344,7 +3606,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             <Text style={styles.recordMeta}>{user.email}</Text>
                           </View>
                           <View style={styles.recordBadge}>
-                            <Text style={styles.recordBadgeText}>{user.role}</Text>
+                            <Text style={styles.recordBadgeText}>{userRoleLabel(user.role)}</Text>
                           </View>
                         </View>
                         <View style={styles.badgeRow}>
@@ -3373,11 +3635,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         {user.role === 'businessOwner' ? (
                           <>
                             <Text style={styles.recordMeta}>
-                              {user.businessName ?? 'Business owner'} - {user.businessCluster ?? 'River Park'}
+                              {user.businessName ?? 'Business owner'} - {user.businessCluster ?? 'Marketplace'}
                             </Text>
                             <View style={styles.totalStack}>
                               <View style={styles.totalRow}>
-                                <Text style={styles.totalLabel}>River Park verification</Text>
+                                <Text style={styles.totalLabel}>Seller verification</Text>
                                 <Text style={styles.totalValue}>
                                   {riverParkVerified ? 'Verified' : 'Pending'}
                                 </Text>
@@ -3425,11 +3687,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             {user.role === 'businessOwner' ? (
                               <MonoButton
                                 dark={!riverParkVerified}
-                                label={riverParkVerified ? 'Mark River Park pending' : 'Verify River Park'}
+                                label={riverParkVerified ? 'Mark seller pending' : 'Verify seller'}
                                 onPress={() =>
                                   runAdminChange(
                                     'Admin PIN',
-                                    'Enter the PIN before changing River Park verification.',
+                                    'Enter the PIN before changing seller verification.',
                                     () => {
                                       setUserRiverParkVerification(
                                         user.id,
@@ -3455,6 +3717,180 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                       </View>
                     );
                   })}
+                </View>
+              </SectionPanel>
+            ) : null}
+
+            {activeSection === 'applications' ? (
+              <SectionPanel
+                title="Store applications"
+                subtitle="Review verified-email sellers separately from their individual product listings."
+                action={
+                  <Text style={styles.panelCount}>
+                    {formatNumber(storeApplications.length)} applications
+                  </Text>
+                }
+              >
+                <View style={styles.recordStack}>
+                  {storeApplications.map((applicant) => {
+                    const profile = ownerProfileForUser(applicant.id);
+                    const status = storeApplicationStatus(applicant);
+
+                    return (
+                      <View key={applicant.id} style={styles.recordCard}>
+                        <View style={styles.recordTopRow}>
+                          <View style={styles.recordCopy}>
+                            <Text style={styles.recordTitle}>
+                              {applicant.businessName ?? profile?.accountName ?? applicant.fullName}
+                            </Text>
+                            <Text style={styles.recordMeta}>
+                              {applicant.fullName} - {applicant.email}
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.recordBadge,
+                              status === 'Approved' && styles.recordBadgeSuccess,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.recordBadgeText,
+                                status === 'Approved' && styles.recordBadgeTextSuccess,
+                              ]}
+                            >
+                              {status}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text style={styles.recordMeta}>
+                          {profile?.phone ?? applicant.phoneNumber}
+                          {' - '}
+                          {profile?.address ?? applicant.businessCluster ?? 'Address not added'}
+                        </Text>
+                        <Text style={styles.recordMeta}>
+                          Joined {formatDateTime(applicant.createdAt)}
+                          {' - '}
+                          {listingVerificationSummaryForUser(applicant.id)}
+                        </Text>
+
+                        {isOwnerAdmin ? (
+                          <>
+                            <TextInput
+                              multiline
+                              onChangeText={(value) =>
+                                setApplicationMessageDrafts((currentDrafts) => ({
+                                  ...currentDrafts,
+                                  [applicant.id]: value,
+                                }))
+                              }
+                              placeholder="Optional approval note, rejection reason, or changes required"
+                              placeholderTextColor="#8A8A8A"
+                              style={[styles.compactInput, styles.replyInput]}
+                              value={applicationMessageDrafts[applicant.id] ?? ''}
+                            />
+                            <View style={styles.inlineActionRow}>
+                              <MonoButton
+                                dark
+                                label="Approve"
+                                onPress={() => reviewStoreApplication(applicant, 'approved')}
+                              />
+                              <MonoButton
+                                dark={false}
+                                label="Request changes"
+                                onPress={() =>
+                                  reviewStoreApplication(applicant, 'changesRequested')
+                                }
+                              />
+                              <MonoButton
+                                dark={false}
+                                label="Reject"
+                                onPress={() => reviewStoreApplication(applicant, 'rejected')}
+                              />
+                            </View>
+                          </>
+                        ) : (
+                          <Text style={styles.recordMeta}>
+                            Store application decisions are owner only.
+                          </Text>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {storeApplications.length === 0 ? (
+                    <Text style={styles.emptyPanelText}>
+                      Verified seller applications will appear here after OTP completion.
+                    </Text>
+                  ) : null}
+                </View>
+              </SectionPanel>
+            ) : null}
+
+            {activeSection === 'managedCatalogs' && isOwnerAdmin ? (
+              <SectionPanel
+                title="Seller-managed catalogs"
+                subtitle="Open only stores that have explicitly allowed View2Connect Admin to create and maintain their products."
+                action={
+                  <Text style={styles.panelCount}>
+                    {formatNumber(catalogManagedStores.length)} stores
+                  </Text>
+                }
+              >
+                <View style={styles.recordStack}>
+                  {catalogManagedStores.map((seller) => {
+                    const profile = ownerProfileForUser(seller.id);
+                    const storeProducts = businesses.filter(
+                      (business) =>
+                        business.ownerUserId === seller.id &&
+                        business.tags.includes('Admin managed catalog'),
+                    );
+
+                    return (
+                      <View key={seller.id} style={styles.recordCard}>
+                        <View style={styles.recordTopRow}>
+                          <View style={styles.recordCopy}>
+                            <Text style={styles.recordTitle}>
+                              {seller.businessName ?? profile?.accountName ?? seller.fullName}
+                            </Text>
+                            <Text style={styles.recordMeta}>
+                              {seller.fullName} - {seller.email}
+                            </Text>
+                          </View>
+                          <View style={[styles.recordBadge, styles.recordBadgeSuccess]}>
+                            <Text
+                              style={[
+                                styles.recordBadgeText,
+                                styles.recordBadgeTextSuccess,
+                              ]}
+                            >
+                              Access granted
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.recordMeta}>
+                          {profile?.address ?? seller.businessCluster ?? 'Address not added'}
+                          {' - '}
+                          {formatNumber(storeProducts.length)} managed products
+                        </Text>
+                        <View style={styles.inlineActionRow}>
+                          <MonoButton
+                            dark
+                            label="Open store catalog"
+                            onPress={() => openManagedCatalog(seller.id)}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  {catalogManagedStores.length === 0 ? (
+                    <Text style={styles.emptyPanelText}>
+                      Stores will appear after their owner turns on Admin catalog assistance
+                      in the seller portal.
+                    </Text>
+                  ) : null}
                 </View>
               </SectionPanel>
             ) : null}
@@ -4428,20 +4864,39 @@ function createStyles(colors: AppColors) {
       flexDirection: 'column',
     },
     sidebar: {
-      width: 248,
-      gap: spacing.lg,
+      width: 180,
       borderRadius: radii.xl,
       backgroundColor: '#111111',
-      padding: spacing.lg,
       ...shadows.card,
     },
     sidebarStacked: {
       width: '100%',
     },
+    sidebarContent: {
+      gap: spacing.lg,
+      padding: spacing.lg,
+    },
     brandBlock: {
       flexDirection: 'row',
       alignItems: 'center',
+      flexWrap: 'wrap',
       gap: spacing.sm,
+    },
+    adminBrandBadge: {
+      minHeight: 30,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: '#444444',
+      backgroundColor: '#242424',
+      paddingHorizontal: spacing.sm,
+    },
+    adminBrandBadgeText: {
+      ...typography.caption,
+      color: colors.white,
+      fontWeight: '900',
     },
     brandIconShell: {
       alignItems: 'center',

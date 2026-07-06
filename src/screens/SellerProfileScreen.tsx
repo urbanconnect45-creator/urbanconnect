@@ -25,7 +25,7 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
       <View style={styles.emptyShell}>
         <Text style={styles.emptyTitle}>Business profile not found</Text>
         <Text style={styles.emptyText}>
-          This River Park profile may no longer be available.
+          This seller profile may no longer be available.
         </Text>
       </View>
     );
@@ -59,7 +59,7 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
               <Text style={styles.eyebrow}>Business profile</Text>
               <Text style={styles.title}>{seller.businessName ?? seller.fullName}</Text>
               <Text style={styles.subtitle}>
-                {seller.fullName} - {seller.businessCluster ?? 'River Park'}
+                {seller.fullName} - {seller.businessCluster ?? 'Marketplace seller'}
               </Text>
             </View>
           </View>
@@ -75,7 +75,7 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
             </View>
             <View style={styles.metaChip}>
               <Ionicons color={colors.white} name="location-outline" size={16} />
-              <Text style={styles.metaText}>River Park only</Text>
+              <Text style={styles.metaText}>Verified marketplace seller</Text>
             </View>
           </View>
         </View>
@@ -103,31 +103,12 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
               This profile is public for browsing only. Use customer care for order, delivery, or
               service support.
             </Text>
-
-            <ScrollView
-              horizontal
-              nestedScrollEnabled
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaRow}
-            >
-              {profileBusiness.media
-                .filter((item) => item.type === 'image')
-                .slice(0, 4)
-                .map((item) => (
-                  <Image
-                    key={item.id}
-                    resizeMode="cover"
-                    source={{ uri: item.url }}
-                    style={styles.mediaImage}
-                  />
-                ))}
-            </ScrollView>
           </View>
         ) : (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>No live profile yet</Text>
             <Text style={styles.bodyText}>
-              This business has no approved River Park listings yet.
+              This business has no approved marketplace listings yet.
             </Text>
           </View>
         )}

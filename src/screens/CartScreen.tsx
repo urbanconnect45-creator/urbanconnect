@@ -11,10 +11,13 @@ import type { CartScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import type { Order, PaymentMethod } from '../types/business';
+import type { PaymentMethod } from '../types/business';
+import {
+  getIndividualSellerMinimumIssues,
+  INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL,
+} from '../utils/cart';
 import { formatCurrency } from '../utils/format';
 import { getPaymentMethodLabel } from '../utils/order';
-import { getAccountWalletBalance } from '../utils/wallet';
 
 const launchPaymentMethods: PaymentMethod[] = ['flutterwave', 'walletAccount'];
 
@@ -45,7 +48,6 @@ const flutterwaveChannels: Array<{
 
 type ActiveFlutterwaveCheckout = {
   checkoutUrl: string;
-  order: Order;
   reference: string;
   title: string;
   subtitle: string;
@@ -61,16 +63,13 @@ export function CartScreen({ navigation }: CartScreenProps) {
     cartTotal,
     checkoutCart,
     clearCart,
-    completeCartFlutterwaveCheckout,
-    dynamicDepositAccounts,
     estates,
+    getAvailableAccountBalanceForUser,
     getAvailableStock,
-    getOrdersForUser,
     isBusinessOwnedByUser,
     removeFromCart,
     securitySettings,
     startCartFlutterwaveCheckout,
-    subscriptionPayments,
     updateCartQuantity,
   } = useBusinessDirectory();
   const defaultCluster = cartEntries[0]?.business.cluster ?? estates[0]?.clusters[0] ?? 'Cluster 1';
@@ -95,24 +94,19 @@ export function CartScreen({ navigation }: CartScreenProps) {
 
   const deliveryFee = cartEntries.length === 0 ? 0 : cartTotal >= 20000 ? 0 : 2000;
   const orderTotal = cartTotal + deliveryFee;
-  const walletBalance = user
-    ? getAccountWalletBalance(
-        user,
-        getOrdersForUser(user.id),
-        subscriptionPayments.filter((payment) => payment.ownerUserId === user.id),
-        dynamicDepositAccounts.filter((deposit) => deposit.userId === user.id),
-      )
-    : 0;
+  const walletBalance = user ? getAvailableAccountBalanceForUser(user) : 0;
   const insufficientFunds = paymentMethod === 'walletAccount' && Boolean(user && orderTotal > walletBalance);
   const checkoutBlocked = securitySettings.maintenanceMode || securitySettings.blockCheckout;
   const selfOwnedEntries = useMemo(
     () =>
-      user?.role === 'businessOwner'
-        ? cartEntries.filter((entry) => isBusinessOwnedByUser(entry.business, user))
-        : [],
+      user ? cartEntries.filter((entry) => isBusinessOwnedByUser(entry.business, user)) : [],
     [cartEntries, isBusinessOwnedByUser, user],
   );
   const selfOwnedNames = selfOwnedEntries.map((entry) => entry.business.name);
+  const individualSellerMinimumIssues = useMemo(
+    () => getIndividualSellerMinimumIssues(cartEntries),
+    [cartEntries],
+  );
   const estateClusters = estates[0]?.clusters ?? [];
   const supportMessage = securitySettings.maintenanceMode
     ? 'Checkout is paused while the marketplace is in maintenance mode.'
@@ -149,7 +143,19 @@ export function CartScreen({ navigation }: CartScreenProps) {
     }
 
     if (selfOwnedEntries.length > 0) {
-      setError(`${selfOwnedNames.join(', ')} is your own listing. Business owners cannot buy items they sell.`);
+      setError(`${selfOwnedNames.join(', ')} is your own listing. Sellers cannot buy items they posted.`);
+      return;
+    }
+
+    if (individualSellerMinimumIssues.length > 0) {
+      setError(
+        individualSellerMinimumIssues
+          .map(
+            (issue) =>
+              `Add ${formatCurrency(issue.amountRemaining)} more from ${issue.sellerName}.`,
+          )
+          .join(' '),
+      );
       return;
     }
 
@@ -176,7 +182,6 @@ export function CartScreen({ navigation }: CartScreenProps) {
 
         setActiveFlutterwaveCheckout({
           checkoutUrl: checkout.checkoutUrl,
-          order: checkout.order,
           reference: checkout.reference,
           title: 'Order checkout',
           subtitle: `Pay ${formatCurrency(checkout.amount)} with ${selectedFlutterwaveChannel.label}.`,
@@ -209,32 +214,6 @@ export function CartScreen({ navigation }: CartScreenProps) {
     setActiveFlutterwaveCheckout(null);
   };
 
-  const handleFlutterwaveReturn = () => {
-    const checkout = activeFlutterwaveCheckout;
-
-    if (!checkout) {
-      return;
-    }
-
-    try {
-      const order = completeCartFlutterwaveCheckout(checkout.order, user);
-      setActiveFlutterwaveCheckout(null);
-      Alert.alert(
-        'Payment confirmed',
-        `Flutterwave confirmed your ${checkout.channelLabel} payment. Your receipt has been created.`,
-      );
-      navigation.navigate('OrderDetails', { orderId: order.id });
-    } catch (paymentError) {
-      const message =
-        paymentError instanceof Error
-          ? paymentError.message
-          : 'Flutterwave payment could not be confirmed.';
-      setError(message);
-      setActiveFlutterwaveCheckout(null);
-      Alert.alert('Payment not completed', message);
-    }
-  };
-
   return (
     <>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -244,7 +223,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
         <Text style={styles.eyebrow}>Wallet payment</Text>
         <Text style={styles.title}>Pay immediately from your account.</Text>
         <Text style={styles.subtitle}>
-          Pay through Flutterwave live checkout, or use your UrbanConnect account balance when it has enough funds.
+          Pay through Flutterwave live checkout, or use your View2Connect account balance when it has enough funds.
         </Text>
       </View>
 
@@ -282,8 +261,23 @@ export function CartScreen({ navigation }: CartScreenProps) {
             <View style={styles.noticeCard}>
               <Text style={styles.noticeTitle}>Own listing in cart</Text>
               <Text style={styles.noticeText}>
-                Remove {selfOwnedNames.join(', ')} before paying. Business owners cannot buy items they sell.
+                Remove {selfOwnedNames.join(', ')} before paying. Sellers cannot buy items they posted.
               </Text>
+            </View>
+          ) : null}
+
+          {individualSellerMinimumIssues.length > 0 ? (
+            <View style={styles.noticeCard}>
+              <Text style={styles.noticeTitle}>Individual seller minimum</Text>
+              <Text style={styles.noticeText}>
+                Each individual seller needs a subtotal of at least{' '}
+                {formatCurrency(INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL)}.
+              </Text>
+              {individualSellerMinimumIssues.map((issue) => (
+                <Text key={issue.sellerId} style={styles.noticeText}>
+                  Add {formatCurrency(issue.amountRemaining)} more from {issue.sellerName}.
+                </Text>
+              ))}
             </View>
           ) : null}
 
@@ -310,7 +304,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
                     <View style={styles.copyBlock}>
                       <Text style={styles.itemTitle}>{entry.business.name}</Text>
                       <Text style={styles.itemMeta}>
-                        {entry.business.ownerName} - {entry.business.cluster}
+                        {entry.business.category}
                       </Text>
                       <Text style={styles.itemMeta}>
                         {formatCurrency(entry.business.price)} each
@@ -397,7 +391,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
                 setDeliveryAddress(value);
                 setError(null);
               }}
-              placeholder="House 14, Cluster 3, River Park Estate"
+              placeholder="Enter your full delivery address"
               value={deliveryAddress}
             />
 
@@ -447,7 +441,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
                 const methodCopy =
                   method === 'flutterwave'
                     ? 'Open Flutterwave to pay with card or bank transfer.'
-                    : 'Use your UrbanConnect account balance to pay now.';
+                    : 'Use your View2Connect account balance to pay now.';
 
                 return (
                   <Pressable
@@ -559,7 +553,8 @@ export function CartScreen({ navigation }: CartScreenProps) {
                   checkoutBlocked ||
                   stockWarnings.length > 0 ||
                   insufficientFunds ||
-                  selfOwnedEntries.length > 0
+                  selfOwnedEntries.length > 0 ||
+                  individualSellerMinimumIssues.length > 0
                 }
                 label="Pay immediately"
                 loading={isSubmitting}
@@ -582,7 +577,6 @@ export function CartScreen({ navigation }: CartScreenProps) {
         activePaymentLabel={activeFlutterwaveCheckout.channelLabel}
         checkoutUrl={activeFlutterwaveCheckout.checkoutUrl}
         onClose={closeFlutterwaveCheckout}
-        onPaymentReturn={handleFlutterwaveReturn}
         reference={activeFlutterwaveCheckout.reference}
         subtitle={activeFlutterwaveCheckout.subtitle}
         title={activeFlutterwaveCheckout.title}

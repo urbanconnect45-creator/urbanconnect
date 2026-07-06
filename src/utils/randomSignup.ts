@@ -68,7 +68,8 @@ export function createRandomSignupForm(role: UserRole): SignUpFormValues {
   const firstName = pickRandom(firstNames, 'Maya');
   const lastName = pickRandom(lastNames, 'Johnson');
   const seed = uniqueSeed();
-  const emailRole = role === 'businessOwner' ? 'business' : 'resident';
+  const emailRole =
+    role === 'businessOwner' ? 'business' : role === 'dispatch' ? 'dispatch' : 'resident';
   const businessName =
     role === 'businessOwner'
       ? `${pickRandom(businessPrefixes, 'SwiftFix')} ${pickRandom(businessSuffixes, 'Services')}`

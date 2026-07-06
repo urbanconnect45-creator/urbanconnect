@@ -30,6 +30,8 @@ import { CatalogAdminScreen } from '../screens/CatalogAdminScreen';
 import { CartScreen } from '../screens/CartScreen';
 import { ChatsScreen } from '../screens/ChatsScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
+import { DispatchDashboardScreen } from '../screens/DispatchDashboardScreen';
+import { DispatchLoginScreen } from '../screens/DispatchLoginScreen';
 import { FoodScreen } from '../screens/FoodScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OrderDetailsScreen } from '../screens/OrderDetailsScreen';
@@ -106,6 +108,12 @@ const routeMeta: Record<
     label: 'Home',
     title: 'Local shop',
     subtitle: 'Buy approved products from nearby businesses.',
+  },
+  DispatchMode: {
+    icon: 'bicycle-outline',
+    label: 'Dispatch',
+    title: 'Dispatch dashboard',
+    subtitle: 'Review assigned and available delivery work.',
   },
   Stores: {
     icon: 'storefront-outline',
@@ -454,9 +462,15 @@ export function AppNavigator() {
       return;
     }
 
+    if (user.role === 'dispatch' && mainRoute !== 'DispatchMode') {
+      setMainRoute('DispatchMode');
+      return;
+    }
+
     if (
       user.role !== 'businessOwner' &&
-      (mainRoute === 'Subscription' || mainRoute === 'SellerMode')
+      user.role !== 'dispatch' &&
+      (mainRoute === 'Subscription' || mainRoute === 'SellerMode' || mainRoute === 'DispatchMode')
     ) {
       setMainRoute('Dashboard');
     }
@@ -914,6 +928,9 @@ export function AppNavigator() {
 
   const isMobileLayout = width < 780;
   const compactSidebar = width < 980;
+  const isDispatchUser = user?.role === 'dispatch';
+  const sellerWebBlockedOnMobile = sellerWebEntrypoint && width < 900;
+  const sellerToolsBlockedOnMobileWeb = Platform.OS === 'web' && width < 900;
   const adminWebBlockedOnMobile =
     adminWebEntrypoint && !catalogAdminWebEntrypoint && width < 900;
   const browsingPublicStore =
@@ -950,10 +967,26 @@ export function AppNavigator() {
     ) : (
       <AdminLoginScreen navigation={navigation} />
     );
+  } else if (sellerWebBlockedOnMobile) {
+    content = (
+      <View style={styles.adminMobileBlocked}>
+        <UrbanConnectLogo />
+        <View style={styles.adminMobileBlockedCard}>
+          <Ionicons color={colors.primary} name="laptop-outline" size={34} />
+          <Text style={styles.adminMobileBlockedTitle}>Seller tools are desktop only</Text>
+          <Text style={styles.adminMobileBlockedText}>
+            Seller login and business registration are only available on laptop or desktop.
+            Please use a larger screen to continue.
+          </Text>
+        </View>
+      </View>
+    );
   } else if (sellerWebEntrypoint) {
     content = user ? (
       user.role === 'businessOwner' ? (
         <StoreOwnerDashboardScreen />
+      ) : user.role === 'dispatch' ? (
+        <DispatchDashboardScreen />
       ) : (
         <SellerPortalLoginScreen />
       )
@@ -984,7 +1017,7 @@ export function AppNavigator() {
       ) : authRoute === 'Signup' ? (
         <SignupScreen navigation={navigation} />
       ) : authRoute === 'DispatchLogin' ? (
-        <LoginScreen navigation={navigation} accountRole="dispatch" />
+        <DispatchLoginScreen />
       ) : (
         <LoginScreen navigation={navigation} />
       );
@@ -1017,6 +1050,8 @@ export function AppNavigator() {
     );
   } else if (mainRoute === 'SellerMode' && user.role === 'businessOwner') {
     content = <StoreOwnerDashboardScreen />;
+  } else if (mainRoute === 'DispatchMode' && user.role === 'dispatch') {
+    content = <DispatchDashboardScreen />;
   } else if (mainRoute === 'Professions') {
     content = <ProfessionsScreen navigation={navigation} />;
   } else if (mainRoute === 'Stores') {
@@ -1223,20 +1258,22 @@ export function AppNavigator() {
             <Ionicons color={colors.primary} name="restaurant-outline" size={18} />
             <Text style={styles.guestNavText}>Food</Text>
           </Pressable>
-          <Pressable
-            accessibilityLabel="Start selling"
-            accessibilityRole="button"
-            onPress={() => openWebPath('/business-registration/')}
-            style={({ pressed }) => [
-              styles.guestNavButton,
-              styles.guestSellButton,
-              isMobileLayout && styles.guestNavButtonMobile,
-              pressed && styles.topActionButtonPressed,
-            ]}
-          >
-            <Ionicons color={colors.white} name="pricetag-outline" size={18} />
-            <Text style={styles.guestSellText}>Sell</Text>
-          </Pressable>
+          {!sellerToolsBlockedOnMobileWeb ? (
+            <Pressable
+              accessibilityLabel="Start selling"
+              accessibilityRole="button"
+              onPress={() => openWebPath('/business-registration/')}
+              style={({ pressed }) => [
+                styles.guestNavButton,
+                styles.guestSellButton,
+                isMobileLayout && styles.guestNavButtonMobile,
+                pressed && styles.topActionButtonPressed,
+              ]}
+            >
+              <Ionicons color={colors.white} name="pricetag-outline" size={18} />
+              <Text style={styles.guestSellText}>Sell</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityLabel="Open sign in"
             accessibilityRole="button"
@@ -1345,41 +1382,69 @@ export function AppNavigator() {
           <View pointerEvents="auto" style={styles.mobileContent}>{content}</View>
 
           <View style={styles.bottomBar}>
-            <NavButton
-              active={mainRoute === 'Dashboard'}
-              icon={routeMeta.Dashboard.icon}
-              label={routeMeta.Dashboard.label}
-              onPress={() => navigation.navigate('Dashboard')}
-              placement="bottom"
-            />
-              <NavButton
-                active={mainRoute === 'Stores'}
-                icon={'storefront-outline'}
-                label={'Shop'}
-                onPress={() => navigation.navigate('Stores')}
-                placement="bottom"
-              />
-            <NavButton
-              active={mainRoute === 'Professions'}
-              icon={routeMeta.Professions.icon}
-              label={routeMeta.Professions.label}
-              onPress={() => navigation.navigate('Professions')}
-              placement="bottom"
-            />
-            <NavButton
-              active={mainRoute === 'Food'}
-              icon={routeMeta.Food.icon}
-              label={routeMeta.Food.label}
-              onPress={() => navigation.navigate('Food')}
-              placement="bottom"
-            />
-            <NavButton
-              active={mainRoute === 'Account'}
-              icon={routeMeta.Account.icon}
-              label={routeMeta.Account.label}
-              onPress={() => navigation.navigate('Account')}
-              placement="bottom"
-            />
+            {isDispatchUser ? (
+              <>
+                <NavButton
+                  active={mainRoute === 'DispatchMode'}
+                  icon={routeMeta.DispatchMode.icon}
+                  label={routeMeta.DispatchMode.label}
+                  onPress={() => navigation.navigate('DispatchMode')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Account'}
+                  icon={routeMeta.Account.icon}
+                  label={routeMeta.Account.label}
+                  onPress={() => navigation.navigate('Account')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Settings'}
+                  icon={routeMeta.Settings.icon}
+                  label={routeMeta.Settings.label}
+                  onPress={() => navigation.navigate('Settings')}
+                  placement="bottom"
+                />
+              </>
+            ) : (
+              <>
+                <NavButton
+                  active={mainRoute === 'Dashboard'}
+                  icon={routeMeta.Dashboard.icon}
+                  label={routeMeta.Dashboard.label}
+                  onPress={() => navigation.navigate('Dashboard')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Stores'}
+                  icon={'storefront-outline'}
+                  label={'Shop'}
+                  onPress={() => navigation.navigate('Stores')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Professions'}
+                  icon={routeMeta.Professions.icon}
+                  label={routeMeta.Professions.label}
+                  onPress={() => navigation.navigate('Professions')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Food'}
+                  icon={routeMeta.Food.icon}
+                  label={routeMeta.Food.label}
+                  onPress={() => navigation.navigate('Food')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Account'}
+                  icon={routeMeta.Account.icon}
+                  label={routeMeta.Account.label}
+                  onPress={() => navigation.navigate('Account')}
+                  placement="bottom"
+                />
+              </>
+            )}
           </View>
         </View>
       ) : (
@@ -1391,46 +1456,77 @@ export function AppNavigator() {
               </View>
 
               <View style={styles.sidebarNav}>
-                <NavButton
-                  active={mainRoute === 'Dashboard'}
-                  compact={compactSidebar}
-                  icon={routeMeta.Dashboard.icon}
-                  label={routeMeta.Dashboard.label}
-                  onPress={() => navigation.navigate('Dashboard')}
-                  placement="sidebar"
-                />
-                <NavButton
-                  active={mainRoute === 'Stores'}
-                  compact={compactSidebar}
-                  icon={'storefront-outline'}
-                  label={'Shop'}
-                  onPress={() => navigation.navigate('Stores')}
-                  placement="sidebar"
-                />
-                <NavButton
-                  active={mainRoute === 'Professions'}
-                  compact={compactSidebar}
-                  icon={routeMeta.Professions.icon}
-                  label={routeMeta.Professions.label}
-                  onPress={() => navigation.navigate('Professions')}
-                  placement="sidebar"
-                />
-                <NavButton
-                  active={mainRoute === 'Food'}
-                  compact={compactSidebar}
-                  icon={routeMeta.Food.icon}
-                  label={routeMeta.Food.label}
-                  onPress={() => navigation.navigate('Food')}
-                  placement="sidebar"
-                />
-                <NavButton
-                  active={mainRoute === 'Account'}
-                  compact={compactSidebar}
-                  icon={routeMeta.Account.icon}
-                  label={routeMeta.Account.label}
-                  onPress={() => navigation.navigate('Account')}
-                  placement="sidebar"
-                />
+                {isDispatchUser ? (
+                  <>
+                    <NavButton
+                      active={mainRoute === 'DispatchMode'}
+                      compact={compactSidebar}
+                      icon={routeMeta.DispatchMode.icon}
+                      label={routeMeta.DispatchMode.label}
+                      onPress={() => navigation.navigate('DispatchMode')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Account'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Account.icon}
+                      label={routeMeta.Account.label}
+                      onPress={() => navigation.navigate('Account')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Settings'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Settings.icon}
+                      label={routeMeta.Settings.label}
+                      onPress={() => navigation.navigate('Settings')}
+                      placement="sidebar"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <NavButton
+                      active={mainRoute === 'Dashboard'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Dashboard.icon}
+                      label={routeMeta.Dashboard.label}
+                      onPress={() => navigation.navigate('Dashboard')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Stores'}
+                      compact={compactSidebar}
+                      icon={'storefront-outline'}
+                      label={'Shop'}
+                      onPress={() => navigation.navigate('Stores')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Professions'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Professions.icon}
+                      label={routeMeta.Professions.label}
+                      onPress={() => navigation.navigate('Professions')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Food'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Food.icon}
+                      label={routeMeta.Food.label}
+                      onPress={() => navigation.navigate('Food')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Account'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Account.icon}
+                      label={routeMeta.Account.label}
+                      onPress={() => navigation.navigate('Account')}
+                      placement="sidebar"
+                    />
+                  </>
+                )}
               </View>
             </View>
 
@@ -1456,19 +1552,21 @@ export function AppNavigator() {
               </View>
 
               <View style={styles.topBarActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => navigation.navigate('RegisterBusiness')}
-                  style={({ pressed }) => [
-                    styles.topActionButton,
-                    styles.sellActionButton,
-                    pressed && styles.topActionButtonPressed,
-                  ]}
-                >
-                  <Ionicons color={colors.white} name="pricetag-outline" size={20} />
-                  <Text style={styles.sellActionText}>Sell</Text>
-                </Pressable>
+                {!isDispatchUser ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={() => navigation.navigate('RegisterBusiness')}
+                    style={({ pressed }) => [
+                      styles.topActionButton,
+                      styles.sellActionButton,
+                      pressed && styles.topActionButtonPressed,
+                    ]}
+                  >
+                    <Ionicons color={colors.white} name="pricetag-outline" size={20} />
+                    <Text style={styles.sellActionText}>Sell</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   accessibilityRole="button"
                   hitSlop={8}
@@ -1650,7 +1748,7 @@ export function AppNavigator() {
                 <Ionicons color={colors.white} name="bicycle-outline" size={22} />
               </View>
               <View style={styles.menuCopy}>
-                <Text style={styles.menuTitle}>Delivery</Text>
+                <Text style={styles.menuTitle}>Dispatch</Text>
                 <Text style={styles.menuMeta}>Sign in as dispatch to manage delivery work.</Text>
               </View>
               <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
@@ -1658,36 +1756,43 @@ export function AppNavigator() {
 
             {/* Individual seller option removed — customers can create listings via the List flow */}
 
-            <Pressable
-              onPress={() => openWebPath('/business-registration/?sellerType=store')}
-              style={({ pressed }) => [
-                styles.accessChoiceOption,
-                styles.accessChoiceStore,
-                pressed && styles.menuRowPressed,
-              ]}
-            >
-              <View style={[styles.accessChoiceIcon, styles.accessChoiceStoreIcon]}>
-                <Ionicons color={colors.white} name="storefront-outline" size={22} />
-              </View>
-              <View style={styles.menuCopy}>
-                <Text style={styles.menuTitle}>Store owner</Text>
-                <Text style={styles.menuMeta}>Register a store, food business, or established catalog.</Text>
-              </View>
-              <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
-            </Pressable>
+            {!sellerToolsBlockedOnMobileWeb ? (
+              <>
+                <Pressable
+                  onPress={() => openWebPath('/business-registration/?sellerType=store')}
+                  style={({ pressed }) => [
+                    styles.accessChoiceOption,
+                    styles.accessChoiceStore,
+                    pressed && styles.menuRowPressed,
+                  ]}
+                >
+                  <View style={[styles.accessChoiceIcon, styles.accessChoiceStoreIcon]}>
+                    <Ionicons color={colors.white} name="storefront-outline" size={22} />
+                  </View>
+                  <View style={styles.menuCopy}>
+                    <Text style={styles.menuTitle}>Store owner</Text>
+                    <Text style={styles.menuMeta}>Register a store, food business, or established catalog.</Text>
+                  </View>
+                  <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+                </Pressable>
 
-            <View style={styles.accessChoiceActions}>
-              <AppButton
-                label="Seller login"
-                onPress={() => openWebPath('/seller-portal/')}
-                variant="secondary"
-              />
-              <AppButton
-                label="Open Catalog"
-                onPress={() => openWebPath('/seller-portal/?page=catalog')}
-                variant="ghost"
-              />
-            </View>
+                <View style={styles.accessChoiceActions}>
+                  <AppButton
+                    label="Seller login"
+                    onPress={() => openWebPath('/seller-portal/')}
+                    variant="secondary"
+                  />
+                </View>
+              </>
+            ) : (
+              <View style={styles.accessChoiceOption}>
+                <Text style={styles.menuTitle}>Seller tools are desktop only</Text>
+                <Text style={styles.menuMeta}>
+                  Seller login and business registration are only available on laptop or desktop.
+                  Please use a larger screen to continue.
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </Modal>

@@ -24,6 +24,7 @@ import type {
   AppNotification,
   Business,
   BusinessProfileFormValues,
+  CentralCatalogProductValues,
   CartEntry,
   CartItem,
   ChatConversation,
@@ -46,8 +47,10 @@ import type {
   SupportConversation,
   SupportMessage,
   VirtualAccount,
+  VerifiedSellerPayoutAccount,
   WithdrawalRequest,
 } from '../types/business';
+import { riverParkClusters } from '../types/business';
 import { buildBusinessMedia, isLocalOnlyMediaUrl } from '../utils/businessMedia';
 import { getBusinessStatusLabel, isPublicBusiness } from '../utils/businessState';
 import {
@@ -57,7 +60,7 @@ import {
   getDepositStatusLabel,
 } from '../utils/deposits';
 import { formatCurrency } from '../utils/format';
-import { getAccountWalletBalance } from '../utils/wallet';
+import { getAccountWalletBalance, getPaidWithdrawalTotal } from '../utils/wallet';
 import {
   createFlutterwaveVirtualAccount,
   createFlutterwaveCheckoutSession,
@@ -84,10 +87,15 @@ import {
   uploadBusinessMediaToSupabase,
 } from '../services/supabaseApi';
 import { normalizeOrderStatus } from '../utils/order';
+import {
+  getIndividualSellerMinimumIssues,
+  INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL,
+} from '../utils/cart';
 import { usePersistentState } from './usePersistentState';
 
 type BusinessDirectoryContextValue = {
   businesses: Business[];
+  centralCatalogProducts: Business[];
   estates: Estate[];
   currentEstateId: string;
   cartEntries: CartEntry[];
@@ -141,6 +149,8 @@ type BusinessDirectoryContextValue = {
   getSupportConversations: () => SupportConversation[];
   getNotificationsForUser: (user?: AppUser | null) => AppNotification[];
   isRiverParkVerifiedForUser: (user?: AppUser | null) => boolean;
+  hasCatalogManagementAccess: (ownerUserId: string) => boolean;
+  setCatalogManagementAccess: (owner: AppUser, allowed: boolean) => void;
   markNotificationsRead: (userId: string) => void;
   sendSupportMessage: (
     user: AppUser,
@@ -159,6 +169,10 @@ type BusinessDirectoryContextValue = {
   registerBusiness: (
     values: BusinessProfileFormValues,
     owner?: AppUser | null,
+  ) => Promise<Business>;
+  createCentralCatalogProduct: (
+    values: CentralCatalogProductValues,
+    managedOwner?: AppUser,
   ) => Promise<Business>;
   getOwnerBusinessProfile: (owner?: AppUser | null) => OwnerBusinessProfile | undefined;
   isSubscriptionExemptForUser: (owner?: AppUser | null) => boolean;
@@ -225,10 +239,15 @@ type BusinessDirectoryContextValue = {
     actorName?: string,
     actorRole?: AuditActorRole,
   ) => void;
+  setVerifiedSellerPayoutAccount: (
+    owner: AppUser,
+    account: VerifiedSellerPayoutAccount,
+  ) => void;
   getBusinessById: (businessId: string) => Business | undefined;
   getOrderById: (orderId: string) => Order | undefined;
   getOrdersForUser: (userId: string) => Order[];
   getOrdersForOwner: (ownerUserId: string, owner?: AppUser | null) => Order[];
+  getAvailableAccountBalanceForUser: (user: AppUser) => number;
   isBusinessOwnedByUser: (business: Business, user?: AppUser | null) => boolean;
   updateBusinessListing: (
     businessId: string,
@@ -236,12 +255,18 @@ type BusinessDirectoryContextValue = {
       name: string;
       description: string;
       longDescription: string;
+      category?: string;
+      address?: string;
+      imageUrl?: string;
+      services?: string[];
+      sku?: string;
       price?: number;
       stockQuantity?: number;
       reorderLevel?: number;
     },
     owner?: AppUser | null,
   ) => Business;
+  deleteOwnedBusinessListing: (businessId: string, owner?: AppUser | null) => void;
   getAvailableStock: (businessId: string) => number;
   addToCart: (businessId: string) => void;
   removeFromCart: (businessId: string) => void;
@@ -253,7 +278,6 @@ type BusinessDirectoryContextValue = {
     customer?: AppUser | null,
     paymentOptions?: string[],
   ) => Promise<FlutterwaveCheckoutSession & { order: Order }>;
-  completeCartFlutterwaveCheckout: (order: Order, customer?: AppUser | null) => Order;
   restockBusinessStock: (
     businessId: string,
     quantity: number,
@@ -437,8 +461,8 @@ function getVerifiedUserIdsFromNotifications(notifications: AppNotification[]) {
 
 function supportAutoReplyText(userRole: AppUser['role']) {
   return userRole === 'businessOwner'
-    ? 'Thanks for reaching UrbanConnect customer care. Please describe the listing, order, payment, or verification issue clearly and be patient. A customer care agent will attend to you shortly. Thank you.'
-    : 'Thanks for reaching UrbanConnect customer care. Please mention the problem clearly and be patient. A customer care agent will attend to you shortly. Thank you.';
+    ? 'Thanks for reaching View2Connect support. Please describe the listing, order, payment, or verification issue clearly. A support agent will attend to you shortly.'
+    : 'Thanks for reaching View2Connect support. Please describe the problem clearly. A support agent will attend to you shortly.';
 }
 
 const supportFollowUpText =
@@ -1348,13 +1372,57 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     appendEmailForNotification(nextNotification);
   };
 
+  const hasCatalogManagementAccess = (ownerUserId: string) => {
+    const latestDecision = notifications
+      .filter(
+        (notification) =>
+          notification.userId === ownerUserId &&
+          notification.contextType === 'general' &&
+          notification.contextId === `catalog-management-${ownerUserId}`,
+      )
+      .sort(
+        (leftNotification, rightNotification) =>
+          new Date(rightNotification.createdAt).getTime() -
+          new Date(leftNotification.createdAt).getTime(),
+      )[0];
+
+    return latestDecision?.title === 'Catalog management access granted';
+  };
+
+  const setCatalogManagementAccess = (owner: AppUser, allowed: boolean) => {
+    if (owner.role !== 'businessOwner') {
+      return;
+    }
+
+    appendNotification({
+      userId: owner.id,
+      userName: owner.fullName,
+      recipientEmail: owner.email,
+      audience: 'businessOwner',
+      title: allowed
+        ? 'Catalog management access granted'
+        : 'Catalog management access revoked',
+      body: allowed
+        ? 'You allowed View2Connect Admin to create and update products for your store. You can revoke this permission from your seller profile.'
+        : 'View2Connect Admin can no longer create or update products for your store.',
+      contextType: 'general',
+      contextId: `catalog-management-${owner.id}`,
+    });
+    appendAuditLog(
+      owner.fullName,
+      'businessOwner',
+      allowed ? 'Catalog management access granted' : 'Catalog management access revoked',
+      `${owner.businessName ?? owner.fullName} ${allowed ? 'granted' : 'revoked'} Admin catalog access.`,
+    );
+  };
+
   useEffect(() => {
     dynamicDepositAccounts
       .filter((deposit) => deposit.status === 'paid')
       .forEach((deposit) => {
         const confirmedAt = deposit.paidAt ?? deposit.updatedAt;
         const title = `Add funds receipt ${deposit.reference}`;
-        const body = `${formatCurrency(deposit.amount)} was received by Flutterwave and added to your UrbanConnect account.`;
+        const body = `${formatCurrency(deposit.amount)} was received by Flutterwave and added to your View2Connect account.`;
         const duplicateExists = notifications.some(
           (notification) =>
             notification.userId === deposit.userId &&
@@ -1461,7 +1529,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       userId: user.id,
       userName: user.fullName,
       userRole: user.role,
-      senderName: 'UrbanConnect customer care',
+      senderName: 'View2Connect support',
       senderRole: 'system',
       text: supportAutoReplyText(user.role),
       ...(context?.contextType ? { contextType: context.contextType } : {}),
@@ -1639,9 +1707,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       userName: owner.fullName,
       recipientEmail: owner.email,
       audience: 'businessOwner',
-      title: 'River Park inspection pending',
+      title: 'Store application received',
       body:
-        'Customer care will inspect and confirm that you stay in River Park before your business account is fully verified.',
+        'Your email is verified and your seller dashboard is ready. Admin is reviewing your store application.',
       contextType: 'general',
       contextId: owner.id,
     });
@@ -1650,9 +1718,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientType: 'owner',
       recipientName: owner.fullName,
       recipientEmail: owner.email,
-      subject: 'UrbanConnect River Park inspection pending',
+      subject: 'View2Connect received your store application',
       body:
-        'Your business owner account was created. Customer care will inspect and confirm that you stay in River Park before your business account is fully verified.',
+        'Your email is verified and your seller dashboard is ready. Admin is reviewing your store application.',
     });
   };
 
@@ -1746,7 +1814,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         userId: sellerGroup.ownerUserId ?? sellerGroup.ownerKey,
         userName: sellerGroup.ownerName,
         userRole: 'businessOwner',
-        senderName: 'UrbanConnect customer care',
+        senderName: 'View2Connect support',
         senderRole: 'system',
         text: `Payment confirmed for ${order.id}. Please prepare ${sellerGroup.itemLines.join(', ')} for collection at the support center by customer care.`,
         contextType: 'order',
@@ -1840,7 +1908,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         }),
       audience: 'resident',
       title: `Delivered ${order.id}`,
-      body: 'Customer care marked your order delivered. Thank you for shopping with UrbanConnect.',
+      body: 'Your order was marked delivered. Thank you for shopping with View2Connect.',
       contextType: 'order',
       contextId: order.id,
     });
@@ -1851,7 +1919,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientName: order.userName,
       recipientEmail: order.userEmail ?? `${order.userId}@buyers.local`,
       subject: `Delivered ${order.id}`,
-      body: 'Customer care marked your order delivered. Thank you for shopping with UrbanConnect.',
+      body: 'Your order was marked delivered. Thank you for shopping with View2Connect.',
     });
 
     const notifiedOwnerKeys = new Set<string>();
@@ -1910,7 +1978,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const updatePaymentPlan = (
     cycle: PaymentPlanCycle,
     patch: Pick<PaymentPlan, 'title' | 'amount' | 'description'>,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
     shouldAudit = true,
   ) => {
@@ -1992,7 +2060,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const confirmBusinessSubscription = (
     businessId: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canConfirmPayments(actorRole)) {
@@ -2060,7 +2128,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const confirmOwnerSubscription = (
     profileId: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canConfirmPayments(actorRole)) {
@@ -2145,7 +2213,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientType: 'owner',
       recipientName: targetProfile.ownerName,
       recipientEmail: targetProfile.email || targetProfile.accountEmail,
-      subject: `${plan.title} confirmed for your River Park profile`,
+      subject: `${plan.title} confirmed for your seller profile`,
       body: `Your subscription is active until ${formatDateTimeForEmail(nextBillingAt)} and is tied to ${itemCount} listing${itemCount > 1 ? 's' : ''}.`,
     });
   };
@@ -2179,12 +2247,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const amountPerListing = amountOverride ?? plan.amount * durationMultiplier;
     const amount = amountPerListing * itemCount;
     const createdAt = new Date().toISOString();
-    const balance = getAccountWalletBalance(
-      owner,
-      getOrdersForUser(owner.id),
-      subscriptionPayments.filter((payment) => payment.ownerUserId === owner.id),
-      dynamicDepositAccounts.filter((deposit) => deposit.userId === owner.id),
-    );
+    const balance = getAvailableAccountBalanceForUser(owner);
 
     if (amount > balance) {
       throw new Error(
@@ -2240,8 +2303,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       email: existingProfile?.email ?? owner.email,
       website: existingProfile?.website ?? '',
       instagram: existingProfile?.instagram ?? '',
-      address:
-        existingProfile?.address ?? `${owner.businessCluster ?? 'River Park'}, River Park Estate`,
+      address: existingProfile?.address ?? owner.businessCluster ?? '',
       coverImage: existingProfile?.coverImage ?? '',
       galleryImages: existingProfile?.galleryImages ?? '',
       galleryVideos: existingProfile?.galleryVideos ?? '',
@@ -2335,7 +2397,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientName: owner.fullName,
       recipientEmail: owner.email,
       subject: `${durationLabel} subscription active`,
-      body: `Your UrbanConnect account balance paid ${formatCurrency(amount)}. All listings on this account are active until ${formatDateTimeForEmail(nextBillingAt)}.`,
+      body: `Your View2Connect account balance paid ${formatCurrency(amount)}. All listings on this account are active until ${formatDateTimeForEmail(nextBillingAt)}.`,
     });
 
     return payment;
@@ -2385,7 +2447,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       customerName: owner.businessName ?? owner.fullName,
       customerEmail: owner.email,
       customerPhone: owner.phoneNumber,
-      title: 'UrbanConnect business subscription',
+      title: 'View2Connect business subscription',
       description: `${durationLabel} subscription for ${itemCount} listing${itemCount > 1 ? 's' : ''}.`,
       purpose: 'subscription',
       meta: {
@@ -2454,7 +2516,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const setOwnerRiverParkVerification = (
     ownerUserId: string,
     verified: boolean,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -2516,8 +2578,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     appendAuditLog(
       actorName,
       actorRole,
-      verified ? 'River Park verified' : 'River Park verification revoked',
-      `${profile?.ownerName ?? ownerUserId} was marked ${verified ? 'verified' : 'pending'} for River Park residency.`,
+      verified ? 'Seller verified' : 'Seller verification revoked',
+      `${profile?.ownerName ?? ownerUserId} was marked ${verified ? 'verified' : 'pending'} for marketplace selling.`,
     );
 
     if (profile) {
@@ -2526,10 +2588,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         userName: profile.ownerName,
         recipientEmail: profile.accountEmail || profile.email,
         audience: 'businessOwner',
-        title: verified ? 'River Park verification approved' : 'River Park verification pending',
+        title: verified ? 'Seller verification approved' : 'Seller verification pending',
         body: verified
-          ? 'Customer care has verified your River Park account. Listing approval and subscription payment are still tracked separately.'
-          : 'Your River Park verification has been moved back to pending. Customer care may contact you for inspection.',
+          ? 'Customer care has verified your seller account. Listing approval and subscription payment are still tracked separately.'
+          : 'Your seller verification has been moved back to pending. Customer care may contact you for more information.',
         contextType: 'general',
         contextId: profile.ownerUserId,
       });
@@ -2543,7 +2605,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const updateBusinessStatus = (
     businessId: string,
     status: 'active' | 'archived',
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -2585,12 +2647,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   };
 
   const registerBusiness = async (values: BusinessProfileFormValues, owner?: AppUser | null) => {
-    if (owner?.role === 'businessOwner' && !isRiverParkVerifiedForUser(owner)) {
-      throw new Error(
-        'Customer care must verify your River Park account before you can create a listing.',
-      );
-    }
-
     const listingId = `listing-${Date.now()}`;
     const fallbackImage = values.coverImage || fallbackImageForListing(values.listingType, values.category);
     const media = buildBusinessMedia({
@@ -2605,15 +2661,27 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const stockQuantity = Number.parseInt(values.stockQuantity, 10);
     const reorderLevel = Number.parseInt(values.reorderLevel, 10);
     const ownerProfile = owner ? getOwnerBusinessProfile(owner) : undefined;
+    const individualSeller = owner?.role === 'resident';
+    const existingIndividualListing = individualSeller
+      ? businesses.find((business) => business.ownerUserId === owner.id)
+      : undefined;
+    const individualFreeStartedAt = existingIndividualListing?.createdAt ?? new Date().toISOString();
+    const individualFreeExpiry =
+      existingIndividualListing?.subscriptionNextBillingAt ??
+      new Date(new Date(individualFreeStartedAt).getTime() + 90 * 86400000).toISOString();
+    const individualFreeActive =
+      Boolean(individualSeller) && new Date(individualFreeExpiry).getTime() > Date.now();
     const subscriptionCycle = ownerProfile?.subscriptionCycle ?? 'monthly';
     const selectedPlan = getPaymentPlanByCycle(subscriptionCycle);
     const subscriptionExempt = owner ? isSubscriptionExemptForUser(owner) : false;
     const subscriptionIsActive =
+      individualFreeActive ||
       subscriptionExempt ||
       (ownerProfile?.subscriptionStatus === 'paid' || ownerProfile?.subscriptionStatus === 'active') &&
         (!ownerProfile.subscriptionNextBillingAt ||
           new Date(ownerProfile.subscriptionNextBillingAt).getTime() > Date.now());
-    const riverParkVerified = isRiverParkVerifiedForUser(owner);
+    const sellerAccessEnabled =
+      Boolean(individualSeller) || Boolean(owner && isRiverParkVerifiedForUser(owner));
     const submittedAt = new Date().toISOString();
 
     const business: Business = {
@@ -2622,8 +2690,13 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       listingType: values.listingType,
       status: 'active',
       subscriptionCycle,
-      subscriptionStatus: subscriptionExempt ? 'active' : subscriptionIsActive ? 'paid' : 'pending',
-      verifiedAmount: subscriptionExempt
+      subscriptionStatus:
+        individualFreeActive || subscriptionExempt
+          ? 'active'
+          : subscriptionIsActive
+            ? 'paid'
+            : 'pending',
+      verifiedAmount: individualSeller || subscriptionExempt
         ? 0
         : subscriptionIsActive
           ? ownerProfile?.verifiedAmount ?? selectedPlan.amount
@@ -2634,7 +2707,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         : {}),
       ...(ownerProfile?.subscriptionNextBillingAt
         ? { subscriptionNextBillingAt: ownerProfile.subscriptionNextBillingAt }
-        : {}),
+        : individualSeller
+          ? { subscriptionNextBillingAt: individualFreeExpiry }
+          : {}),
       name: values.businessName.trim(),
       ownerName: values.ownerName.trim(),
       ...(owner ? { ownerUserId: owner.id } : {}),
@@ -2659,15 +2734,19 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       priceLabel: values.listingType === 'product' ? 'Price' : 'Discuss in chat',
       responseTime: values.listingType === 'product' ? 'Delivered today' : 'Chat to discuss',
       verified:
-        riverParkVerified && subscriptionIsActive && !securitySettings.requireManualListingApproval,
-      riverParkVerified,
+        sellerAccessEnabled && subscriptionIsActive && !securitySettings.requireManualListingApproval,
+      riverParkVerified: sellerAccessEnabled,
       services:
         serviceList.length > 0
           ? serviceList
           : values.listingType === 'product'
             ? ['Fast pickup']
             : ['On-demand support'],
-      tags: ['New listing', values.category, values.cluster],
+      tags: [
+        'New listing',
+        values.category,
+        ...(individualSeller ? ['Individual seller', 'Standard placement'] : ['Priority store']),
+      ],
       contact: {
         phone: values.phone.trim(),
         email: values.email.trim().toLowerCase(),
@@ -2703,9 +2782,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     setCurrentEstateId(values.estateId);
     appendAuditLog(
       owner?.fullName ?? business.ownerName,
-      owner ? 'owner' : 'system',
+      owner?.role === 'businessOwner' ? 'owner' : 'system',
       'Listing created',
-      `${businessForSave.name} was submitted as a ${businessForSave.listingType} listing in ${businessForSave.cluster}.`,
+      `${businessForSave.name} was submitted as a ${businessForSave.listingType} listing for admin review.`,
     );
 
     appendEmailLog({
@@ -2713,13 +2792,114 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientType: 'owner',
       recipientName: businessForSave.ownerName,
       recipientEmail: businessForSave.ownerEmail ?? values.email.trim().toLowerCase(),
-      subject: `River Park verification started for ${businessForSave.name}`,
-      body: subscriptionIsActive
-        ? `We received your listing. Customer care will inspect the media, category, and River Park details before it appears publicly.`
+      subject: `View2Connect listing review started for ${businessForSave.name}`,
+      body: individualSeller
+        ? `We received your listing on the 3-month Individual Seller Free Plan. Customer care must approve it before it appears. Free individual listings use standard placement, while paid store listings are prioritized first.`
+        : subscriptionIsActive
+          ? `We received your listing. Customer care will review the image, category, price, and short description before it appears publicly.`
         : `We received your listing. Pay your ${selectedPlan.title.toLowerCase()} from the Subscription page so customer care can activate the business.`,
     });
 
     return businessForSave;
+  };
+
+  const createCentralCatalogProduct = async (
+    values: CentralCatalogProductValues,
+    managedOwner?: AppUser,
+  ) => {
+    const createdAt = new Date().toISOString();
+    const managedProfile = managedOwner ? getOwnerBusinessProfile(managedOwner) : undefined;
+    const catalogOwnerEmail = managedOwner?.email ?? 'catalog@view2connect.ng';
+    const catalogOwnerUserId = managedOwner?.id;
+    const matchingCatalogProduct = businesses.find(
+      (business) =>
+        business.ownerEmail === catalogOwnerEmail &&
+        business.name.trim().toLowerCase() === values.name.trim().toLowerCase(),
+    );
+    const catalogId = matchingCatalogProduct?.id ?? `catalog-${Date.now()}`;
+    const fallbackImage =
+      values.image || fallbackImageForListing('product', values.category);
+    const media = buildBusinessMedia({
+      baseId: catalogId,
+      coverImage: values.image,
+      galleryImages: '',
+      galleryVideos: '',
+      fallbackImage,
+    });
+    const catalogProduct: Business = {
+      id: catalogId,
+      estateId: estates[0]?.id ?? currentEstateId,
+      listingType: 'product',
+      status: managedOwner ? 'active' : 'archived',
+      subscriptionCycle: 'monthly',
+      subscriptionStatus: managedProfile?.subscriptionStatus ?? 'active',
+      verifiedAmount: 0,
+      subscriptionItemCount: 0,
+      name: values.name.trim(),
+      ownerName: managedOwner?.fullName ?? 'View2Connect Catalog',
+      ...(catalogOwnerUserId ? { ownerUserId: catalogOwnerUserId } : {}),
+      ownerEmail: catalogOwnerEmail,
+      cluster: managedOwner?.businessCluster ?? riverParkClusters[0],
+      category: values.category,
+      description: values.description.trim(),
+      longDescription: values.description.trim(),
+      imageUrl: media[0]?.url ?? fallbackImage,
+      media,
+      address: managedProfile?.address || managedOwner?.businessCluster || 'Nigeria',
+      sku:
+        values.hasBarcode && values.barcode.trim()
+          ? values.barcode.trim()
+          : `CAT-${slugify(values.name)}`,
+      stockQuantity: 0,
+      reorderLevel: 1,
+      price: Number.parseFloat(values.price) || 0,
+      priceLabel: 'Catalog price',
+      responseTime: 'Available from participating stores',
+      verified: Boolean(managedOwner?.riverParkVerified),
+      riverParkVerified: Boolean(managedOwner?.riverParkVerified),
+      services: [],
+      tags: [
+        managedOwner ? 'Admin managed catalog' : 'Central catalog',
+        values.category,
+        ...(values.hasSize && values.size.trim()
+          ? [`Size: ${values.size.trim()}`]
+          : []),
+      ],
+      contact: {
+        phone: managedProfile?.phone ?? managedOwner?.phoneNumber ?? '',
+        email: managedProfile?.email ?? catalogOwnerEmail,
+      },
+      createdAt: matchingCatalogProduct?.createdAt ?? createdAt,
+      updatedAt: createdAt,
+    };
+    const productForSave = isSupabaseConfigured
+      ? await uploadBusinessMediaToSupabase(catalogProduct)
+      : catalogProduct;
+
+    if (isSupabaseConfigured) {
+      await saveBusinessToSupabase(productForSave);
+    }
+
+    setBusinesses((currentBusinesses) => [
+      productForSave,
+      ...currentBusinesses.filter(
+        (business) =>
+          !(
+            business.ownerEmail === catalogOwnerEmail &&
+            business.name.trim().toLowerCase() === values.name.trim().toLowerCase()
+          ),
+      ),
+    ]);
+    appendAuditLog(
+      'View2Connect Owner',
+      'owner',
+      managedOwner ? 'Managed store product created' : 'Central catalog product created',
+      managedOwner
+        ? `${productForSave.name} was added to ${managedOwner.businessName ?? managedOwner.fullName} with seller permission.`
+        : `${productForSave.name} was added to the owner-managed catalog.`,
+    );
+
+    return productForSave;
   };
 
   const updateOwnerBusinessProfile = (
@@ -2746,7 +2926,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       email: profileEmail || owner.email,
       website: values.website.trim(),
       instagram: values.instagram.trim(),
-      address: values.address.trim() || `${owner.businessCluster ?? 'River Park'}, River Park Estate`,
+      address: values.address.trim() || owner.businessCluster || '',
       coverImage: values.coverImage.trim(),
       galleryImages: values.galleryImages.trim(),
       galleryVideos: values.galleryVideos.trim(),
@@ -2837,6 +3017,56 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
+  const setVerifiedSellerPayoutAccount = (
+    owner: AppUser,
+    account: VerifiedSellerPayoutAccount,
+  ) => {
+    const existingProfile = getOwnerBusinessProfile(owner);
+    const nextProfile: OwnerBusinessProfile = {
+      ...(existingProfile ?? {
+        id: owner.id,
+        ownerUserId: owner.id,
+        accountName: owner.businessName ?? owner.fullName,
+        accountEmail: owner.email,
+        ownerName: owner.fullName,
+        phone: owner.phoneNumber,
+        whatsapp: owner.phoneNumber,
+        email: owner.email,
+        website: '',
+        instagram: '',
+        address: owner.businessCluster ?? '',
+        coverImage: '',
+        galleryImages: '',
+        galleryVideos: '',
+      }),
+      payoutBankCode: account.bankCode,
+      payoutBankName: account.bankName,
+      payoutAccountNumber: account.accountNumber,
+      payoutAccountName: account.accountName,
+      payoutVerifiedAt: account.verifiedAt,
+      updatedAt: account.verifiedAt,
+    };
+
+    setOwnerBusinessProfiles((currentProfiles) => [
+      nextProfile,
+      ...currentProfiles.filter(
+        (profile) =>
+          profile.ownerUserId !== owner.id && profile.accountEmail !== owner.email,
+      ),
+    ]);
+
+    if (isSupabaseConfigured) {
+      void saveOwnerBusinessProfileToSupabase(nextProfile).catch(() => undefined);
+    }
+
+    appendAuditLog(
+      owner.fullName,
+      'businessOwner',
+      'Seller payout account verified',
+      `${account.bankName} account ending ${account.accountNumber.slice(-4)} was verified through Flutterwave.`,
+    );
+  };
+
   const getBusinessById = (businessId: string) =>
     businesses.find((business) => business.id === businessId);
 
@@ -2844,7 +3074,11 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const getOrdersForUser = (userId: string) =>
     orders
-      .filter((order) => order.userId === userId)
+      .filter(
+        (order) =>
+          order.userId === userId &&
+          !(order.paymentMethod === 'flutterwave' && order.paymentStatus === 'pending'),
+      )
       .sort(
         (leftOrder, rightOrder) =>
           new Date(rightOrder.createdAt).getTime() - new Date(leftOrder.createdAt).getTime(),
@@ -2869,17 +3103,57 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     });
 
     return orders
-      .filter((order) =>
-        order.items.some((item) =>
-          [item.ownerUserId, item.ownerName]
-            .map(normalizeOwnerKey)
-            .some((key) => Boolean(key && ownerKeys.has(key))),
-        ),
+      .filter(
+        (order) =>
+          !(order.paymentMethod === 'flutterwave' && order.paymentStatus === 'pending') &&
+          order.items.some((item) =>
+            [item.ownerUserId, item.ownerName]
+              .map(normalizeOwnerKey)
+              .some((key) => Boolean(key && ownerKeys.has(key))),
+          ),
       )
       .sort(
         (leftOrder, rightOrder) =>
           new Date(rightOrder.createdAt).getTime() - new Date(leftOrder.createdAt).getTime(),
       );
+  };
+
+  const getAvailableAccountBalanceForUser = (accountUser: AppUser) => {
+    const customerWalletBeforeWithdrawals = getAccountWalletBalance(
+      accountUser,
+      getOrdersForUser(accountUser.id),
+      subscriptionPayments.filter((payment) => payment.ownerUserId === accountUser.id),
+      dynamicDepositAccounts.filter((deposit) => deposit.userId === accountUser.id),
+    );
+    const ownerProfile = getOwnerBusinessProfile(accountUser);
+    const ownerKeys = new Set(getUserOwnerKeys(accountUser, ownerProfile));
+
+    businesses
+      .filter((business) => getBusinessOwnerKeys(business).some((key) => ownerKeys.has(key)))
+      .forEach((business) => {
+        getBusinessOwnerKeys(business).forEach((key) => ownerKeys.add(key));
+      });
+
+    const releasedSellerEarnings = getOrdersForOwner(accountUser.id, accountUser).reduce(
+      (total, order) =>
+        total +
+        (order.paymentStatus === 'paid' && order.status === 'delivered'
+          ? order.items
+              .filter((item) =>
+                [item.ownerUserId, item.ownerName]
+                  .map(normalizeOwnerKey)
+                  .some((key) => Boolean(key && ownerKeys.has(key))),
+              )
+              .reduce((itemTotal, item) => itemTotal + item.lineTotal, 0)
+          : 0),
+      0,
+    );
+    const paidWithdrawals = getPaidWithdrawalTotal(withdrawalRequests, accountUser);
+
+    return Math.max(
+      0,
+      customerWalletBeforeWithdrawals + releasedSellerEarnings - paidWithdrawals,
+    );
   };
 
   const isBusinessOwnedByUser = (business: Business, user?: AppUser | null) => {
@@ -2899,6 +3173,11 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       name: string;
       description: string;
       longDescription: string;
+      category?: string;
+      address?: string;
+      imageUrl?: string;
+      services?: string[];
+      sku?: string;
       price?: number;
       stockQuantity?: number;
       reorderLevel?: number;
@@ -2960,6 +3239,11 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       name,
       description,
       longDescription,
+      category: values.category ?? business.category,
+      address: values.address?.trim() || business.address,
+      imageUrl: values.imageUrl?.trim() || business.imageUrl,
+      services: values.services ?? business.services,
+      ...(values.sku?.trim() ? { sku: values.sku.trim() } : {}),
       ...(isProduct
         ? {
             price: Math.round(productPrice),
@@ -2988,6 +3272,50 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
 
     return nextBusiness;
+  };
+
+  const deleteOwnedBusinessListing = (businessId: string, owner?: AppUser | null) => {
+    const business = getBusinessById(businessId);
+
+    if (!business) {
+      throw new Error('This listing could not be found.');
+    }
+
+    if (!isBusinessOwnedByUser(business, owner)) {
+      throw new Error('You can only delete listings that belong to your business account.');
+    }
+
+    const deletedAt = new Date().toISOString();
+
+    setDeletedBusinessIds((currentIds) =>
+      currentIds.includes(businessId) ? currentIds : [...currentIds, businessId],
+    );
+    setBusinesses((currentBusinesses) =>
+      currentBusinesses.filter((currentBusiness) => currentBusiness.id !== businessId),
+    );
+    setCartItems((currentCartItems) =>
+      currentCartItems.filter((item) => item.businessId !== businessId),
+    );
+
+    if (isSupabaseConfigured) {
+      const hiddenBusiness: Business = {
+        ...business,
+        status: 'archived',
+        verified: false,
+        updatedAt: deletedAt,
+      };
+
+      void deleteBusinessFromSupabase(businessId).catch(() => {
+        void saveBusinessToSupabase(hiddenBusiness).catch(() => undefined);
+      });
+    }
+
+    appendAuditLog(
+      owner?.fullName ?? business.ownerName,
+      'businessOwner',
+      'Listing deleted',
+      `${business.name} was deleted by the seller.`,
+    );
   };
 
   const getWithdrawalsForOwner = (ownerUserId: string) =>
@@ -3081,8 +3409,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       customerName: accountUser.businessName ?? accountUser.fullName,
       customerEmail: accountUser.email,
       customerPhone: accountUser.phoneNumber,
-      title: 'UrbanConnect portfolio top-up',
-      description: 'Add money to your UrbanConnect portfolio.',
+      title: 'View2Connect portfolio top-up',
+      description: 'Add money to your View2Connect portfolio.',
       purpose: 'addFunds',
       ...(paymentOptions ? { paymentOptions } : {}),
       meta: {
@@ -3207,10 +3535,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       idDocumentName?: string;
     },
   ) => {
-    if (owner.role !== 'businessOwner') {
-      throw new Error('Only business owners can verify a withdrawal account.');
-    }
-
     const kycNumber = values.kycNumber.replace(/\D/g, '');
 
     if (kycNumber.length !== 11) {
@@ -3242,7 +3566,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       userId: owner.id,
       userName: owner.fullName,
       recipientEmail: owner.email,
-      audience: 'businessOwner',
+      audience: owner.role,
       title: 'Withdrawal account verified',
       body: `Flutterwave verified ${accountWithDocument.kycReference ?? 'your KYC'} with your uploaded ID document.`,
       contextType: 'general',
@@ -3252,7 +3576,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     appendAuditLog(
       owner.fullName,
-      'owner',
+      owner.role === 'businessOwner' ? 'owner' : 'system',
       'Withdrawal KYC verified',
       `${accountWithDocument.ownerName} verified ${accountWithDocument.kycReference ?? 'KYC'} with Flutterwave and uploaded ID.`,
     );
@@ -3269,10 +3593,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       accountName?: string;
     },
   ) => {
-    if (owner.role !== 'businessOwner') {
-      throw new Error('Only business owners can withdraw seller earnings.');
-    }
-
     const amount = Math.max(0, Math.floor(values.amount));
 
     if (amount <= 0) {
@@ -3341,7 +3661,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       userId: owner.id,
       userName: owner.fullName,
       recipientEmail: owner.email,
-      audience: 'businessOwner',
+      audience: owner.role,
       title: 'Withdrawal paid',
       body: `${formatCurrency(amount)} was withdrawn to ${withdrawal.bankName} ${withdrawal.accountNumber} after ${withdrawal.kycReference} verification.`,
       contextType: 'general',
@@ -3350,16 +3670,16 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     });
 
     appendEmailLog({
-      recipientType: 'owner',
+      recipientType: owner.role === 'businessOwner' ? 'owner' : 'buyer',
       recipientName: owner.fullName,
       recipientEmail: owner.email,
-      subject: 'UrbanConnect withdrawal paid',
+      subject: 'View2Connect withdrawal paid',
       body: `${formatCurrency(amount)} was withdrawn to ${withdrawal.bankName} ${withdrawal.accountNumber}. KYC: ${withdrawal.kycReference}.`,
     });
 
     appendAuditLog(
       owner.fullName,
-      'owner',
+      owner.role === 'businessOwner' ? 'owner' : 'system',
       'Withdrawal paid',
       `${withdrawal.ownerName} withdrew ${amount} to ${withdrawal.bankName} with ${withdrawal.kycReference}.`,
     );
@@ -3583,14 +3903,27 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       );
     }
 
-    const selfOwnedEntries =
-      customer.role === 'businessOwner'
-        ? cartEntries.filter((entry) => isBusinessOwnedByUser(entry.business, customer))
-        : [];
+    const selfOwnedEntries = cartEntries.filter((entry) =>
+      isBusinessOwnedByUser(entry.business, customer),
+    );
 
     if (selfOwnedEntries.length > 0) {
       throw new Error(
-        `${selfOwnedEntries.map((entry) => entry.business.name).join(', ')} is your own listing. Business owners cannot buy items they sell.`,
+        `${selfOwnedEntries.map((entry) => entry.business.name).join(', ')} is your own listing. Sellers cannot buy items they posted.`,
+      );
+    }
+
+    const individualSellerMinimumIssues =
+      getIndividualSellerMinimumIssues(cartEntries);
+
+    if (individualSellerMinimumIssues.length > 0) {
+      throw new Error(
+        individualSellerMinimumIssues
+          .map(
+            (issue) =>
+              `Add ${formatCurrency(issue.amountRemaining)} more from ${issue.sellerName}. Individual-seller orders must reach ${formatCurrency(INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL)} per seller.`,
+          )
+          .join(' '),
       );
     }
 
@@ -3599,12 +3932,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const serviceFee = 0;
     const deliveryFee = subtotal >= 20000 ? 0 : 2000;
     const totalAmount = subtotal + serviceFee + deliveryFee;
-    const walletBalance = getAccountWalletBalance(
-      customer,
-      getOrdersForUser(customer.id),
-      subscriptionPayments.filter((payment) => payment.ownerUserId === customer.id),
-      dynamicDepositAccounts.filter((deposit) => deposit.userId === customer.id),
-    );
+    const walletBalance = getAvailableAccountBalanceForUser(customer);
 
     if (totalAmount > walletBalance) {
       throw new Error(
@@ -3697,14 +4025,27 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       );
     }
 
-    const selfOwnedEntries =
-      customer.role === 'businessOwner'
-        ? cartEntries.filter((entry) => isBusinessOwnedByUser(entry.business, customer))
-        : [];
+    const selfOwnedEntries = cartEntries.filter((entry) =>
+      isBusinessOwnedByUser(entry.business, customer),
+    );
 
     if (selfOwnedEntries.length > 0) {
       throw new Error(
-        `${selfOwnedEntries.map((entry) => entry.business.name).join(', ')} is your own listing. Business owners cannot buy items they sell.`,
+        `${selfOwnedEntries.map((entry) => entry.business.name).join(', ')} is your own listing. Sellers cannot buy items they posted.`,
+      );
+    }
+
+    const individualSellerMinimumIssues =
+      getIndividualSellerMinimumIssues(cartEntries);
+
+    if (individualSellerMinimumIssues.length > 0) {
+      throw new Error(
+        individualSellerMinimumIssues
+          .map(
+            (issue) =>
+              `Add ${formatCurrency(issue.amountRemaining)} more from ${issue.sellerName}. Individual-seller orders must reach ${formatCurrency(INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL)} per seller.`,
+          )
+          .join(' '),
       );
     }
 
@@ -3758,7 +4099,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       customerName: customer.fullName,
       customerEmail: customer.email,
       customerPhone: customer.phoneNumber,
-      title: 'UrbanConnect order payment',
+      title: 'View2Connect order payment',
       description: `Order ${order.id} for ${cartEntries.length} item${cartEntries.length > 1 ? 's' : ''}.`,
       purpose: 'cart',
       ...(paymentOptions ? { paymentOptions } : {}),
@@ -3767,6 +4108,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         userId: customer.id,
       },
     });
+    await saveOrderToSupabase(order);
 
     appendAuditLog(
       customer.fullName,
@@ -3778,44 +4120,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return { ...session, order };
   };
 
-  const completeCartFlutterwaveCheckout = (order: Order, customer?: AppUser | null) => {
-    if (!customer) {
-      throw new Error('You need to sign in before confirming this payment.');
-    }
-
-    if (order.userId !== customer.id) {
-      throw new Error('This checkout belongs to another account.');
-    }
-
-    const confirmedAt = new Date().toISOString();
-    const paidOrder: Order = {
-      ...order,
-      paymentStatus: 'paid',
-      status: 'placed',
-      createdAt: confirmedAt,
-      updatedAt: confirmedAt,
-      timeline: [
-        buildTimelineEvent(
-          order.id,
-          'placed',
-          confirmedAt,
-          'Flutterwave confirmed the card or bank payment.',
-        ),
-      ],
-    };
-
-    return persistPaidOrder(
-      paidOrder,
-      customer.fullName,
-      'system',
-      'Flutterwave order paid',
-      `${customer.fullName} paid with Flutterwave for ${paidOrder.id} worth ${paidOrder.totalAmount}.`,
-    );
-  };
-
   const toggleBusinessVerification = (
     businessId: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canVerifyListings(actorRole)) {
@@ -3864,7 +4171,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           audience: 'businessOwner',
           title: nextVerified ? 'Listing approved' : 'Listing returned to pending',
           body: nextVerified
-            ? `${business.name} has been approved by customer care and can now appear in UrbanConnect.`
+            ? `${business.name} has been approved and can now appear in View2Connect.`
             : `${business.name} was moved back to pending. Please contact customer care for more information.`,
           contextType: 'listing',
           contextId: business.id,
@@ -3881,7 +4188,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
             ? `${business.name} listing approved`
             : `${business.name} listing moved to pending`,
           body: nextVerified
-            ? `Customer care approved ${business.name}. It can now appear in UrbanConnect.`
+            ? `${business.name} was approved. It can now appear in View2Connect.`
             : `Customer care moved ${business.name} back to pending. Please contact support for next steps.`,
         });
       }
@@ -3891,7 +4198,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const restockBusinessStock = (
     businessId: string,
     quantity: number,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -3933,7 +4240,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const updateBusinessReorderLevel = (
     businessId: string,
     reorderLevel: number,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -3974,7 +4281,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const updateOrderProgressCode = (
     code: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -4041,7 +4348,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   };
 
   const clearOrderTestingState = (
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -4085,7 +4392,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const deleteOrder = (
     orderId: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -4140,7 +4447,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const updateOrderStatus = (
     orderId: string,
     status: OrderStatus,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
     progressCode = '',
     actorUserId?: string,
@@ -4213,7 +4520,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const updatePaymentStatus = (
     orderId: string,
     paymentStatus: PaymentStatus,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canConfirmPayments(actorRole)) {
@@ -4299,8 +4606,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           title: 'Order refunded',
           body:
             orderBeforeUpdate.paymentMethod === 'walletAccount'
-              ? `${formatCurrency(orderBeforeUpdate.totalAmount)} was returned to your UrbanConnect account balance.`
-              : `${formatCurrency(orderBeforeUpdate.totalAmount)} was credited to your UrbanConnect in-app account balance.`,
+              ? `${formatCurrency(orderBeforeUpdate.totalAmount)} was returned to your View2Connect account balance.`
+              : `${formatCurrency(orderBeforeUpdate.totalAmount)} was credited to your View2Connect in-app account balance.`,
           contextType: 'order',
           contextId: orderBeforeUpdate.id,
           createdAt: updatedAt,
@@ -4313,7 +4620,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
             recipientName: orderBeforeUpdate.userName,
             recipientEmail: orderBeforeUpdate.userEmail,
             subject: `Refund completed for ${orderBeforeUpdate.id}`,
-            body: `Your ${formatCurrency(orderBeforeUpdate.totalAmount)} refund was returned to your UrbanConnect in-app account balance.`,
+            body: `Your ${formatCurrency(orderBeforeUpdate.totalAmount)} refund was returned to your View2Connect in-app account balance.`,
           });
         }
       }
@@ -4329,7 +4636,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const updateSecuritySettings = (
     patch: Partial<SecuritySettings>,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canEditSensitiveData(actorRole)) {
@@ -4362,7 +4669,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const deleteBusiness = (
     businessId: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     if (!canVerifyListings(actorRole)) {
@@ -4407,7 +4714,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const restoreBusiness = (
     businessId: string,
-    actorName = 'UrbanConnect Owner',
+    actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
   ) => {
     updateBusinessStatus(businessId, 'active', actorName, actorRole);
@@ -4532,9 +4839,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     });
   }, [notifications, orders]);
 
+  const centralCatalogProducts = useMemo(
+    () =>
+      businesses.filter(
+        (business) =>
+          business.ownerEmail === 'catalog@view2connect.ng' &&
+          business.tags.includes('Central catalog'),
+      ),
+    [businesses],
+  );
+
   const value = useMemo<BusinessDirectoryContextValue>(
     () => ({
       businesses,
+      centralCatalogProducts,
       estates,
       currentEstateId,
       cartEntries,
@@ -4566,6 +4884,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       getSupportConversations,
       getNotificationsForUser,
       isRiverParkVerifiedForUser,
+      hasCatalogManagementAccess,
+      setCatalogManagementAccess,
       markNotificationsRead,
       sendSupportMessage,
       sendSupportReply,
@@ -4573,6 +4893,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       deleteLatestSupportConversation,
       setCurrentEstateId,
       registerBusiness,
+      createCentralCatalogProduct,
       getOwnerBusinessProfile,
       isSubscriptionExemptForUser,
       confirmOwnerSubscription,
@@ -4589,12 +4910,15 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       notifyBusinessOwnerInspection,
       setOwnerRiverParkVerification,
       updateOwnerBusinessProfile,
+      setVerifiedSellerPayoutAccount,
       getBusinessById,
       getOrderById,
       getOrdersForUser,
       getOrdersForOwner,
+      getAvailableAccountBalanceForUser,
       isBusinessOwnedByUser,
       updateBusinessListing,
+      deleteOwnedBusinessListing,
       getAvailableStock,
       addToCart,
       removeFromCart,
@@ -4602,7 +4926,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       clearCart,
       checkoutCart,
       startCartFlutterwaveCheckout,
-      completeCartFlutterwaveCheckout,
       restockBusinessStock,
       updateBusinessReorderLevel,
       updateOrderStatus,
@@ -4620,6 +4943,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       appendNotification,
       auditLogs,
       businesses,
+      centralCatalogProducts,
       cartCount,
       cartEntries,
       cartTotal,

@@ -50,10 +50,33 @@ npm install
 npm run start
 ```
 
+When the hosted Supabase project is restricted or you want to test without using live database/storage space, run local test mode:
+
+```bash
+npm run start:local
+```
+
+Local test mode disables Supabase reads/writes and keeps test accounts, listings, orders, wallet state, and admin changes under separate local storage keys. Use external image URLs while testing media-heavy listings so Supabase Storage space is not used.
+
+Local test accounts:
+
+- Buyer: `buyer@test.urbanconnect.local` / `password123`
+- Seller: `seller@test.urbanconnect.local` / `password123`
+
+Seller portal product import test file:
+
+- `sample-data/seller-product-import.csv`
+
 For web:
 
 ```bash
 npm run web
+```
+
+For web local test mode:
+
+```bash
+npm run web:local
 ```
 
 ## Secure admin panel

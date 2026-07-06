@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UrbanConnect Investment Proposal - Daniel Kenneth</title>
+    <style>
+      :root {
+        --ink: #14201d;
+        --muted: #64706c;
+        --green: #174f45;
+        --green-soft: #e7f2ee;
+        --gold: #d8a72c;
+        --paper: #ffffff;
+        --line: #d8e1dd;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: #edf1ef;
+        color: var(--ink);
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-size: 10.5pt;
+        line-height: 1.55;
+      }
+
+      body {
+        padding: 24px;
+      }
+
+      .page {
+        width: 210mm;
+        height: 297mm;
+        margin: 0 auto;
+        padding: 17mm 18mm 15mm;
+        background: var(--paper);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .page + .page {
+        margin-top: 24px;
+      }
+
+      .continuation-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        padding-bottom: 13px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .continuation-title {
+        font-size: 12pt;
+        font-weight: 800;
+      }
+
+      .top-rule {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 7px;
+        background: linear-gradient(90deg, var(--green) 0 74%, var(--gold) 74% 100%);
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+      }
+
+      .mark {
+        width: 46px;
+        height: 46px;
+        border-radius: 12px;
+        background: var(--green);
+        color: white;
+        display: grid;
+        place-items: center;
+        position: relative;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .mark::before {
+        content: "";
+        position: absolute;
+        left: 9px;
+        right: 9px;
+        bottom: 9px;
+        height: 9px;
+        border-radius: 9px;
+        background: var(--gold);
+        opacity: 0.9;
+      }
+
+      .mark span {
+        position: relative;
+        z-index: 1;
+      }
+
+      .mark::after {
+        content: "";
+        position: absolute;
+        right: 7px;
+        bottom: 7px;
+        width: 8px;
+        height: 8px;
+        border: 2px solid var(--green);
+        border-radius: 50%;
+        background: #efc84d;
+      }
+
+      .brand-name {
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .brand-subtitle,
+      .document-meta {
+        color: var(--muted);
+        font-size: 8.8pt;
+      }
+
+      .document-meta {
+        text-align: right;
+      }
+
+      .hero {
+        padding: 24px 0 16px;
+      }
+
+      .eyebrow {
+        margin: 0 0 5px;
+        color: var(--green);
+        font-size: 8.5pt;
+        font-weight: 800;
+        letter-spacing: 1.1px;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 610px;
+        margin: 0;
+        font-size: 27px;
+        line-height: 1.15;
+        letter-spacing: 0;
+      }
+
+      .intro {
+        max-width: 650px;
+        margin: 12px 0 0;
+        color: #34423e;
+        font-size: 11pt;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: 1.25fr 0.75fr;
+        gap: 12px;
+        margin: 4px 0 18px;
+      }
+
+      .summary-panel {
+        padding: 14px 15px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fbfcfb;
+      }
+
+      .summary-panel.accent {
+        border-color: var(--green);
+        background: var(--green);
+        color: white;
+      }
+
+      .summary-label {
+        margin-bottom: 3px;
+        color: var(--muted);
+        font-size: 8.3pt;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .accent .summary-label {
+        color: #cae1da;
+      }
+
+      .summary-value {
+        font-size: 14pt;
+        font-weight: 800;
+        line-height: 1.25;
+      }
+
+      h2 {
+        margin: 17px 0 8px;
+        font-size: 13.5pt;
+        line-height: 1.3;
+      }
+
+      p {
+        margin: 0 0 9px;
+      }
+
+      table {
+        width: 100%;
+        margin: 8px 0 13px;
+        border-collapse: collapse;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+      }
+
+      th {
+        padding: 8px 9px;
+        background: var(--green-soft);
+        color: var(--green);
+        text-align: left;
+        font-size: 8.5pt;
+        text-transform: uppercase;
+      }
+
+      td {
+        padding: 8px 9px;
+        border-top: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      td:nth-child(2) {
+        width: 24%;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      ol {
+        margin: 6px 0 10px;
+        padding-left: 22px;
+      }
+
+      li {
+        margin-bottom: 5px;
+        padding-left: 3px;
+      }
+
+      .note {
+        padding: 10px 12px;
+        border-left: 4px solid var(--gold);
+        background: #fff9e9;
+        color: #50451f;
+      }
+
+      .investment {
+        margin-top: 16px;
+        padding: 14px 15px;
+        border: 1px solid #b8cec7;
+        border-radius: 7px;
+        background: var(--green-soft);
+      }
+
+      .investment h2 {
+        margin-top: 0;
+        color: var(--green);
+      }
+
+      .signature-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        margin-top: 30px;
+      }
+
+      .signature-line {
+        padding-top: 26px;
+        border-bottom: 1px solid #65716d;
+      }
+
+      .signature-label {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 8.5pt;
+      }
+
+      footer {
+        position: absolute;
+        right: 18mm;
+        bottom: 9mm;
+        left: 18mm;
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 8pt;
+      }
+
+      @page {
+        size: A4;
+        margin: 0;
+      }
+
+      @media print {
+        html,
+        body {
+          background: white;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        body {
+          padding: 0;
+        }
+
+        .page {
+          margin: 0;
+          box-shadow: none;
+          break-after: page;
+        }
+
+        .page:last-child {
+          break-after: auto;
+        }
+
+        .page + .page {
+          margin-top: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="top-rule"></div>
+
+      <header>
+        <div class="brand">
+          <div class="mark"><span>UC</span></div>
+          <div>
+            <div class="brand-name">UrbanConnect</div>
+            <div class="brand-subtitle">Local marketplace and commerce platform</div>
+          </div>
+        </div>
+        <div class="document-meta">
+          Investment Proposal<br />
+          27 June 2026
+        </div>
+      </header>
+
+      <section class="hero">
+        <p class="eyebrow">Early-stage investment proposal</p>
+        <h1>Building UrbanConnect from product development to a supermarket pilot</h1>
+        <p class="intro">
+          Prepared for <strong>Madam Comfort</strong> by <strong>Daniel Kenneth</strong>,
+          Founder of UrbanConnect.
+        </p>
+      </section>
+
+      <section class="summary">
+        <div class="summary-panel">
+          <div class="summary-label">Immediate capital requested</div>
+          <div class="summary-value">$50 plus the approved banner production cost</div>
+        </div>
+        <div class="summary-panel accent">
+          <div class="summary-label">Ongoing operating cost</div>
+          <div class="summary-value">$25 monthly</div>
+        </div>
+      </section>
+
+      <p>Dear Madam Comfort,</p>
+      <p>
+        I am presenting this as a business proposal rather than a personal request for
+        money. UrbanConnect is the marketplace platform I am developing to connect
+        customers with supermarkets, stores, and independent sellers through one
+        organised digital platform.
+      </p>
+      <p>
+        I have attempted projects before and experienced setbacks. Those experiences
+        taught me important lessons about planning, operating costs, partnerships, and
+        execution. I am willing to try again because building a successful technology
+        company is what I have always wanted, and I now have a clearer and more
+        practical route to launch.
+      </p>
+
+      <h2>Required Investment</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Requirement</th>
+            <th>Cost</th>
+            <th>Business purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Supabase database and storage</td>
+            <td>$25 monthly</td>
+            <td>Reactivate the backend, store product information and images, and begin building the catalogue.</td>
+          </tr>
+          <tr>
+            <td>Google Play developer account</td>
+            <td>$25 one-time</td>
+            <td>Prepare UrbanConnect for publication and distribution on the Google Play Store.</td>
+          </tr>
+          <tr>
+            <td>Supermarket promotional banner</td>
+            <td>To be confirmed</td>
+            <td>Promote the customer app inside Anishok after collaboration and placement are approved.</td>
+          </tr>
+          <tr>
+            <td>Chat development subscription</td>
+            <td>Deferred</td>
+            <td>The subscription expires on 28 June 2026, but I can continue development with the free plan for now.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        The first funding priority is infrastructure and distribution. No immediate
+        funding is being requested for the chat subscription.
+      </div>
+
+      <footer>
+        <span>UrbanConnect Investment Proposal</span>
+        <span>Page 1 of 2</span>
+      </footer>
+    </main>
+
+    <main class="page">
+      <div class="top-rule"></div>
+
+      <div class="continuation-header">
+        <div class="brand">
+          <div class="mark"><span>UC</span></div>
+          <div>
+            <div class="brand-name">UrbanConnect</div>
+            <div class="brand-subtitle">Investment Proposal</div>
+          </div>
+        </div>
+        <div class="document-meta">
+          Daniel Kenneth<br />
+          Founder
+        </div>
+      </div>
+
+      <h2>Launch and Execution Plan</h2>
+      <ol>
+        <li>Present the collaboration proposal to the manager of Anishok.</li>
+        <li>Reactivate Supabase and begin creating the UrbanConnect product catalogue.</li>
+        <li>Organise supermarket products, prices, barcodes, stock data, and images.</li>
+        <li>Test the customer and seller experience using real supermarket information.</li>
+        <li>Produce and place the promotional banner after receiving permission from Anishok.</li>
+        <li>Register the Google Play developer account and prepare the first public release.</li>
+        <li>Measure registrations, orders, seller participation, and customer feedback before expanding.</li>
+      </ol>
+
+      <section class="investment">
+        <h2>Your Position as an Investor</h2>
+        <p>
+          I do not see your contribution as ordinary financial assistance. I see you
+          as a major early investor and an important part of UrbanConnect's foundation.
+          Your support should be formally recognised through a shareholding position
+          in the company.
+        </p>
+        <p>
+          The ownership percentage and investment terms will be agreed clearly and
+          documented when the company is formally incorporated. I will maintain records
+          of how every investment is used and provide progress updates against the
+          launch plan.
+        </p>
+      </section>
+
+      <h2>Founder's Commitment</h2>
+      <p>
+        I understand that belief must be supported by consistent action. I cannot
+        promise that building the business will be effortless, but I can promise
+        discipline, transparency, persistence, and responsible use of the investment.
+      </p>
+      <p>
+        I have failed before, but I have also learned from those failures. This time I
+        have a clearer product, a realistic launch strategy, and a potential supermarket
+        partnership. I genuinely believe I can make UrbanConnect succeed, and I would
+        be honoured to build it with you as one of its earliest and most important
+        investors.
+      </p>
+
+      <div class="signature-grid">
+        <div>
+          <div class="signature-line"></div>
+          <div class="signature-label">Daniel Kenneth, Founder</div>
+        </div>
+        <div>
+          <div class="signature-line"></div>
+          <div class="signature-label">Madam Comfort, Investor</div>
+        </div>
+      </div>
+
+      <footer>
+        <span>Confidential</span>
+        <span>Page 2 of 2</span>
+      </footer>
+    </main>
+  </body>
+</html>

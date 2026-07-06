@@ -189,7 +189,7 @@ function cleanDigits(value?: string) {
 
 function splitName(value: string) {
   const parts = value.trim().split(/\s+/).filter(Boolean);
-  const firstName = parts[0] ?? 'UrbanConnect';
+  const firstName = parts[0] ?? 'View2Connect';
   const lastName = parts.slice(1).join(' ') || 'Seller';
 
   return { firstName, lastName };
@@ -311,7 +311,7 @@ Deno.serve(async (request: Request) => {
     firstname: firstName,
     lastname: lastName,
     ...(purpose === 'deposit' ? { amount, currency } : {}),
-    narration: payload.narration?.trim() || 'UrbanConnect wallet account',
+    narration: payload.narration?.trim() || 'View2Connect wallet account',
     ...(hasKyc ? (kycType === 'bvn' ? { bvn: kycNumber } : { nin: kycNumber }) : {}),
   };
 

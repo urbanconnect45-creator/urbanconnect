@@ -12,22 +12,10 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Business, OwnerBusinessProfile, OwnerBusinessProfileValues } from '../types/business';
-import { splitInputList } from '../utils/businessMedia';
 
 function assetLabelFromUri(uri: string, fallbackPrefix: string, index: number) {
   const lastSegment = uri.split('/').pop()?.split('?')[0];
   return lastSegment && lastSegment.length > 0 ? lastSegment : `${fallbackPrefix} ${index + 1}`;
-}
-
-function assetsFromValue(value: string, fallbackPrefix: string) {
-  return splitInputList(value).map((uri, index) => ({
-    label: assetLabelFromUri(uri, fallbackPrefix, index),
-    uri,
-  }));
-}
-
-function mergeSelectedUris(currentValue: string, nextUris: string[]) {
-  return Array.from(new Set([...splitInputList(currentValue), ...nextUris])).join(', ');
 }
 
 function createProfileForm(
@@ -38,28 +26,17 @@ function createProfileForm(
   profile?: Business | null,
   savedProfile?: OwnerBusinessProfile | null,
 ): OwnerBusinessProfileValues {
-  const profileGalleryImages =
-    profile?.media
-      .filter((item) => item.type === 'image' && item.url !== profile.imageUrl)
-      .map((item) => item.url)
-      .join(', ') ?? '';
-  const profileGalleryVideos =
-    profile?.media
-      .filter((item) => item.type === 'video')
-      .map((item) => item.url)
-      .join(', ') ?? '';
-
   return {
     ownerName: savedProfile?.ownerName ?? ownerName,
     phone: savedProfile?.phone ?? profile?.contact.phone ?? phone,
     whatsapp: savedProfile?.whatsapp ?? profile?.contact.whatsapp ?? '',
     email: savedProfile?.email ?? profile?.contact.email ?? email,
-    website: savedProfile?.website ?? profile?.contact.website ?? '',
-    instagram: savedProfile?.instagram ?? profile?.contact.instagram ?? '',
+    website: '',
+    instagram: '',
     address: savedProfile?.address ?? profile?.address ?? address,
     coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
-    galleryImages: savedProfile?.galleryImages ?? profileGalleryImages,
-    galleryVideos: savedProfile?.galleryVideos ?? profileGalleryVideos,
+    galleryImages: '',
+    galleryVideos: '',
   };
 }
 
@@ -80,7 +57,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
     () => getOwnerBusinessProfile(user),
     [getOwnerBusinessProfile, user],
   );
-  const defaultProfileAddress = `${user?.businessCluster ?? 'River Park'}, River Park Estate`;
+  const defaultProfileAddress = user?.businessCluster ?? '';
   const [profileForm, setProfileForm] = useState<OwnerBusinessProfileValues>(
     createProfileForm(
       user?.fullName ?? '',
@@ -102,7 +79,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
         user.fullName,
         user.phoneNumber,
         user.email,
-        `${user.businessCluster ?? 'River Park'}, River Park Estate`,
+        user.businessCluster ?? '',
         ownerListing,
         savedOwnerProfile,
       ),
@@ -136,12 +113,8 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
   const coverAssets = profileForm.coverImage
     ? [{ label: assetLabelFromUri(profileForm.coverImage, 'Cover image', 0), uri: profileForm.coverImage }]
     : [];
-  const galleryImageAssets = assetsFromValue(profileForm.galleryImages, 'Gallery image');
 
-  const pickProfileMedia = async (
-    field: 'coverImage' | 'galleryImages',
-    allowsMultipleSelection: boolean,
-  ) => {
+  const pickCoverImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
@@ -163,33 +136,22 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
 
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: false,
-      allowsMultipleSelection,
+      allowsMultipleSelection: false,
       mediaTypes: ['images'],
       quality: 1,
-      selectionLimit: allowsMultipleSelection ? 0 : 1,
+      selectionLimit: 1,
     });
 
     if (result.canceled) {
       return;
     }
 
-    const nextUris = result.assets.map((asset) => asset.uri).filter(Boolean);
-
-    if (nextUris.length === 0) {
-      return;
-    }
-
-    if (field === 'coverImage') {
-      updateProfileField('coverImage', nextUris[0] ?? '');
-      return;
-    }
-
-    updateProfileField('galleryImages', mergeSelectedUris(profileForm.galleryImages, nextUris));
+    updateProfileField('coverImage', result.assets[0]?.uri ?? '');
   };
 
   const saveBusinessProfile = () => {
     updateOwnerBusinessProfile(user, profileForm);
-    Alert.alert('Profile updated', 'Business contact and media have been saved.', [
+    Alert.alert('Profile updated', 'Business contact details and cover image have been saved.', [
       { text: 'View profile', onPress: () => navigation.navigate('Account') },
     ]);
   };
@@ -198,9 +160,9 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Edit profile</Text>
-        <Text style={styles.title}>Update every business detail.</Text>
+        <Text style={styles.title}>Update your store profile.</Text>
         <Text style={styles.subtitle}>
-          This page controls business contact, profile media, social links, and pickup address.
+          Keep your business contact, pickup address, and cover image current.
         </Text>
       </View>
 
@@ -236,22 +198,8 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
         <FormField
           label="Address or pickup point"
           onChangeText={(value) => updateProfileField('address', value)}
-          placeholder="Cluster 1, River Park Estate"
+          placeholder="Enter your complete business address"
           value={profileForm.address}
-        />
-        <FormField
-          autoCapitalize="none"
-          label="Website"
-          onChangeText={(value) => updateProfileField('website', value)}
-          placeholder="https://yourbusiness.com"
-          value={profileForm.website}
-        />
-        <FormField
-          autoCapitalize="none"
-          label="Instagram"
-          onChangeText={(value) => updateProfileField('instagram', value)}
-          placeholder="@yourbusiness"
-          value={profileForm.instagram}
         />
         <MediaPickerField
           assets={coverAssets}
@@ -261,18 +209,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
           label="Cover photo"
           onClear={() => updateProfileField('coverImage', '')}
           onPick={() => {
-            void pickProfileMedia('coverImage', false);
-          }}
-        />
-        <MediaPickerField
-          assets={galleryImageAssets}
-          buttonLabel="Add profile photos"
-          helper="Photos shown on your business profile."
-          kind="image"
-          label="Profile photos"
-          onClear={() => updateProfileField('galleryImages', '')}
-          onPick={() => {
-            void pickProfileMedia('galleryImages', true);
+            void pickCoverImage();
           }}
         />
         <AppButton label="Save profile" onPress={saveBusinessProfile} />

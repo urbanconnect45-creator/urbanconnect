@@ -23,6 +23,7 @@ import type { BusinessMedia } from '../types/business';
 import { openExternalUrl } from '../utils/contact';
 import { formatCurrency } from '../utils/format';
 import { isPublicBusiness } from '../utils/businessState';
+import { normalizeProductCategory } from '../utils/category';
 
 export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScreenProps) {
   const { width } = useWindowDimensions();
@@ -39,7 +40,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
       <View style={styles.emptyShell}>
         <Text style={styles.emptyTitle}>Listing not found</Text>
         <Text style={styles.emptyText}>
-          This product or service may have been removed from the River Park shop.
+          This product or service may have been removed from the marketplace.
         </Text>
       </View>
     );
@@ -49,7 +50,6 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
   const relatedBusinesses = businesses
     .filter(
       (item) =>
-        item.estateId === business.estateId &&
         item.listingType === business.listingType &&
         isPublicBusiness(item) &&
         item.id !== business.id,
@@ -57,6 +57,14 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
     .slice(0, 3);
   const mediaCardWidth = Math.min(width - spacing.lg * 2, 360);
   const isProduct = business.listingType === 'product';
+  const displayCategory = isProduct
+    ? normalizeProductCategory(
+        business.category,
+        business.name,
+        business.description,
+        business.longDescription,
+      )
+    : business.category;
   const isAvailableToPublic = isPublicBusiness(business);
   const isOwnProduct =
     isProduct && user?.role === 'businessOwner' && isBusinessOwnedByUser(business, user);
@@ -75,8 +83,8 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
           <View style={styles.copyBlock}>
             <Text style={styles.title}>{business.name}</Text>
             <Text style={styles.subtitle}>
-              {business.category} {isProduct ? 'item' : 'service'} in{' '}
-              {estate?.name ?? 'River Park'}
+              {displayCategory} {isProduct ? 'item' : 'service'} in{' '}
+              {estate?.name ?? 'View2Connect Marketplace'}
             </Text>
           </View>
         {business.verified ? (
@@ -108,12 +116,8 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
 
         <View style={styles.clusterStrip}>
           <View style={styles.clusterPill}>
-            <Ionicons color={colors.primary} name="layers-outline" size={16} />
-            <Text style={styles.clusterPillText}>{business.cluster}</Text>
-          </View>
-          <View style={styles.clusterPill}>
             <Ionicons color={colors.primary} name="location-outline" size={16} />
-            <Text style={styles.clusterPillText}>River Park</Text>
+            <Text style={styles.clusterPillText}>{estate?.city ?? 'Nigeria'}</Text>
           </View>
           {isProduct ? (
             <View
@@ -158,16 +162,12 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
           </View>
         )}
 
-        <Text style={styles.description}>{business.longDescription}</Text>
+        <Text style={styles.description}>{business.description}</Text>
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Listed by</Text>
-            <Text style={styles.statValue}>{business.ownerName}</Text>
-          </View>
-          <View style={styles.statCard}>
             <Text style={styles.statLabel}>Category</Text>
-            <Text style={styles.statValue}>{business.category}</Text>
+            <Text style={styles.statValue}>{displayCategory}</Text>
           </View>
           {isProduct ? (
             <View style={styles.statCard}>
@@ -238,41 +238,6 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            {isProduct ? 'What comes with it' : 'Skills and services'}
-          </Text>
-          <View style={styles.serviceList}>
-            {business.services.map((service) => (
-              <View key={service} style={styles.servicePill}>
-                <Text style={styles.serviceText}>{service}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            {isProduct ? 'Seller profile' : 'Professional profile'}
-          </Text>
-          <Pressable
-            disabled={!business.ownerUserId}
-            onPress={() => {
-              if (business.ownerUserId) {
-                navigation.navigate('SellerProfile', { userId: business.ownerUserId });
-              }
-            }}
-            style={({ pressed }) => [styles.ownerCard, pressed && business.ownerUserId && styles.ownerCardPressed]}
-          >
-            <Text style={styles.ownerTitle}>{business.ownerName}</Text>
-            <Text style={styles.ownerMeta}>
-              {isProduct
-                ? `${business.category} seller serving ${business.cluster}, ${estate?.name ?? 'River Park'}`
-                : `${business.category} specialist serving ${business.cluster}, ${estate?.name ?? 'River Park'}`}
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
             {isProduct ? 'Buy this item' : 'Need help?'}
           </Text>
           <View style={styles.buttonGroup}>
@@ -288,23 +253,20 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
                         ? 'Your listing'
                         : 'Add to cart'
                 }
-                onPress={() => addToCart(business.id)}
+                onPress={() => {
+                  if (!user) {
+                    navigation.navigate('AuthPrompt');
+                    return;
+                  }
+
+                  addToCart(business.id);
+                }}
               />
             ) : (
               <Text style={styles.noticeText}>
                 Use the floating customer care button for service questions or support.
               </Text>
             )}
-            {business.ownerUserId ? (
-              <AppButton
-                label="View business profile"
-                disabled={!isAvailableToPublic}
-                onPress={() =>
-                  navigation.navigate('SellerProfile', { userId: business.ownerUserId! })
-                }
-                variant="ghost"
-              />
-            ) : null}
           </View>
         </View>
 
@@ -318,14 +280,21 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
       {relatedBusinesses.length > 0 ? (
         <View style={styles.relatedCard}>
           <Text style={styles.sectionTitle}>
-            {isProduct ? 'More items in River Park' : 'More services in River Park'}
+            {isProduct ? 'More marketplace items' : 'More marketplace services'}
           </Text>
           {relatedBusinesses.map((item) => (
             <View key={item.id} style={styles.relatedRow}>
               <View style={styles.relatedCopy}>
                 <Text style={styles.relatedName}>{item.name}</Text>
                 <Text style={styles.relatedMeta}>
-                  {item.category} - {item.cluster}
+                  {item.listingType === 'product'
+                    ? normalizeProductCategory(
+                        item.category,
+                        item.name,
+                        item.description,
+                        item.longDescription,
+                      )
+                    : item.category}
                 </Text>
               </View>
               <AppButton

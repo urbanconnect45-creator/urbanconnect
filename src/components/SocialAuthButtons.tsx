@@ -1,12 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { getSupabaseOAuthUrl, isSupabaseConfigured } from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 type SocialProvider = 'google' | 'apple';
+
+type SocialAuthButtonsProps = {
+  webRedirectPath?: string;
+};
 
 const providers: {
   id: SocialProvider;
@@ -17,18 +22,31 @@ const providers: {
   { id: 'apple', label: 'Apple', icon: 'logo-apple' },
 ];
 
-export function SocialAuthButtons() {
+export function SocialAuthButtons({ webRedirectPath }: SocialAuthButtonsProps = {}) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
 
   const openProvider = async (provider: SocialProvider) => {
+    if (provider === 'apple') {
+      Alert.alert('Coming soon', 'Apple sign-in is not connected yet.');
+      return;
+    }
+
+    if (isUrbanConnectLocalTestMode) {
+      Alert.alert(
+        'Local test mode',
+        'Google sign-in is disabled while Supabase calls are turned off.',
+      );
+      return;
+    }
+
     if (!isSupabaseConfigured) {
       Alert.alert('Supabase not configured', 'Add your Supabase URL and publishable key first.');
       return;
     }
 
     try {
-      await Linking.openURL(getSupabaseOAuthUrl(provider));
+      await Linking.openURL(getSupabaseOAuthUrl(provider, webRedirectPath));
     } catch {
       Alert.alert(
         'Social login unavailable',
@@ -41,7 +59,7 @@ export function SocialAuthButtons() {
     <View style={styles.wrapper}>
       <View style={styles.dividerRow}>
         <View style={styles.divider} />
-        <Text style={styles.dividerText}>or continue with</Text>
+        <Text style={styles.dividerText}>or sign in with</Text>
         <View style={styles.divider} />
       </View>
       <View style={styles.buttonRow}>

@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>View2Connect App Map</title>
+    <style>
+      :root {
+        --purple: #5b2bcb;
+        --purple-soft: #eee8fb;
+        --ink: #1f1831;
+        --muted: #706a7c;
+        --line: #d9d2e5;
+        --orange: #f06038;
+        --gold: #f5c84c;
+        --teal: #138b80;
+        --green: #2b8f55;
+        --blue: #2f6f9f;
+        --canvas: #f8f7fb;
+        --white: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 1700px;
+        min-height: 1050px;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: Inter, "Segoe UI", Arial, sans-serif;
+      }
+
+      body {
+        padding: 42px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 30px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .brand-mark {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 64px;
+        height: 64px;
+        border-radius: 8px;
+        background: var(--purple);
+        color: var(--white);
+        font-size: 30px;
+        font-weight: 900;
+      }
+
+      .brand-mark::before {
+        position: absolute;
+        top: 10px;
+        width: 26px;
+        height: 15px;
+        border: 4px solid var(--white);
+        border-bottom: 0;
+        border-radius: 14px 14px 0 0;
+        content: "";
+      }
+
+      .brand-mark::after {
+        position: absolute;
+        right: 7px;
+        bottom: 7px;
+        width: 12px;
+        height: 12px;
+        border: 3px solid var(--purple);
+        border-radius: 50%;
+        background: var(--orange);
+        content: "";
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 34px;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .cac {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 44px;
+        border: 1px solid var(--purple);
+        border-radius: 8px;
+        background: var(--purple-soft);
+        color: var(--purple);
+        padding: 0 16px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .cac span {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--purple);
+        color: var(--white);
+      }
+
+      .lanes {
+        display: grid;
+        grid-template-columns: 1fr 1.05fr 1.05fr 1.05fr;
+        gap: 18px;
+      }
+
+      .lane {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-top: 5px solid var(--lane-color);
+        border-radius: 8px;
+        background: var(--white);
+        padding: 20px;
+      }
+
+      .lane.public {
+        --lane-color: var(--blue);
+      }
+
+      .lane.customer {
+        --lane-color: var(--purple);
+      }
+
+      .lane.seller {
+        --lane-color: var(--orange);
+      }
+
+      .lane.admin {
+        --lane-color: var(--teal);
+      }
+
+      .lane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 62px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .lane h2 {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0;
+      }
+
+      .lane-kicker {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .lane-number {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background: var(--lane-color);
+        color: var(--white);
+        font-weight: 900;
+      }
+
+      .flow {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .node {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px 12px;
+      }
+
+      .node.primary {
+        border-color: var(--lane-color);
+        background: color-mix(in srgb, var(--lane-color) 8%, white);
+      }
+
+      .node-icon {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        background: var(--lane-color);
+        color: var(--white);
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .node-copy {
+        min-width: 0;
+      }
+
+      .node strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .node small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      .arrow {
+        position: relative;
+        width: 2px;
+        height: 10px;
+        margin: 0 auto;
+        background: var(--line);
+      }
+
+      .arrow::after {
+        position: absolute;
+        bottom: -2px;
+        left: -3px;
+        width: 6px;
+        height: 6px;
+        border-right: 2px solid var(--line);
+        border-bottom: 2px solid var(--line);
+        transform: rotate(45deg);
+        content: "";
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .split .node {
+        align-items: flex-start;
+        min-height: 82px;
+      }
+
+      .catalog {
+        border-color: var(--gold);
+        background: #fff9e7;
+      }
+
+      .catalog .node-icon {
+        background: #b98900;
+      }
+
+      .legend {
+        display: grid;
+        grid-template-columns: 1.5fr repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .legend-item {
+        min-height: 80px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--white);
+        padding: 14px;
+      }
+
+      .legend-item strong {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 13px;
+      }
+
+      .legend-item span {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      .legend-item.system {
+        border-left: 5px solid var(--purple);
+      }
+
+      .status {
+        display: inline-flex;
+        margin-top: 7px;
+        border-radius: 6px;
+        background: #e8f6ed;
+        color: var(--green);
+        padding: 4px 7px;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        margin-top: 18px;
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <div class="brand-mark">2</div>
+        <div>
+          <h1>View2Connect Product Map</h1>
+          <p class="subtitle">Customer marketplace, seller operations, catalog, payments, and administration</p>
+        </div>
+      </div>
+      <div class="cac"><span>✓</span> CAC registered</div>
+    </header>
+
+    <main class="lanes">
+      <section class="lane public">
+        <div class="lane-head">
+          <div>
+            <h2>Public Web</h2>
+            <p class="lane-kicker">No login required to browse</p>
+          </div>
+          <div class="lane-number">01</div>
+        </div>
+        <div class="flow">
+          <div class="node primary">
+            <div class="node-icon">H</div>
+            <div class="node-copy"><strong>Storefront home</strong><small>Search, featured stores, products</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">C</div><div class="node-copy"><strong>Categories</strong><small>Products and services</small></div></div>
+            <div class="node"><div class="node-icon">F</div><div class="node-copy"><strong>Food</strong><small>Meals and groceries</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node">
+            <div class="node-icon">P</div>
+            <div class="node-copy"><strong>Product details</strong><small>Seller, price, stock, media</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node primary">
+            <div class="node-icon">A</div>
+            <div class="node-copy"><strong>Sign in or create account</strong><small>Required when adding to cart or opening Profile</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="lane customer">
+        <div class="lane-head">
+          <div>
+            <h2>Customer App</h2>
+            <p class="lane-kicker">App Store and Play Store</p>
+          </div>
+          <div class="lane-number">02</div>
+        </div>
+        <div class="flow">
+          <div class="split">
+            <div class="node primary"><div class="node-icon">H</div><div class="node-copy"><strong>Home</strong><small>Deals and stores</small></div></div>
+            <div class="node primary"><div class="node-icon">F</div><div class="node-copy"><strong>Food</strong><small>Quick-access tab</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node">
+            <div class="node-icon">K</div>
+            <div class="node-copy"><strong>Cart and checkout</strong><small>Address, delivery fee, order review</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">W</div><div class="node-copy"><strong>Wallet</strong><small>Add funds and history</small></div></div>
+            <div class="node"><div class="node-icon">FW</div><div class="node-copy"><strong>Flutterwave</strong><small>Card and bank rails</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node">
+            <div class="node-icon">O</div>
+            <div class="node-copy"><strong>Orders and receipts</strong><small>Provider-confirmed payment, email receipt, delivery status</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">ID</div><div class="node-copy"><strong>KYC</strong><small>ID, BVN/NIN checks</small></div></div>
+            <div class="node"><div class="node-icon">S</div><div class="node-copy"><strong>Security</strong><small>Passcode, biometrics, password</small></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="lane seller">
+        <div class="lane-head">
+          <div>
+            <h2>Seller Portal</h2>
+            <p class="lane-kicker">Separate responsive web dashboard</p>
+          </div>
+          <div class="lane-number">03</div>
+        </div>
+        <div class="flow">
+          <div class="node primary">
+            <div class="node-icon">R</div>
+            <div class="node-copy"><strong>Business registration</strong><small>Identity, store type, pickup and fulfillment</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node">
+            <div class="node-icon">D</div>
+            <div class="node-copy"><strong>Seller dashboard</strong><small>Sales, stock, orders, subscription status</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node catalog">
+            <div class="node-icon">+</div>
+            <div class="node-copy"><strong>Product Catalog</strong><small>Add one product, import CSV/Excel, auto-match image, edit, delete</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">O</div><div class="node-copy"><strong>Orders</strong><small>Prepare confirmed items</small></div></div>
+            <div class="node"><div class="node-icon">P</div><div class="node-copy"><strong>Payments</strong><small>Method and settlement</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">ST</div><div class="node-copy"><strong>Store profile</strong><small>Logo, address, hours</small></div></div>
+            <div class="node"><div class="node-icon">S</div><div class="node-copy"><strong>Security</strong><small>Password and sessions</small></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="lane admin">
+        <div class="lane-head">
+          <div>
+            <h2>Owner Admin</h2>
+            <p class="lane-kicker">Private desktop-only link</p>
+          </div>
+          <div class="lane-number">04</div>
+        </div>
+        <div class="flow">
+          <div class="node primary">
+            <div class="node-icon">D</div>
+            <div class="node-copy"><strong>Control dashboard</strong><small>Gross profit, marketplace totals, alerts</small></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">U</div><div class="node-copy"><strong>Users and sellers</strong><small>Account decisions</small></div></div>
+            <div class="node"><div class="node-icon">C</div><div class="node-copy"><strong>Catalog review</strong><small>Approve listings</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">O</div><div class="node-copy"><strong>Orders</strong><small>Pack, dispatch, refund</small></div></div>
+            <div class="node"><div class="node-icon">₦</div><div class="node-copy"><strong>Finance</strong><small>Provider-backed records</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="split">
+            <div class="node"><div class="node-icon">PP</div><div class="node-copy"><strong>Payment plans</strong><small>Seller subscriptions</small></div></div>
+            <div class="node"><div class="node-icon">K</div><div class="node-copy"><strong>KYC review</strong><small>ID and bank match</small></div></div>
+          </div>
+          <div class="arrow"></div>
+          <div class="node">
+            <div class="node-icon">S</div>
+            <div class="node-copy"><strong>Security and policies</strong><small>Admin password, access, audit logs</small></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="legend">
+      <div class="legend-item system">
+        <strong>Shared platform</strong>
+        <span>Supabase Auth, database, Storage, Edge Functions, and provider-confirmed transaction state connect every portal.</span>
+        <div class="status">ONE SOURCE OF TRUTH</div>
+      </div>
+      <div class="legend-item"><strong>Flutterwave</strong><span>Checkout, card/bank payments, webhooks, receipts, and settlement references.</span></div>
+      <div class="legend-item"><strong>Resend</strong><span>Branded signup, password, order, payment, and decision emails.</span></div>
+      <div class="legend-item"><strong>Termii</strong><span>Phone OTP delivery after live credentials and sender setup.</span></div>
+      <div class="legend-item"><strong>Catalog engine</strong><span>Barcode/GTIN matching, product enrichment, images, and seller-specific stock.</span></div>
+    </section>
+
+    <footer>
+      <span>View2Connect product architecture, version 1.0</span>
+      <span>Copyright 2026 View2Connect. All rights reserved.</span>
+    </footer>
+  </body>
+</html>

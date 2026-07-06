@@ -23,8 +23,10 @@ import {
 } from '../types/business';
 import { buildBusinessMedia } from '../utils/businessMedia';
 import { splitInputList } from '../utils/businessMedia';
+import { inferListingCategory } from '../utils/category';
 import { formatCurrency } from '../utils/format';
-import { createRandomListingForm } from '../utils/randomListing';
+
+const foodListingReference = require('../../assets/food-listing-reference.jpeg');
 
 function categoriesForListingType(listingType: ListingType) {
   return listingType === 'product' ? [...productCategories] : [...professionCategories];
@@ -56,11 +58,15 @@ function createInitialForm(
     email: savedProfile?.email ?? profile?.contact.email ?? email,
     website: savedProfile?.website ?? profile?.contact.website ?? '',
     instagram: savedProfile?.instagram ?? profile?.contact.instagram ?? '',
-    address: savedProfile?.address ?? profile?.address ?? 'River Park Estate',
+    address: savedProfile?.address ?? profile?.address ?? '',
     coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
     galleryImages: savedProfile?.galleryImages ?? '',
     galleryVideos: savedProfile?.galleryVideos ?? '',
     services: '',
+    foodAllergies: '',
+    foodExtras: '',
+    preparationTime: '',
+    portionSize: '',
   };
 }
 
@@ -118,11 +124,11 @@ function createPreviewBusiness(values: BusinessProfileFormValues): Business {
     longDescription:
       values.longDescription ||
       (values.listingType === 'product'
-        ? 'Use the detailed description to explain what buyers get, delivery expectations, and why this item stands out in River Park.'
+        ? 'Use the detailed description to explain what buyers get, delivery expectations, and why this item stands out.'
         : 'Use the detailed description to explain your service style, response time, and why residents should trust you.'),
     imageUrl: media[0]?.url ?? fallbackImage,
     media,
-    address: values.address || 'River Park service base',
+    address: values.address || 'Seller service address',
     sku: values.businessName.trim()
       ? `UC-${values.businessName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-')}`
       : 'UC-PREVIEW',
@@ -169,12 +175,9 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
   const {
     businesses,
     currentEstateId,
-    estates,
     getOwnerBusinessProfile,
-    isRiverParkVerifiedForUser,
     registerBusiness,
   } = useBusinessDirectory();
-  const currentEstate = estates.find((estate) => estate.id === currentEstateId) ?? estates[0];
   const ownerProfile = useMemo(
     () =>
       businesses.find(
@@ -189,7 +192,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     () => getOwnerBusinessProfile(user),
     [getOwnerBusinessProfile, user],
   );
-  const riverParkVerified = isRiverParkVerifiedForUser(user);
+  const isIndividualSeller = user?.role === 'resident';
   const [form, setForm] = useState<BusinessProfileFormValues>(
     createInitialForm(
       currentEstateId,
@@ -204,6 +207,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     {},
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categoryManuallySelected, setCategoryManuallySelected] = useState(false);
 
   const categoryOptions = useMemo(
     () => categoriesForListingType(form.listingType),
@@ -256,7 +260,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       address:
         savedOwnerProfile?.address ??
         ownerProfile?.address ??
-        `${user.businessCluster ?? 'River Park'}, River Park Estate`,
+        user.businessCluster ?? '',
       coverImage: savedOwnerProfile?.coverImage ?? ownerProfile?.imageUrl ?? current.coverImage,
       galleryImages: savedOwnerProfile?.galleryImages ?? current.galleryImages,
       galleryVideos: savedOwnerProfile?.galleryVideos ?? current.galleryVideos,
@@ -270,61 +274,38 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     user?.phoneNumber,
   ]);
 
-  if (!user || user.role !== 'businessOwner') {
+  if (!user) {
     return (
       <View style={styles.gateShell}>
-        <Text style={styles.sectionTitle}>Business owner access only</Text>
+        <Text style={styles.sectionTitle}>Sign in to sell</Text>
         <Text style={styles.subtitle}>
-          Sign in with a business owner account to create a product or service listing.
+          Use your customer account to submit an item or service for review.
         </Text>
       </View>
     );
   }
 
-  if (!riverParkVerified) {
-    return (
-      <View style={styles.gateShell}>
-        <Text style={styles.sectionTitle}>Verify your account first</Text>
-        <Text style={styles.subtitle}>
-          Customer care must verify that your business owner account belongs in River Park before
-          you can submit a product or service listing for approval.
-        </Text>
-        <View style={styles.gateActions}>
-          <AppButton label="Talk to customer care" onPress={() => navigation.navigate('Chats')} />
-          <AppButton
-            label="Back to profile"
-            onPress={() => navigation.navigate('Account')}
-            variant="secondary"
-          />
-        </View>
-      </View>
-    );
-  }
-
+  const isFoodListing =
+    form.listingType === 'product' && form.category === 'Food';
+  const needsAllergyCopy =
+    form.listingType === 'product' &&
+    ['Food', 'Drinks', 'Infant'].includes(form.category);
   const copy =
     form.listingType === 'product'
       ? {
           nameLabel: 'Item name',
-          namePlaceholder: 'River Harvest Fruit Box',
-          shortPlaceholder: 'What item are residents buying in one sentence?',
-          longPlaceholder:
-            'Explain what comes with the item, delivery expectations, and why buyers should choose it.',
-          servicesLabel: 'Item highlights',
-          servicesPlaceholder: 'Same-day dropoff, family-size pack, fresh stock',
-          servicesHelper: 'Separate item highlights with commas.',
+          namePlaceholder: isFoodListing ? 'Jollof rice and chicken' : 'Everyday product name',
+          shortPlaceholder: needsAllergyCopy
+            ? 'Brief description, ingredients, and allergy information when relevant.'
+            : 'Describe the item in one short sentence.',
           priceLabel: 'Price',
           pricePlaceholder: '18000',
           buttonLabel: 'Send product for approval',
         }
       : {
           nameLabel: 'Profession or service name',
-          namePlaceholder: 'River Park Home Nurse',
+          namePlaceholder: 'Trusted Home Nurse',
           shortPlaceholder: 'What service are residents booking in one sentence?',
-          longPlaceholder:
-            'Explain your service, response style, and what residents should expect.',
-          servicesLabel: 'Services offered',
-          servicesPlaceholder: 'Medication support, home visits, post-op checks',
-          servicesHelper: 'Separate services with commas.',
           priceLabel: '',
           pricePlaceholder: '',
           buttonLabel: 'Send service for approval',
@@ -334,7 +315,29 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     key: K,
     value: BusinessProfileFormValues[K],
   ) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const nextForm = { ...current, [key]: value };
+
+      if (
+        !categoryManuallySelected &&
+        nextForm.listingType === 'product' &&
+        (key === 'businessName' ||
+          key === 'shortDescription' ||
+          key === 'longDescription')
+      ) {
+        const inferredCategory = inferListingCategory(
+          nextForm.businessName,
+          nextForm.shortDescription,
+          nextForm.longDescription,
+        );
+
+        if (inferredCategory) {
+          nextForm.category = inferredCategory;
+        }
+      }
+
+      return nextForm;
+    });
     setErrors((current) => {
       const nextErrors = { ...current };
       delete nextErrors[key];
@@ -392,11 +395,6 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     updateField(field, mergeSelectedUris(form[field], nextUris));
   };
 
-  const fillTestListing = (listingType: ListingType = form.listingType) => {
-    setForm((current) => createRandomListingForm(current, listingType));
-    setErrors({});
-  };
-
   const validateForm = () => {
     const nextErrors: Partial<Record<keyof BusinessProfileFormValues, string>> = {};
     const parsedPrice = Number.parseFloat(form.price);
@@ -406,14 +404,8 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     if (!form.businessName.trim()) {
       nextErrors.businessName = 'This name is required.';
     }
-    if (!form.ownerName.trim()) {
-      nextErrors.ownerName = 'Owner name is required.';
-    }
     if (!form.shortDescription.trim()) {
       nextErrors.shortDescription = 'Add a short summary for the listing card.';
-    }
-    if (!form.longDescription.trim()) {
-      nextErrors.longDescription = 'Add a detailed description for this listing.';
     }
     if (
       form.listingType === 'product' &&
@@ -437,11 +429,8 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     ) {
       nextErrors.reorderLevel = 'Add a valid reorder level.';
     }
-    if (!form.services.trim()) {
-      nextErrors.services = 'Add at least one highlight or service.';
-    }
     if (form.listingType === 'profession' && existingServiceListing) {
-      nextErrors.services = 'This business already has one service profile.';
+      nextErrors.businessName = 'This business already has one service profile.';
     }
 
     return nextErrors;
@@ -459,18 +448,6 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       return;
     }
 
-    if (!riverParkVerified) {
-      Alert.alert(
-        'Verify your account first',
-        'Customer care must verify your River Park account before you can create a listing.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Talk to customer care', onPress: () => navigation.navigate('Chats') },
-        ],
-      );
-      return;
-    }
-
     const nextErrors = validateForm();
 
     if (Object.keys(nextErrors).length > 0) {
@@ -481,11 +458,18 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     setIsSubmitting(true);
 
     try {
-      const createdBusiness = await registerBusiness(form, user);
+      const submissionForm = {
+        ...form,
+        longDescription: form.shortDescription.trim(),
+        services: '',
+      };
+      const createdBusiness = await registerBusiness(submissionForm, user);
 
       Alert.alert(
-        'Sent to customer care',
-        'Your listing was submitted. Customer care will inspect it, and your paid subscription controls when it can go live.',
+        'Sent for review',
+        isIndividualSeller
+          ? 'Your listing is on the 3-month Individual Seller Free Plan. It must be approved and uses standard placement; paid stores are shown first.'
+          : 'Your listing was submitted. Customer care will inspect it, and your paid subscription controls when it can go live.',
         [
           {
             text: 'View listing',
@@ -521,13 +505,18 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
-        <View style={styles.heroOrbOne} />
-        <View style={styles.heroOrbTwo} />
-        <Text style={styles.eyebrow}>Business onboarding</Text>
-        <Text style={styles.title}>Create a clean River Park listing for approval.</Text>
+        <Text style={styles.eyebrow}>
+          {isIndividualSeller ? 'Individual Seller Free Plan' : 'Business onboarding'}
+        </Text>
+        <Text style={styles.title}>
+          {isIndividualSeller
+            ? 'Sell from the customer account you already use.'
+            : 'Create a clean marketplace listing for approval.'}
+        </Text>
         <Text style={styles.subtitle}>
-          Subscription payment is managed from the Subscription page. This form is only for the item or
-          service details customer care needs to inspect.
+          {isIndividualSeller
+            ? 'Free for 3 months. Every listing is reviewed and receives standard placement; paid store listings are prioritized above it.'
+            : 'Subscription payment is managed from the Subscription page. This form is only for the item or service details customer care needs to inspect.'}
         </Text>
       </View>
 
@@ -544,6 +533,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
                 key={listingType}
                 onPress={() => {
                   if (!isDisabled) {
+                    setCategoryManuallySelected(false);
                     updateField('listingType', listingType);
                   }
                 }}
@@ -581,9 +571,6 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
               <View style={styles.previewBadge}>
                 <Text style={styles.previewBadgeText}>{previewBusiness.category}</Text>
               </View>
-            <View style={styles.previewBadge}>
-              <Text style={styles.previewBadgeText}>{previewBusiness.cluster}</Text>
-            </View>
             {form.listingType === 'product' ? (
               <View style={styles.previewBadge}>
                 <Text style={styles.previewBadgeText}>
@@ -593,7 +580,6 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
             ) : null}
           </View>
           <Text style={styles.previewTitle}>{previewBusiness.name}</Text>
-          <Text style={styles.previewMeta}>by {previewBusiness.ownerName}</Text>
             <Text style={styles.previewText}>{previewBusiness.description}</Text>
             <Text style={styles.previewPrice}>
               {form.listingType === 'product'
@@ -607,31 +593,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>River Park setup</Text>
-        <View style={styles.lockedCard}>
-          <Text style={styles.lockedTitle}>{currentEstate?.name ?? 'River Park Estate'}</Text>
-          <Text style={styles.lockedCopy}>
-            This release is still limited to River Park. Choose the cluster where buyers or clients
-            can find you first.
-          </Text>
-        </View>
-        <View style={styles.chipWrap}>
-          {riverParkClusters.map((cluster) => {
-            const isSelected = cluster === form.cluster;
-
-            return (
-              <Pressable
-                key={cluster}
-                onPress={() => updateField('cluster', cluster)}
-                style={[styles.selectionChip, isSelected && styles.selectionChipActive]}
-              >
-                <Text style={[styles.selectionText, isSelected && styles.selectionTextActive]}>
-                  {cluster}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Text style={styles.sectionTitle}>Category</Text>
         <View style={styles.chipWrap}>
           {categoryOptions.map((category) => {
             const isSelected = category === form.category;
@@ -639,7 +601,10 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
             return (
               <Pressable
                 key={category}
-                onPress={() => updateField('category', category)}
+                onPress={() => {
+                  setCategoryManuallySelected(true);
+                  updateField('category', category);
+                }}
                 style={[styles.selectionChip, isSelected && styles.selectionChipActive]}
               >
                 <Text style={[styles.selectionText, isSelected && styles.selectionTextActive]}>
@@ -649,47 +614,30 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
           );
           })}
         </View>
+        <Text style={styles.sectionHelper}>
+          {categoryManuallySelected
+            ? 'You selected this category manually.'
+            : 'View2Connect suggests a category from the item name and description. You can change it.'}
+        </Text>
       </View>
 
       <View style={styles.formSection}>
-        <View style={styles.testFillRow}>
-          <Pressable
-            onPress={() => fillTestListing('product')}
-            style={({ pressed }) => [
-              styles.testFillButton,
-              pressed && styles.testFillButtonPressed,
-            ]}
-          >
-            <Ionicons color={colors.white} name="sparkles-outline" size={18} />
-            <Text style={styles.testFillButtonText}>Random product</Text>
-          </Pressable>
-          <Pressable
-            disabled={Boolean(existingServiceListing)}
-            onPress={() => fillTestListing('profession')}
-            style={({ pressed }) => [
-              styles.testFillButton,
-              styles.testFillButtonSecondary,
-              pressed && !existingServiceListing && styles.testFillButtonPressed,
-              existingServiceListing && styles.testFillButtonDisabled,
-            ]}
-          >
-            <Ionicons color={colors.white} name="construct-outline" size={18} />
-            <Text style={styles.testFillButtonText}>Random service</Text>
-          </Pressable>
-        </View>
+        {isFoodListing ? (
+          <View style={styles.foodVisual}>
+            <Image source={foodListingReference} style={styles.foodVisualImage} />
+            <View style={styles.foodVisualOverlay} />
+            <View style={styles.foodVisualCopy}>
+              <Text style={styles.foodVisualEyebrow}>Food listing</Text>
+              <Text style={styles.foodVisualTitle}>Add meal details buyers need before ordering.</Text>
+            </View>
+          </View>
+        ) : null}
         <FormField
           error={errors.businessName}
           label={copy.nameLabel}
           onChangeText={(value) => updateField('businessName', value)}
           placeholder={copy.namePlaceholder}
           value={form.businessName}
-        />
-        <FormField
-          error={errors.ownerName}
-          label="Owner name"
-          onChangeText={(value) => updateField('ownerName', value)}
-          placeholder="Ada Nwosu"
-          value={form.ownerName}
         />
         {form.listingType === 'product' ? (
           <>
@@ -737,29 +685,11 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
         <FormField
           error={errors.shortDescription}
           helper="This appears on the marketplace card."
-          label="Short description"
+          label={needsAllergyCopy ? 'Short description / allergy note' : 'Short description'}
           multiline
           onChangeText={(value) => updateField('shortDescription', value)}
           placeholder={copy.shortPlaceholder}
           value={form.shortDescription}
-        />
-        <FormField
-          error={errors.longDescription}
-          helper="This powers the full details page."
-          label="Detailed description"
-          multiline
-          onChangeText={(value) => updateField('longDescription', value)}
-          placeholder={copy.longPlaceholder}
-          value={form.longDescription}
-        />
-        <FormField
-          error={errors.services}
-          helper={copy.servicesHelper}
-          label={copy.servicesLabel}
-          multiline
-          onChangeText={(value) => updateField('services', value)}
-          placeholder={copy.servicesPlaceholder}
-          value={form.services}
         />
         <MediaPickerField
           assets={coverAssets}
@@ -867,10 +797,6 @@ function createStyles(colors: AppColors) {
       gap: spacing.sm,
       padding: spacing.xl,
     },
-    gateActions: {
-      gap: spacing.sm,
-      marginTop: spacing.sm,
-    },
     previewSection: {
       gap: spacing.md,
       borderRadius: radii.xl,
@@ -914,10 +840,6 @@ function createStyles(colors: AppColors) {
       ...typography.section,
       color: colors.text,
     },
-    previewMeta: {
-      ...typography.caption,
-      color: colors.textMuted,
-    },
     previewText: {
       ...typography.body,
       color: colors.textMuted,
@@ -936,23 +858,6 @@ function createStyles(colors: AppColors) {
     errorText: {
       ...typography.caption,
       color: colors.danger,
-    },
-    lockedCard: {
-      gap: spacing.xs,
-      borderRadius: radii.lg,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.md,
-      ...shadows.soft,
-    },
-    lockedTitle: {
-      ...typography.bodyStrong,
-      color: colors.text,
-    },
-    lockedCopy: {
-      ...typography.caption,
-      color: colors.textMuted,
     },
     planWrap: {
       flexDirection: 'row',
@@ -1014,37 +919,37 @@ function createStyles(colors: AppColors) {
       padding: spacing.lg,
       ...shadows.soft,
     },
-    testFillRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.sm,
+    foodVisual: {
+      position: 'relative',
+      minHeight: 210,
+      overflow: 'hidden',
+      justifyContent: 'flex-end',
+      borderRadius: radii.lg,
+      backgroundColor: colors.overlay,
     },
-    testFillButton: {
-      minHeight: 48,
-      flex: 1,
-      minWidth: 150,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
+    foodVisualImage: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      aspectRatio: 498 / 1120,
+    },
+    foodVisualOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(24, 14, 36, 0.48)',
+    },
+    foodVisualCopy: {
+      position: 'relative',
       gap: spacing.xs,
-      borderRadius: radii.pill,
-      backgroundColor: colors.primary,
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.sm,
-      ...shadows.soft,
+      padding: spacing.lg,
     },
-    testFillButtonSecondary: {
-      backgroundColor: colors.secondary,
+    foodVisualEyebrow: {
+      ...typography.eyebrow,
+      color: '#F2C45A',
     },
-    testFillButtonDisabled: {
-      opacity: 0.52,
-    },
-    testFillButtonPressed: {
-      opacity: 0.9,
-      transform: [{ translateY: 1 }],
-    },
-    testFillButtonText: {
-      ...typography.bodyStrong,
+    foodVisualTitle: {
+      ...typography.section,
+      maxWidth: 520,
       color: colors.white,
     },
     sectionTitle: {

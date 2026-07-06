@@ -119,8 +119,8 @@ create table if not exists public.security_settings (
   session_timeout_minutes integer not null default 30,
   max_login_attempts integer not null default 5,
   login_announcement_enabled boolean not null default true,
-  login_announcement_title text not null default 'Welcome to UrbanConnect',
-  login_announcement_body text not null default 'River Park marketplace updates, verification notices, and customer care messages will appear in your notifications.',
+  login_announcement_title text not null default 'Welcome to View2Connect',
+  login_announcement_body text not null default 'Marketplace updates, verification notices, and customer care messages will appear in your notifications.',
   subscription_exempt_account_email text not null default 'owner.admin@urbanconnect.com',
   updated_at timestamptz not null default now()
 );
@@ -147,6 +147,11 @@ create table if not exists public.owner_business_profiles (
   subscription_next_billing_at timestamptz,
   subscription_item_count integer,
   river_park_verified boolean not null default false,
+  payout_bank_code text,
+  payout_bank_name text,
+  payout_account_number text,
+  payout_account_name text,
+  payout_verified_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
@@ -327,8 +332,8 @@ insert into public.estates (
   updated_at
 ) values (
   'river-park',
-  'River Park Estate',
-  'Abuja',
+  'View2Connect Marketplace',
+  'Nigeria',
   12680,
   0,
   '12 mins',
@@ -349,7 +354,7 @@ insert into public.estates (
     {
       "id": "amenity-gym",
       "title": "Fitness studio",
-      "description": "Cardio, weights, and guided classes for River Park members.",
+      "description": "Cardio, weights, and guided classes from local fitness providers.",
       "icon": "barbell-outline"
     },
     {
@@ -421,8 +426,8 @@ insert into public.security_settings (
   30,
   5,
   true,
-  'Welcome to UrbanConnect',
-  'River Park marketplace updates, verification notices, and customer care messages will appear in your notifications.',
+  'Welcome to View2Connect',
+  'Marketplace updates, verification notices, and customer care messages will appear in your notifications.',
   'owner.admin@urbanconnect.com',
   now()
 ) on conflict (id) do update set
@@ -451,7 +456,7 @@ insert into public.admin_users (
 ) values
   (
     'admin-owner',
-    'UrbanConnect Owner',
+    'View2Connect Owner',
     'owner.admin@urbanconnect.com',
     crypt('password123', gen_salt('bf')),
     'owner',
@@ -461,7 +466,7 @@ insert into public.admin_users (
   ),
   (
     'admin-customer-care',
-    'UrbanConnect Customer Care',
+    'View2Connect Customer Care',
     'care.admin@urbanconnect.com',
     crypt('password123', gen_salt('bf')),
     'customerCare',

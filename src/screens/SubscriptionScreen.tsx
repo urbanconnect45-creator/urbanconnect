@@ -13,7 +13,6 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import type { PaymentPlan, PaymentPlanCycle } from '../types/business';
 import { formatCurrency, formatDateTime, formatNumber } from '../utils/format';
 import { isSubscriptionActive } from '../utils/businessState';
-import { getAccountWalletBalance } from '../utils/wallet';
 
 type SubscriptionDurationOption = {
   id: string;
@@ -96,9 +95,8 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
   const { user } = useAuth();
   const {
     businesses,
-    dynamicDepositAccounts,
+    getAvailableAccountBalanceForUser,
     getOwnerBusinessProfile,
-    getOrdersForUser,
     isSubscriptionExemptForUser,
     isRiverParkVerifiedForUser,
     paymentPlans,
@@ -155,13 +153,7 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
   const durationMinutes = selectedDuration.minutes;
   const amountDue = selectedDuration.amount * itemCount;
   const ownerPayments = subscriptionPayments.filter((payment) => payment.ownerUserId === user.id);
-  const ownerDeposits = dynamicDepositAccounts.filter((deposit) => deposit.userId === user.id);
-  const accountBalance = getAccountWalletBalance(
-    user,
-    getOrdersForUser(user.id),
-    ownerPayments,
-    ownerDeposits,
-  );
+  const accountBalance = getAvailableAccountBalanceForUser(user);
   const status = ownerProfile?.subscriptionStatus ?? ownerListings[0]?.subscriptionStatus;
   const nextBillingAt =
     ownerProfile?.subscriptionNextBillingAt ?? ownerListings[0]?.subscriptionNextBillingAt;
@@ -201,14 +193,6 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
     setActiveFlutterwaveCheckout(null);
   };
 
-  const handleFlutterwaveReturn = () => {
-    setActiveFlutterwaveCheckout(null);
-    Alert.alert(
-      'Payment submitted',
-      'Your subscription activates automatically after Flutterwave confirms payment.',
-    );
-  };
-
   const startAccountPayment = () => {
     try {
       setIsStartingPayment(true);
@@ -221,13 +205,13 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
       );
       Alert.alert(
         'Subscription active',
-        `Paid ${formatCurrency(payment.amount)} from your UrbanConnect account. Your listings are now active.`,
+        `Paid ${formatCurrency(payment.amount)} from your View2Connect account. Your listings are now active.`,
       );
     } catch (paymentError) {
       const message =
         paymentError instanceof Error
           ? paymentError.message
-          : 'Unable to pay from your UrbanConnect account right now.';
+          : 'Unable to pay from your View2Connect account right now.';
       Alert.alert('Payment failed', message);
     } finally {
       setIsStartingPayment(false);
@@ -239,7 +223,7 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Business subscription</Text>
-        <Text style={styles.title}>Pay from your UrbanConnect account.</Text>
+        <Text style={styles.title}>Pay from your View2Connect account.</Text>
         <Text style={styles.subtitle}>
           {subscriptionExempt
             ? 'This account is covered by the owner admin subscription exemption.'
@@ -268,7 +252,7 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
             size={22}
           />
           <Text style={styles.statusValue}>{riverParkVerified ? 'Verified' : 'Pending'}</Text>
-          <Text style={styles.statusLabel}>River Park account</Text>
+          <Text style={styles.statusLabel}>Seller account</Text>
         </View>
         <View style={styles.statusCard}>
           <Ionicons color={colors.primary} name="storefront-outline" size={22} />
@@ -398,7 +382,6 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
         key={activeFlutterwaveCheckout.checkoutUrl}
         checkoutUrl={activeFlutterwaveCheckout.checkoutUrl}
         onClose={closeFlutterwaveCheckout}
-        onPaymentReturn={handleFlutterwaveReturn}
         reference={activeFlutterwaveCheckout.reference}
         subtitle={activeFlutterwaveCheckout.subtitle}
         title={activeFlutterwaveCheckout.title}
