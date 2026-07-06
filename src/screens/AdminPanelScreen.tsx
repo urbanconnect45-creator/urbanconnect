@@ -577,7 +577,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const [adminPasswordConfirmDraft, setAdminPasswordConfirmDraft] = useState('');
   const [adminPasswordError, setAdminPasswordError] = useState<string | null>(null);
 
-  const isWideLayout = width >= 1100;
+  const isWideLayout = width >= 900;
   const isOwnerAdmin = adminUser.role === 'owner';
   const canReviewListings = isOwnerAdmin || adminUser.role === 'customerCare';
   const normalizedSearch = searchValue.trim().toLowerCase();
@@ -4864,13 +4864,14 @@ function createStyles(colors: AppColors) {
       flexDirection: 'column',
     },
     sidebar: {
-      width: 180,
-      borderRadius: radii.xl,
-      backgroundColor: '#111111',
-      ...shadows.card,
+    width: 180,
+    borderRadius: radii.xl,
+    backgroundColor: '#111111',
+    ...shadows.card,
     },
+
     sidebarStacked: {
-      width: '100%',
+    width: '100%',
     },
     sidebarContent: {
       gap: spacing.lg,
