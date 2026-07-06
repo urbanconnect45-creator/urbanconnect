@@ -2072,9 +2072,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   return (
     <>
     <View style={styles.screen}>
-      <View style={[styles.adminShell, !isWideLayout && styles.adminShellStacked]}>
+      <View style={styles.adminShell}>
         <ScrollView
-          style={[styles.sidebar, !isWideLayout && styles.sidebarStacked]}
+          style={styles.sidebar}
           contentContainerStyle={styles.sidebarContent}
           showsVerticalScrollIndicator={false}
         >
@@ -4864,18 +4864,20 @@ function createStyles(colors: AppColors) {
       flexDirection: 'column',
     },
     sidebar: {
-    width: 180,
-    borderRadius: radii.xl,
-    backgroundColor: '#111111',
-    ...shadows.card,
+      width: 180,
+      maxWidth: 180,
+      minWidth: 180,
+      borderRadius: radii.xl,
+      backgroundColor: '#111111',
+      ...shadows.card,
     },
 
     sidebarStacked: {
     width: '100%',
     },
     sidebarContent: {
-      gap: spacing.lg,
-      padding: spacing.lg,
+      gap: spacing.sm,
+      padding: spacing.sm,
     },
     brandBlock: {
       flexDirection: 'row',
@@ -4924,10 +4926,10 @@ function createStyles(colors: AppColors) {
     sidebarRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.sm,
-      borderRadius: radii.lg,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
+      gap: spacing.xs,
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
     },
     sidebarRowActive: {
       backgroundColor: '#2B2B2B',
