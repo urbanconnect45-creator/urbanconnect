@@ -705,7 +705,7 @@ export function StoreOwnerDashboardScreen() {
         ? bank.name.toLowerCase().includes(normalizedPayoutBankSearch)
         : true,
     )
-    .slice(0, 10);
+    .slice(0, 3);
   const payoutAccountVerified = Boolean(
     ownerProfile?.payoutBankCode &&
       ownerProfile.payoutAccountNumber &&
@@ -2506,7 +2506,9 @@ export function StoreOwnerDashboardScreen() {
                 variant="secondary"
               />
             </View>
+
           ) : null}
+          
 
           {!payoutBankListError && visiblePayoutBanks.length > 0 ? (
             <View style={styles.bankSearchResults}>
