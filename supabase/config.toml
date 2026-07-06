@@ -413,24 +413,13 @@ enabled = true
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
-[functions.flutterwave-banks]
+[functions.verify-seller-bank-account]
 enabled = true
 verify_jwt = false
-import_map = "./functions/flutterwave-banks/deno.json"
+import_map = "./functions/verify-seller-bank-account/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/flutterwave-banks/index.ts"
+entrypoint = "./functions/verify-seller-bank-account/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/flutterwave-banks/*.html" ]
-
-[functions.verify-seller-payout-account]
-enabled = true
-verify_jwt = false
-import_map = "./functions/verify-seller-payout-account/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/verify-seller-payout-account/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/verify-seller-payout-account/*.html" ]
+# static_files = [ "./functions/verify-seller-bank-account/*.html" ]

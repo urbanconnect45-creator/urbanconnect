@@ -699,11 +699,12 @@ export function StoreOwnerDashboardScreen() {
     (normalizedPayoutBankSearch
       ? payoutBanks.find((bank) => bank.name.toLowerCase() === normalizedPayoutBankSearch)
       : undefined);
+  const canSearchPayoutBanks = payoutAccountNumber.length === 10;
   const visiblePayoutBanks = payoutBanks
     .filter((bank) =>
-      normalizedPayoutBankSearch
+      canSearchPayoutBanks && normalizedPayoutBankSearch
         ? bank.name.toLowerCase().includes(normalizedPayoutBankSearch)
-        : true,
+        : false,
     )
     .slice(0, 3);
   const payoutAccountVerified = Boolean(
@@ -2501,16 +2502,20 @@ export function StoreOwnerDashboardScreen() {
             <View style={styles.errorBox}>
               <Text style={styles.errorText}>{payoutBankListError}</Text>
               <AppButton
-                label="Retry loading banks"
+                label="Retry"
                 onPress={() => void loadPayoutBanks()}
                 variant="secondary"
               />
             </View>
-
           ) : null}
-          
 
-          {!payoutBankListError && visiblePayoutBanks.length > 0 ? (
+          {!payoutBankListError && !canSearchPayoutBanks ? (
+            <Text style={styles.mutedText}>
+              Enter a valid 10-digit account number before searching for the bank.
+            </Text>
+          ) : null}
+
+          {!payoutBankListError && canSearchPayoutBanks && visiblePayoutBanks.length > 0 ? (
             <View style={styles.bankSearchResults}>
               {visiblePayoutBanks.map((bank) => {
                 const isSelected = selectedPayoutBankCode === bank.code;
@@ -2535,13 +2540,16 @@ export function StoreOwnerDashboardScreen() {
                     </View>
                     <View style={styles.previewCopy}>
                       <Text style={styles.bankOptionText}>{bank.name}</Text>
-                      <Text style={styles.bankOptionSubtext}>Bank code: {bank.code}</Text>
+                      <Text style={styles.bankOptionSubtext}>Tap to use this bank</Text>
                     </View>
                   </Pressable>
                 );
               })}
             </View>
-          ) : !payoutBankListError && payoutBanks.length > 0 && payoutBankSearch.trim() ? (
+          ) : !payoutBankListError &&
+            canSearchPayoutBanks &&
+            payoutBanks.length > 0 &&
+            payoutBankSearch.trim() ? (
             <Text style={styles.mutedText}>
               No bank matched "{payoutBankSearch.trim()}". Try a shorter bank name.
             </Text>

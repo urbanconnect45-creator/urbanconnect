@@ -268,12 +268,21 @@ export function DispatchLoginScreen() {
               </View>
               <View style={styles.heroListItem}>
                 <Ionicons color={colors.primary} name="shield-checkmark-outline" size={18} />
-                <Text style={styles.heroListText}>Dispatch access stays separate from customer and seller accounts.</Text>
+                <Text style={styles.heroListText}>
+                  Dispatch access stays separate from customer and seller accounts.
+                </Text>
               </View>
+            </View>
+            <View style={styles.noticeCard}>
+              <Ionicons color={colors.primary} name="information-circle-outline" size={18} />
+              <Text style={styles.noticeText}>
+                Dispatch accounts are created by View2Connect Admin. Contact admin if you need
+                access.
+              </Text>
             </View>
           </View>
 
-          <View style={styles.authCard}>
+          <View style={[styles.authCard, isWideLayout && styles.authCardWide]}>
             <View style={styles.authHeader}>
               <Text style={styles.cardTitle}>Sign in</Text>
               <Text style={styles.cardSubtitle}>
@@ -465,7 +474,8 @@ function createStyles(colors: AppColors) {
     },
     shellWide: {
       flexDirection: 'row',
-      alignItems: 'stretch',
+      alignItems: 'center',
+      gap: spacing.xl,
     },
     heroPanel: {
       gap: spacing.lg,
@@ -479,6 +489,7 @@ function createStyles(colors: AppColors) {
     heroPanelWide: {
       flex: 1,
       minWidth: 0,
+      paddingVertical: spacing.xxl,
     },
     brandRow: {
       flexDirection: 'row',
@@ -534,6 +545,21 @@ function createStyles(colors: AppColors) {
       ...typography.body,
       color: colors.text,
     },
+    noticeCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
+    },
+    noticeText: {
+      flex: 1,
+      ...typography.caption,
+      color: colors.textMuted,
+    },
     authCard: {
       width: '100%',
       gap: spacing.md,
@@ -543,6 +569,12 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       padding: spacing.xl,
       ...shadows.card,
+    },
+    authCardWide: {
+      flexShrink: 0,
+      width: 420,
+      maxWidth: '100%',
+      alignSelf: 'center',
     },
     authHeader: {
       gap: spacing.xs,
