@@ -176,6 +176,8 @@ export type OwnerBusinessProfileValues = {
   website: string;
   instagram: string;
   address: string;
+  openingTime?: string;
+  closingTime?: string;
   coverImage: string;
   galleryImages: string;
   galleryVideos: string;

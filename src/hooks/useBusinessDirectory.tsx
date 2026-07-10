@@ -195,6 +195,9 @@ type BusinessDirectoryContextValue = {
   payCustomerBenefitSubscriptionWithAccount: (
     customer: AppUser,
     cycle: PaymentPlanCycle,
+    durationMonths?: number,
+    amountOverride?: number,
+    discountAmount?: number,
   ) => SubscriptionPayment;
   startOwnerSubscriptionFlutterwaveCheckout: (
     owner: AppUser,
@@ -2333,6 +2336,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       website: existingProfile?.website ?? '',
       instagram: existingProfile?.instagram ?? '',
       address: existingProfile?.address ?? owner.businessCluster ?? '',
+      openingTime: existingProfile?.openingTime ?? '',
+      closingTime: existingProfile?.closingTime ?? '',
       coverImage: existingProfile?.coverImage ?? '',
       galleryImages: existingProfile?.galleryImages ?? '',
       galleryVideos: existingProfile?.galleryVideos ?? '',
@@ -2435,18 +2440,24 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const payCustomerBenefitSubscriptionWithAccount = (
     customer: AppUser,
     cycle: PaymentPlanCycle,
+    durationMonths = 1,
+    amountOverride?: number,
+    discountAmount = 0,
   ) => {
     if (customer.role !== 'resident') {
       throw new Error('Customer benefits are available only from a customer account.');
     }
 
     const plan = getPaymentPlanByCycle(cycle);
-    const amount = plan.amount;
+    const durationMultiplier = Math.max(1, Math.floor(durationMonths));
+    const amountBeforeDiscount = plan.amount * durationMultiplier;
+    const amount = amountOverride ?? amountBeforeDiscount;
     const balance = getAvailableAccountBalanceForUser(customer);
     const createdAt = new Date().toISOString();
     const nextBillingDate = new Date(createdAt);
-    nextBillingDate.setDate(nextBillingDate.getDate() + (cycle === 'weekly' ? 7 : 30));
+    nextBillingDate.setDate(nextBillingDate.getDate() + 30 * durationMultiplier);
     const nextBillingAt = nextBillingDate.toISOString();
+    const durationLabel = `${durationMultiplier} month${durationMultiplier === 1 ? '' : 's'}`;
 
     if (amount > balance) {
       throw new Error(
@@ -2470,6 +2481,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         method: 'accountBalance',
         subscriptionType: 'customerBenefits',
         planTitle: plan.title,
+        durationLabel,
+        durationMonths: durationMultiplier,
+        amountBeforeDiscount,
+        discountAmount,
         nextBillingAt,
       }),
       createdAt,
@@ -2489,7 +2504,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       customer.fullName,
       'system',
       'Customer benefits subscription paid',
-      `${customer.fullName} paid ${formatCurrency(amount)} for ${plan.title}.`,
+      `${customer.fullName} paid ${formatCurrency(amount)} for ${plan.title} (${durationLabel}).`,
     );
     appendNotification({
       userId: customer.id,
@@ -2497,7 +2512,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientEmail: customer.email,
       audience: 'resident',
       title: 'Benefits subscription active',
-      body: `${plan.title} is active until ${formatDateTimeForEmail(nextBillingAt)}.`,
+      body: `${plan.title} is active for ${durationLabel} until ${formatDateTimeForEmail(nextBillingAt)}.`,
       contextType: 'general',
       contextId: reference,
       createdAt,
@@ -2507,7 +2522,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientName: customer.fullName,
       recipientEmail: customer.email,
       subject: 'View2Connect benefits active',
-      body: `Your ${plan.title} subscription is active until ${formatDateTimeForEmail(nextBillingAt)}.`,
+      body: `Your ${plan.title} subscription is active for ${durationLabel} until ${formatDateTimeForEmail(nextBillingAt)}.`,
     });
 
     return payment;
@@ -2738,6 +2753,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         website: '',
         instagram: '',
         address: owner.businessCluster ?? '',
+        openingTime: '',
+        closingTime: '',
         coverImage: '',
         galleryImages: '',
         galleryVideos: '',
@@ -3158,6 +3175,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       website: values.website.trim(),
       instagram: values.instagram.trim(),
       address: values.address.trim() || owner.businessCluster || '',
+      openingTime: values.openingTime?.trim() ?? '',
+      closingTime: values.closingTime?.trim() ?? '',
       coverImage: values.coverImage.trim(),
       galleryImages: values.galleryImages.trim(),
       galleryVideos: values.galleryVideos.trim(),
@@ -3271,6 +3290,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         website: '',
         instagram: '',
         address: owner.businessCluster ?? '',
+        openingTime: '',
+        closingTime: '',
         coverImage: '',
         galleryImages: '',
         galleryVideos: '',

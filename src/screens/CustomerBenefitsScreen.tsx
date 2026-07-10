@@ -13,10 +13,25 @@ import type { PaymentPlanCycle, SubscriptionPayment } from '../types/business';
 import { formatCurrency, formatDateTime } from '../utils/format';
 
 type CustomerSubscriptionPayload = {
+  amountBeforeDiscount?: number;
+  discountAmount?: number;
+  durationLabel?: string;
+  durationMonths?: number;
   nextBillingAt?: string;
   planTitle?: string;
   subscriptionType?: string;
 };
+
+const benefitDurationOptions = [
+  { months: 1, discountRate: 0 },
+  { months: 3, discountRate: 0.05 },
+  { months: 6, discountRate: 0.1 },
+  { months: 12, discountRate: 0.15 },
+] as const;
+
+function discountCopy(rate: number) {
+  return rate > 0 ? `${Math.round(rate * 100)}% off` : 'No discount';
+}
 
 function parseCustomerSubscriptionPayload(payment: SubscriptionPayment) {
   try {
@@ -50,11 +65,20 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const [selectedCycle, setSelectedCycle] = useState<PaymentPlanCycle>('monthly');
+  const [selectedMonths, setSelectedMonths] = useState(1);
   const [isPaying, setIsPaying] = useState(false);
   const selectedPlan =
     paymentPlans.find((plan) => plan.cycle === selectedCycle) ??
     paymentPlans.find((plan) => plan.cycle === 'monthly') ??
     paymentPlans[0];
+  const selectedDuration =
+    benefitDurationOptions.find((option) => option.months === selectedMonths) ??
+    benefitDurationOptions[0];
+  const amountBeforeDiscount = selectedPlan
+    ? selectedPlan.amount * selectedDuration.months
+    : 0;
+  const discountAmount = Math.round(amountBeforeDiscount * selectedDuration.discountRate);
+  const amountDue = Math.max(0, amountBeforeDiscount - discountAmount);
   const customerPayments = useMemo(
     () =>
       subscriptionPayments
@@ -88,7 +112,13 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
 
     try {
       setIsPaying(true);
-      const payment = payCustomerBenefitSubscriptionWithAccount(user, selectedPlan.cycle);
+      const payment = payCustomerBenefitSubscriptionWithAccount(
+        user,
+        selectedPlan.cycle,
+        selectedDuration.months,
+        amountDue,
+        discountAmount,
+      );
       const payload = parseCustomerSubscriptionPayload(payment);
 
       Alert.alert(
@@ -203,19 +233,55 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
           })}
         </View>
 
+        <Text style={styles.sectionTitle}>Choose duration</Text>
+        <View style={styles.durationGrid}>
+          {benefitDurationOptions.map((option) => {
+            const isSelected = selectedDuration.months === option.months;
+
+            return (
+              <Pressable
+                key={option.months}
+                onPress={() => setSelectedMonths(option.months)}
+                style={({ pressed }) => [
+                  styles.durationCard,
+                  isSelected && styles.durationCardActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.durationLabel, isSelected && styles.planTitleActive]}>
+                  {option.months} month{option.months === 1 ? '' : 's'}
+                </Text>
+                <Text style={[styles.durationMeta, isSelected && styles.planTitleActive]}>
+                  {discountCopy(option.discountRate)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.summaryStack}>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Before discount</Text>
+            <Text style={styles.totalValue}>{formatCurrency(amountBeforeDiscount)}</Text>
+          </View>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Discount</Text>
+            <Text style={styles.totalValue}>-{formatCurrency(discountAmount)}</Text>
+          </View>
+        </View>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Amount due</Text>
           <Text style={styles.totalValue}>
-            {selectedPlan ? formatCurrency(selectedPlan.amount) : formatCurrency(0)}
+            {formatCurrency(amountDue)}
           </Text>
         </View>
         <AppButton
-          disabled={!selectedPlan || Boolean(selectedPlan && selectedPlan.amount > accountBalance)}
+          disabled={!selectedPlan || amountDue > accountBalance}
           label={isPaying ? 'Paying...' : 'Pay from account balance'}
           loading={isPaying}
           onPress={paySubscription}
         />
-        {selectedPlan && selectedPlan.amount > accountBalance ? (
+        {selectedPlan && amountDue > accountBalance ? (
           <AppButton
             label="Open wallet"
             onPress={() => navigation.navigate('Transactions')}
@@ -234,6 +300,13 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
                 <Text style={styles.bodyText}>
                   {formatCurrency(payment.amount)} paid {formatDateTime(payment.createdAt)}
                 </Text>
+                {payload.durationLabel || payload.durationMonths ? (
+                  <Text style={styles.bodyText}>
+                    Duration{' '}
+                    {payload.durationLabel ??
+                      `${payload.durationMonths} month${payload.durationMonths === 1 ? '' : 's'}`}
+                  </Text>
+                ) : null}
                 {payload.nextBillingAt ? (
                   <Text style={styles.bodyText}>Until {formatDateTime(payload.nextBillingAt)}</Text>
                 ) : null}
@@ -369,6 +442,39 @@ function createStyles(colors: AppColors) {
       ...typography.caption,
       color: colors.textMuted,
       flex: 1,
+    },
+    durationGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+    },
+    durationCard: {
+      flex: 1,
+      minWidth: 130,
+      gap: spacing.xs,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
+    },
+    durationCardActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    durationLabel: {
+      ...typography.bodyStrong,
+      color: colors.text,
+    },
+    durationMeta: {
+      ...typography.caption,
+      color: colors.textMuted,
+    },
+    summaryStack: {
+      gap: spacing.xs,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
     },
     totalRow: {
       flexDirection: 'row',

@@ -20,6 +20,7 @@ import {
   type BusinessProfileFormValues,
   type ListingType,
   type OwnerBusinessProfile,
+  type OwnerBusinessProfileValues,
 } from '../types/business';
 import { buildBusinessMedia } from '../utils/businessMedia';
 import { splitInputList } from '../utils/businessMedia';
@@ -177,6 +178,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     currentEstateId,
     getOwnerBusinessProfile,
     registerBusiness,
+    updateOwnerBusinessProfile,
   } = useBusinessDirectory();
   const ownerProfile = useMemo(
     () =>
@@ -206,6 +208,10 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
   const [errors, setErrors] = useState<Partial<Record<keyof BusinessProfileFormValues, string>>>(
     {},
   );
+  const [storeHours, setStoreHours] = useState({
+    openingTime: savedOwnerProfile?.openingTime ?? '',
+    closingTime: savedOwnerProfile?.closingTime ?? '',
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryManuallySelected, setCategoryManuallySelected] = useState(false);
 
@@ -273,6 +279,13 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     user?.fullName,
     user?.phoneNumber,
   ]);
+
+  useEffect(() => {
+    setStoreHours({
+      openingTime: savedOwnerProfile?.openingTime ?? '',
+      closingTime: savedOwnerProfile?.closingTime ?? '',
+    });
+  }, [savedOwnerProfile?.closingTime, savedOwnerProfile?.openingTime]);
 
   if (!user) {
     return (
@@ -458,6 +471,25 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     setIsSubmitting(true);
 
     try {
+      if (user.role === 'businessOwner') {
+        const profileValues: OwnerBusinessProfileValues = {
+          ownerName: savedOwnerProfile?.ownerName ?? user.businessName ?? user.fullName,
+          phone: savedOwnerProfile?.phone ?? user.phoneNumber,
+          whatsapp: savedOwnerProfile?.whatsapp ?? user.phoneNumber,
+          email: savedOwnerProfile?.email ?? user.email,
+          website: savedOwnerProfile?.website ?? '',
+          instagram: savedOwnerProfile?.instagram ?? '',
+          address: savedOwnerProfile?.address ?? user.businessCluster ?? '',
+          openingTime: storeHours.openingTime,
+          closingTime: storeHours.closingTime,
+          coverImage: savedOwnerProfile?.coverImage ?? '',
+          galleryImages: savedOwnerProfile?.galleryImages ?? '',
+          galleryVideos: savedOwnerProfile?.galleryVideos ?? '',
+        };
+
+        await updateOwnerBusinessProfile(user, profileValues);
+      }
+
       const submissionForm = {
         ...form,
         longDescription: form.shortDescription.trim(),
@@ -724,6 +756,35 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
             void pickListingMedia('galleryVideos', ['videos'], true);
           }}
         />
+        {!isIndividualSeller ? (
+          <View style={styles.planNotice}>
+            <Text style={styles.planNoticeText}>
+              Store opening and closing time will be saved to your seller profile.
+            </Text>
+            <View style={styles.inlineFieldRow}>
+              <View style={styles.inlineField}>
+                <FormField
+                  label="Opening time"
+                  onChangeText={(value) =>
+                    setStoreHours((current) => ({ ...current, openingTime: value }))
+                  }
+                  placeholder="09:00 AM"
+                  value={storeHours.openingTime}
+                />
+              </View>
+              <View style={styles.inlineField}>
+                <FormField
+                  label="Closing time"
+                  onChangeText={(value) =>
+                    setStoreHours((current) => ({ ...current, closingTime: value }))
+                  }
+                  placeholder="08:00 PM"
+                  value={storeHours.closingTime}
+                />
+              </View>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.planNotice}>
           <Text style={styles.planNoticeText}>
             Contact details and address are managed from the Profile screen in Edit business

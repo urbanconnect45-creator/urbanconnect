@@ -205,6 +205,8 @@ type SupabaseOwnerProfileRow = {
   website?: string | null;
   instagram?: string | null;
   address: string;
+  opening_time?: string | null;
+  closing_time?: string | null;
   cover_image?: string | null;
   gallery_images?: string | null;
   gallery_videos?: string | null;
@@ -1843,6 +1845,8 @@ function ownerProfileRowToProfile(row: SupabaseOwnerProfileRow): OwnerBusinessPr
   const coverImage = optionalString(row.cover_image);
   const galleryImages = optionalString(row.gallery_images);
   const galleryVideos = optionalString(row.gallery_videos);
+  const openingTime = optionalString(row.opening_time);
+  const closingTime = optionalString(row.closing_time);
   const subscriptionPaidAt = optionalString(row.subscription_paid_at);
   const subscriptionNextBillingAt = optionalString(row.subscription_next_billing_at);
   const payoutBankCode = optionalString(row.payout_bank_code);
@@ -1863,6 +1867,8 @@ function ownerProfileRowToProfile(row: SupabaseOwnerProfileRow): OwnerBusinessPr
     website: website ?? '',
     instagram: instagram ?? '',
     address: row.address,
+    ...(openingTime ? { openingTime } : {}),
+    ...(closingTime ? { closingTime } : {}),
     coverImage: coverImage ?? '',
     galleryImages: galleryImages ?? '',
     galleryVideos: galleryVideos ?? '',
@@ -2708,6 +2714,8 @@ export async function saveOwnerBusinessProfileToSupabase(profile: OwnerBusinessP
       website: profile.website || null,
       instagram: profile.instagram || null,
       address: profile.address,
+      opening_time: profile.openingTime || null,
+      closing_time: profile.closingTime || null,
       cover_image: profile.coverImage || null,
       gallery_images: profile.galleryImages || null,
       gallery_videos: profile.galleryVideos || null,

@@ -93,6 +93,11 @@ type ImportedProductRow = ProductDraft & {
   rowNumber: number;
 };
 
+type ImportedProductEditorRow = ImportedProductRow & {
+  imageUri: string;
+  imageName: string;
+};
+
 type ProductImportField = Exclude<keyof ProductDraft, 'hasBarcode' | 'hasSize'>;
 
 const fallbackProductImage =
@@ -115,10 +120,10 @@ const categoryFallbackImages: Record<string, string> = {
     'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=900&q=80',
 };
 
-const sampleProductImportCsv = `itemName,category,price,stockQuantity,reorderLevel,identifier,size,area,pickupAddress,shortDescription,details
-Jollof Rice and Chicken,Food,3500,12,3,,Plate,Wuse 2,"Shop 12 Banex Plaza, Wuse 2","Freshly prepared meal","Contains chicken and spices."
-Orange Juice 50cl,Drinks,900,40,10,6154000031290,50cl,Gwarinpa,"Local Test Store, 3rd Avenue","Chilled orange drink","Serve cold."
-Morning Fresh Dishwashing Liquid 500ml,Home Essentials,1200,8,2,NAFDAC-A8-2345,500ml,Lekki Phase 1,"Adeniran Ogunsanya Street","Dishwashing liquid 500ml","Household cleaning product ready for pickup."`;
+const sampleProductImportCsv = `itemName,category,price,stockQuantity,reorderLevel,identifier,size,shortDescription
+Jollof Rice and Chicken,Food,3500,12,3,,Plate,"Freshly prepared meal"
+Orange Juice 50cl,Drinks,900,40,10,6154000031290,50cl,"Chilled orange drink"
+Morning Fresh Dishwashing Liquid 500ml,Home Essentials,1200,8,2,NAFDAC-A8-2345,500ml,"Dishwashing liquid 500ml"`;
 
 const importHeaderAliases: Record<string, ProductImportField> = {
   item: 'itemName',
@@ -383,7 +388,7 @@ function parseProductImportText(text: string) {
   const mappedHeaders = rawHeaders.map(
     (header) => importHeaderAliases[normalizeImportHeader(header)],
   );
-  const missingRequiredHeaders = ['itemName', 'price', 'stockQuantity', 'pickupAddress', 'shortDescription'].filter(
+  const missingRequiredHeaders = ['itemName', 'price', 'stockQuantity'].filter(
     (requiredHeader) => !mappedHeaders.includes(requiredHeader as ProductImportField),
   );
 
@@ -434,19 +439,38 @@ function parseProductImportText(text: string) {
       errors.push(`Row ${rowNumber}: reorderLevel must be higher than 0.`);
     }
 
-    if (!row.pickupAddress.trim()) {
-      errors.push(`Row ${rowNumber}: pickupAddress is required.`);
-    }
-
-    if (!row.shortDescription.trim()) {
-      errors.push(`Row ${rowNumber}: shortDescription is required.`);
-    }
-
     parsedRows.push({ ...row, rowNumber });
     return parsedRows;
   }, []);
 
   return { rows, errors };
+}
+
+function validateImportedProductReviewRows(rows: ImportedProductEditorRow[]) {
+  return rows.flatMap((row) => {
+    const errors: string[] = [];
+    const price = Number.parseFloat(row.price);
+    const stockQuantity = Number.parseInt(row.stockQuantity, 10);
+    const reorderLevel = Number.parseInt(row.reorderLevel, 10);
+
+    if (!row.itemName.trim()) {
+      errors.push(`Row ${row.rowNumber}: item name is required.`);
+    }
+
+    if (!row.price.trim() || !Number.isFinite(price) || price <= 0) {
+      errors.push(`Row ${row.rowNumber}: price must be a number higher than 0.`);
+    }
+
+    if (!row.stockQuantity.trim() || !Number.isFinite(stockQuantity) || stockQuantity < 0) {
+      errors.push(`Row ${row.rowNumber}: stock must be 0 or higher.`);
+    }
+
+    if (!row.reorderLevel.trim() || !Number.isFinite(reorderLevel) || reorderLevel <= 0) {
+      errors.push(`Row ${row.rowNumber}: reorder level must be higher than 0.`);
+    }
+
+    return errors;
+  });
 }
 
 function createEditDraft(listing: Business): ListingEditDraft {
@@ -521,6 +545,8 @@ function buildProfileValues(userName: string, userEmail: string): OwnerBusinessP
     website: '',
     instagram: '',
     address: '',
+    openingTime: '',
+    closingTime: '',
     coverImage: '',
     galleryImages: '',
     galleryVideos: '',
@@ -637,6 +663,7 @@ export function StoreOwnerDashboardScreen() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [isImportingProducts, setIsImportingProducts] = useState(false);
   const [importFileName, setImportFileName] = useState<string | null>(null);
+  const [importReviewRows, setImportReviewRows] = useState<ImportedProductEditorRow[]>([]);
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ListingEditDraft | null>(null);
   const [editMessage, setEditMessage] = useState<string | null>(null);
@@ -776,6 +803,8 @@ export function StoreOwnerDashboardScreen() {
       website: '',
       instagram: '',
       address: source.address ?? '',
+      openingTime: source.openingTime ?? '',
+      closingTime: source.closingTime ?? '',
       coverImage: source.coverImage ?? '',
       galleryImages: '',
       galleryVideos: '',
@@ -950,12 +979,6 @@ export function StoreOwnerDashboardScreen() {
     if (!draft.itemName.trim()) {
       nextErrors.itemName = 'Item name is required.';
     }
-    if (!draft.shortDescription.trim()) {
-      nextErrors.shortDescription = 'Short description is required.';
-    }
-    if (!draft.pickupAddress.trim()) {
-      nextErrors.pickupAddress = 'Pickup address is required.';
-    }
     if (!draft.price.trim() || !Number.isFinite(price) || price <= 0) {
       nextErrors.price = 'Enter a valid price.';
     }
@@ -1002,8 +1025,10 @@ export function StoreOwnerDashboardScreen() {
       ? `\n\nIdentifier: ${product.identifier.trim()}`
       : '';
     const sizeLine = product.hasSize && product.size.trim() ? `\nSize: ${product.size.trim()}` : '';
-    const areaLine = product.area.trim() ? `\nArea: ${product.area.trim()}` : '';
-    const details = `${product.details.trim() || product.shortDescription.trim()}${identifierLine}${sizeLine}${areaLine}`;
+    const description =
+      product.shortDescription.trim() ||
+      `${itemName} from ${ownerProfile?.accountName ?? user?.businessName ?? user?.fullName ?? 'this seller'}.`;
+    const details = `${description}${identifierLine}${sizeLine}`;
     const normalizedIdentifier = normalizeProductIdentity(
       product.hasBarcode ? product.identifier : '',
     );
@@ -1029,7 +1054,7 @@ export function StoreOwnerDashboardScreen() {
       subscriptionCycle: 'monthly',
       cluster: user?.businessCluster ?? riverParkClusters[0],
       category: product.category,
-      shortDescription: product.shortDescription.trim(),
+      shortDescription: description,
       longDescription: details,
       price: product.price.trim(),
       stockQuantity: product.stockQuantity.trim(),
@@ -1039,7 +1064,7 @@ export function StoreOwnerDashboardScreen() {
       email: user?.email ?? '',
       website: '',
       instagram: '',
-      address: product.pickupAddress.trim(),
+      address: ownerProfile?.address?.trim() || user?.businessCluster || riverParkClusters[0],
       coverImage: resolvedImageUrl,
       galleryImages: '',
       galleryVideos: '',
@@ -1049,7 +1074,6 @@ export function StoreOwnerDashboardScreen() {
           ? `Code: ${product.identifier.trim()}`
           : '',
         product.hasSize && product.size.trim() ? `Size: ${product.size.trim()}` : '',
-        product.area.trim() ? `Area: ${product.area.trim()}` : '',
       ]
         .filter(Boolean)
         .join(', '),
@@ -1081,12 +1105,13 @@ export function StoreOwnerDashboardScreen() {
   const saveImportedProduct = async (
     product: ProductDraft,
     sourceListings = ownerListings,
+    productImageUri?: string,
   ): Promise<{ listing: Business; status: 'created' | 'updated' }> => {
     if (!user) {
       throw new Error('Sign in as a store owner before importing products.');
     }
 
-    const values = await createBusinessValuesFromProduct(product);
+    const values = await createBusinessValuesFromProduct(product, productImageUri);
     const existingListing = findMatchingListingForProduct(product, sourceListings);
 
     if (!existingListing) {
@@ -1160,10 +1185,33 @@ export function StoreOwnerDashboardScreen() {
       return;
     }
 
-    const parsed = parseProductImportText(importText);
+    if (importReviewRows.length === 0) {
+      const parsed = parseProductImportText(importText);
 
-    if (parsed.errors.length > 0) {
-      setImportErrors(parsed.errors);
+      if (parsed.errors.length > 0) {
+        setImportErrors(parsed.errors);
+        setImportMessage(null);
+        return;
+      }
+
+      setImportReviewRows(
+        parsed.rows.map((row) => ({
+          ...row,
+          imageUri: '',
+          imageName: '',
+        })),
+      );
+      setImportErrors([]);
+      setImportMessage(
+        `${parsed.rows.length} product row${parsed.rows.length === 1 ? '' : 's'} loaded. Review, edit, attach images, then save products.`,
+      );
+      return;
+    }
+
+    const reviewErrors = validateImportedProductReviewRows(importReviewRows);
+
+    if (reviewErrors.length > 0) {
+      setImportErrors(reviewErrors);
       setImportMessage(null);
       return;
     }
@@ -1176,8 +1224,8 @@ export function StoreOwnerDashboardScreen() {
       let updatedCount = 0;
       const importedListings = [...ownerListings];
 
-      for (const product of parsed.rows) {
-        const result = await saveImportedProduct(product, importedListings);
+      for (const product of importReviewRows) {
+        const result = await saveImportedProduct(product, importedListings, product.imageUri);
         const existingIndex = importedListings.findIndex((listing) => listing.id === result.listing.id);
 
         if (existingIndex >= 0) {
@@ -1196,6 +1244,7 @@ export function StoreOwnerDashboardScreen() {
       setImportMessage(
         `${createdCount} product${createdCount === 1 ? '' : 's'} created, ${updatedCount} updated.`,
       );
+      setImportReviewRows([]);
       Alert.alert(
         'Products imported',
         `${createdCount} product${createdCount === 1 ? '' : 's'} created and ${updatedCount} updated.`,
@@ -1207,6 +1256,81 @@ export function StoreOwnerDashboardScreen() {
     } finally {
       setIsImportingProducts(false);
     }
+  };
+
+  const updateImportReviewRow = <K extends keyof ProductDraft>(
+    rowNumber: number,
+    key: K,
+    value: ProductDraft[K],
+  ) => {
+    setImportReviewRows((currentRows) =>
+      currentRows.map((row) => {
+        if (row.rowNumber !== rowNumber) {
+          return row;
+        }
+
+        const nextRow = { ...row, [key]: value };
+
+        if (key === 'identifier') {
+          nextRow.hasBarcode = Boolean(String(value).trim());
+        }
+
+        if (key === 'size') {
+          nextRow.hasSize = Boolean(String(value).trim());
+        }
+
+        return nextRow;
+      }),
+    );
+    setImportErrors([]);
+    setImportMessage(null);
+  };
+
+  const pickImportProductImage = async (rowNumber: number) => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert(
+        'Permission needed',
+        'Allow gallery access in your device settings so you can attach product images.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open settings',
+            onPress: () => {
+              void Linking.openSettings();
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: false,
+      mediaTypes: ['images'],
+      quality: 1,
+      selectionLimit: 1,
+    });
+
+    if (result.canceled || !result.assets[0]) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    setImportReviewRows((currentRows) =>
+      currentRows.map((row) =>
+        row.rowNumber === rowNumber
+          ? {
+              ...row,
+              imageUri: asset.uri,
+              imageName: asset.fileName ?? `import-product-${rowNumber}-${Date.now()}.jpg`,
+            }
+          : row,
+      ),
+    );
+    setImportErrors([]);
+    setImportMessage(null);
   };
 
   const openImportFilePicker = () => {
@@ -1231,6 +1355,7 @@ export function StoreOwnerDashboardScreen() {
       setImportFileName(file.name);
       setImportErrors([]);
       setImportMessage(null);
+      setImportReviewRows([]);
 
       if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
         setImportErrors([
@@ -1242,6 +1367,7 @@ export function StoreOwnerDashboardScreen() {
       const reader = new FileReaderRef();
       reader.onload = () => {
         setImportText(String(reader.result ?? ''));
+        setImportReviewRows([]);
       };
       reader.onerror = () => {
         setImportErrors(['Unable to read this file. Export it as CSV and try again.']);
@@ -2113,17 +2239,6 @@ export function StoreOwnerDashboardScreen() {
             onChangeText={(value) => setEditDraft({ ...editDraft, description: value })}
             value={editDraft.description}
           />
-          <FormField
-            label="Pickup address"
-            onChangeText={(value) => setEditDraft({ ...editDraft, address: value })}
-            value={editDraft.address}
-          />
-          <FormField
-            label="Details"
-            multiline
-            onChangeText={(value) => setEditDraft({ ...editDraft, longDescription: value })}
-            value={editDraft.longDescription}
-          />
 
           {editMessage ? <Text style={styles.infoText}>{editMessage}</Text> : null}
           <View style={styles.buttonRow}>
@@ -2149,10 +2264,7 @@ export function StoreOwnerDashboardScreen() {
 
     const draftPreviewPrice = Number.parseFloat(draft.price);
     const hasDraftPreviewImage = Boolean(draftImageUri.trim());
-    const previewDescription =
-      draft.shortDescription.trim() ||
-      draft.details.trim() ||
-      'Description preview';
+    const previewDescription = draft.shortDescription.trim() || 'Short description is optional.';
 
     return (
       <View style={styles.workspaceGrid}>
@@ -2161,7 +2273,7 @@ export function StoreOwnerDashboardScreen() {
           <View>
             <Text style={styles.sectionTitle}>View2Connect central catalog</Text>
             <Text style={styles.mutedText}>
-              Choose an owner-created product, then add your stock and pickup details.
+              Choose an owner-created product, then add your stock, image, and price.
             </Text>
           </View>
           <View style={styles.statusPill}>
@@ -2246,12 +2358,12 @@ export function StoreOwnerDashboardScreen() {
         <View style={styles.infoBox}>
           <Text style={styles.rowTitle}>Required columns</Text>
           <Text style={styles.mutedText}>
-            itemName, price, stockQuantity, pickupAddress, shortDescription. Optional columns:
-            category, reorderLevel, barcode/NAFDAC/SKU, size, area, details.
+            itemName, price, stockQuantity. Optional columns: category, reorderLevel,
+            barcode/NAFDAC/SKU, size, shortDescription.
           </Text>
           <Text style={styles.mutedText}>
-            Images are automatic: barcode match first, product-name match second, category image
-            fallback last.
+            Load the rows first, then edit product details and attach real gallery images before
+            saving them to the catalog.
           </Text>
         </View>
         <FormField
@@ -2260,6 +2372,7 @@ export function StoreOwnerDashboardScreen() {
           multiline
           onChangeText={(value) => {
             setImportText(value);
+            setImportReviewRows([]);
             setImportErrors([]);
             setImportMessage(null);
           }}
@@ -2280,6 +2393,114 @@ export function StoreOwnerDashboardScreen() {
         ) : null}
         {importMessage ? <Text style={styles.successText}>{importMessage}</Text> : null}
         {importFileName ? <Text style={styles.infoText}>Selected file: {importFileName}</Text> : null}
+        {importReviewRows.length > 0 ? (
+          <View style={styles.importReviewStack}>
+            <View style={styles.panelHeader}>
+              <Text style={styles.rowTitle}>Review imported products</Text>
+              <View style={styles.statusPill}>
+                <Text style={styles.statusText}>{formatNumber(importReviewRows.length)} rows</Text>
+              </View>
+            </View>
+            {importReviewRows.map((row) => (
+              <View key={`import-${row.rowNumber}`} style={styles.importReviewCard}>
+                <View style={styles.panelHeader}>
+                  <Text style={styles.itemTitle}>Row {row.rowNumber}</Text>
+                  <Text style={styles.mutedText}>{row.category}</Text>
+                </View>
+                <View style={styles.formRow}>
+                  <View style={styles.formColumnWide}>
+                    <FormField
+                      label="Product name"
+                      onChangeText={(value) => updateImportReviewRow(row.rowNumber, 'itemName', value)}
+                      value={row.itemName}
+                    />
+                  </View>
+                  <View style={styles.formColumn}>
+                    <FormField
+                      label="Category"
+                      onChangeText={(value) => updateImportReviewRow(row.rowNumber, 'category', value)}
+                      value={row.category}
+                    />
+                  </View>
+                </View>
+                <View style={styles.formRow}>
+                  <View style={styles.formColumn}>
+                    <FormField
+                      keyboardType="numeric"
+                      label="Price"
+                      onChangeText={(value) =>
+                        updateImportReviewRow(row.rowNumber, 'price', value.replace(/[^\d.]/g, ''))
+                      }
+                      value={row.price}
+                    />
+                  </View>
+                  <View style={styles.formColumn}>
+                    <FormField
+                      keyboardType="numeric"
+                      label="Stock"
+                      onChangeText={(value) =>
+                        updateImportReviewRow(row.rowNumber, 'stockQuantity', value.replace(/[^\d]/g, ''))
+                      }
+                      value={row.stockQuantity}
+                    />
+                  </View>
+                  <View style={styles.formColumn}>
+                    <FormField
+                      keyboardType="numeric"
+                      label="Reorder"
+                      onChangeText={(value) =>
+                        updateImportReviewRow(row.rowNumber, 'reorderLevel', value.replace(/[^\d]/g, ''))
+                      }
+                      value={row.reorderLevel}
+                    />
+                  </View>
+                </View>
+                <View style={styles.formRow}>
+                  <View style={styles.formColumn}>
+                    <FormField
+                      label="Barcode / NAFDAC / SKU"
+                      onChangeText={(value) => updateImportReviewRow(row.rowNumber, 'identifier', value)}
+                      value={row.identifier}
+                    />
+                  </View>
+                  <View style={styles.formColumn}>
+                    <FormField
+                      label="Size"
+                      onChangeText={(value) => updateImportReviewRow(row.rowNumber, 'size', value)}
+                      value={row.size}
+                    />
+                  </View>
+                </View>
+                <FormField
+                  label="Short description (optional)"
+                  onChangeText={(value) => updateImportReviewRow(row.rowNumber, 'shortDescription', value)}
+                  value={row.shortDescription}
+                />
+                <MediaPickerField
+                  assets={
+                    row.imageUri
+                      ? [{ label: row.imageName || assetLabelFromUri(row.imageUri, 'Imported product image', 0), uri: row.imageUri }]
+                      : []
+                  }
+                  buttonLabel={row.imageUri ? 'Change image' : 'Attach image'}
+                  helper="Optional for imported rows. If empty, View2Connect uses catalog or category fallback."
+                  kind="image"
+                  label="Product image"
+                  onClear={() =>
+                    setImportReviewRows((currentRows) =>
+                      currentRows.map((currentRow) =>
+                        currentRow.rowNumber === row.rowNumber
+                          ? { ...currentRow, imageUri: '', imageName: '' }
+                          : currentRow,
+                      ),
+                    )
+                  }
+                  onPick={() => void pickImportProductImage(row.rowNumber)}
+                />
+              </View>
+            ))}
+          </View>
+        ) : null}
         <View style={styles.buttonRow}>
           <Pressable
             accessibilityRole="button"
@@ -2294,6 +2515,7 @@ export function StoreOwnerDashboardScreen() {
             onPress={() => {
               setImportText(sampleProductImportCsv);
               setImportFileName(null);
+              setImportReviewRows([]);
               setImportErrors([]);
               setImportMessage(null);
             }}
@@ -2301,7 +2523,7 @@ export function StoreOwnerDashboardScreen() {
             variant="ghost"
           />
           <AppButton
-            label="Import products"
+            label={importReviewRows.length > 0 ? 'Save reviewed products' : 'Review imported rows'}
             loading={isImportingProducts}
             onPress={() => void importProducts()}
             style={styles.flexButton}
@@ -2348,7 +2570,7 @@ export function StoreOwnerDashboardScreen() {
             );
           })}
         </View>
-        <FormField error={errors.shortDescription} label="Short description" onChangeText={(value) => updateDraft('shortDescription', value)} placeholder="Small pack available for quick delivery" value={draft.shortDescription} />
+        <FormField error={errors.shortDescription} label="Short description (optional)" onChangeText={(value) => updateDraft('shortDescription', value)} placeholder="Small pack available for quick delivery" value={draft.shortDescription} />
         <Text style={styles.label}>Does this item have a barcode, NAFDAC number, or SKU?</Text>
         <View style={styles.categoryGrid}>
           {[
@@ -2452,9 +2674,6 @@ export function StoreOwnerDashboardScreen() {
           onPick={() => void pickProductImage()}
         />
         {draftImageError ? <Text style={styles.errorText}>{draftImageError}</Text> : null}
-        <FormField error={errors.pickupAddress} label="Pickup address" onChangeText={(value) => updateDraft('pickupAddress', value)} placeholder="Shop, street, estate, or landmark" value={draft.pickupAddress} />
-        <FormField label="Area" onChangeText={(value) => updateDraft('area', value)} placeholder="Gwarinpa, Wuse 2, Lekki Phase 1" value={draft.area} />
-        <FormField label="Details" multiline onChangeText={(value) => updateDraft('details', value)} placeholder="Pack size, brand, freshness, preparation note, or pickup condition" value={draft.details} />
         <AppButton label="Add product to catalog" loading={isSubmittingItem} onPress={() => void submitItem()} />
       </View>
 
@@ -2498,15 +2717,6 @@ export function StoreOwnerDashboardScreen() {
               {draft.hasBarcode && draft.identifier.trim() ? (
                 <Text style={styles.previewMeta}>Code {draft.identifier.trim()}</Text>
               ) : null}
-              {draft.area.trim() ? <Text style={styles.previewMeta}>{draft.area.trim()}</Text> : null}
-            </View>
-            <View style={styles.previewInfoStack}>
-              <Text style={styles.mutedText}>
-                Pickup: {draft.pickupAddress.trim() || 'Pickup address preview'}
-              </Text>
-              <Text style={styles.mutedText}>
-                Details: {draft.details.trim() || 'Extra product details appear here.'}
-              </Text>
             </View>
           </View>
         </View>
@@ -2991,6 +3201,11 @@ export function StoreOwnerDashboardScreen() {
           <Text style={styles.mutedText}>
             {profileDraft.address.trim() || 'Pickup/business address preview'}
           </Text>
+          <Text style={styles.mutedText}>
+            {profileDraft.openingTime?.trim() || profileDraft.closingTime?.trim()
+              ? `${profileDraft.openingTime?.trim() || 'Opening time'} - ${profileDraft.closingTime?.trim() || 'Closing time'}`
+              : 'Opening and closing time preview'}
+          </Text>
         </View>
       </View>
       <View style={styles.formRow}>
@@ -3010,6 +3225,24 @@ export function StoreOwnerDashboardScreen() {
         </View>
       </View>
       <FormField label="Pickup/business address" onChangeText={(value) => setProfileDraft({ ...profileDraft, address: value })} value={profileDraft.address} />
+      <View style={styles.formRow}>
+        <View style={styles.formColumn}>
+          <FormField
+            label="Opening time"
+            onChangeText={(value) => setProfileDraft({ ...profileDraft, openingTime: value })}
+            placeholder="09:00 AM"
+            value={profileDraft.openingTime ?? ''}
+          />
+        </View>
+        <View style={styles.formColumn}>
+          <FormField
+            label="Closing time"
+            onChangeText={(value) => setProfileDraft({ ...profileDraft, closingTime: value })}
+            placeholder="08:00 PM"
+            value={profileDraft.closingTime ?? ''}
+          />
+        </View>
+      </View>
       <MediaPickerField
         assets={profileDraft.coverImage ? [{ label: assetLabelFromUri(profileDraft.coverImage, 'Cover image', 0), uri: profileDraft.coverImage }] : []}
         buttonLabel="Choose cover photo"
@@ -3748,6 +3981,17 @@ function createStyles(colors: AppColors) {
     uploadButtonText: {
       ...typography.bodyStrong,
       color: colors.primary,
+    },
+    importReviewStack: {
+      gap: spacing.md,
+    },
+    importReviewCard: {
+      gap: spacing.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
     },
     pressed: {
       opacity: 0.88,

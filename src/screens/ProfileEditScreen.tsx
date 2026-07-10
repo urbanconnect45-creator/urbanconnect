@@ -34,6 +34,8 @@ function createProfileForm(
     website: '',
     instagram: '',
     address: savedProfile?.address ?? profile?.address ?? address,
+    openingTime: savedProfile?.openingTime ?? '',
+    closingTime: savedProfile?.closingTime ?? '',
     coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
     galleryImages: '',
     galleryVideos: '',
@@ -201,6 +203,24 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
           placeholder="Enter your complete business address"
           value={profileForm.address}
         />
+        <View style={styles.inlineFieldRow}>
+          <View style={styles.inlineField}>
+            <FormField
+              label="Opening time"
+              onChangeText={(value) => updateProfileField('openingTime', value)}
+              placeholder="09:00 AM"
+              value={profileForm.openingTime ?? ''}
+            />
+          </View>
+          <View style={styles.inlineField}>
+            <FormField
+              label="Closing time"
+              onChangeText={(value) => updateProfileField('closingTime', value)}
+              placeholder="08:00 PM"
+              value={profileForm.closingTime ?? ''}
+            />
+          </View>
+        </View>
         <MediaPickerField
           assets={coverAssets}
           buttonLabel="Add cover photo"
@@ -262,6 +282,15 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       padding: spacing.lg,
       ...shadows.soft,
+    },
+    inlineFieldRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+    },
+    inlineField: {
+      flex: 1,
+      minWidth: 180,
     },
     sectionTitle: {
       ...typography.section,
