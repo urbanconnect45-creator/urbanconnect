@@ -156,6 +156,30 @@ function normalizeSignInIdentifier(value: string) {
     : normalizePhoneNumber(trimmedValue);
 }
 
+function authRoleLabel(role: AppUser['role']) {
+  if (role === 'businessOwner') {
+    return 'store owner';
+  }
+
+  if (role === 'dispatch') {
+    return 'dispatch';
+  }
+
+  return 'customer';
+}
+
+function roleConflictMessage(
+  existingRole: AppUser['role'],
+  requestedRole: AppUser['role'],
+  identifierLabel: 'email' | 'phone number' = 'email',
+) {
+  return `This ${identifierLabel} is registered as a ${authRoleLabel(
+    existingRole,
+  )} account. Use the ${authRoleLabel(existingRole)} login, or use a different ${identifierLabel} for ${authRoleLabel(
+    requestedRole,
+  )}.`;
+}
+
 function migrateStoredUser(user: StoredUser): StoredUser {
   const nameParts =
     typeof user.fullName === 'string' && user.fullName.trim().length > 0
@@ -565,13 +589,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
 
       if (requestedRole) {
-        const roleLabel =
-          requestedRole === 'businessOwner'
-            ? 'store owner'
-            : requestedRole === 'dispatch'
-              ? 'dispatch'
-              : 'customer';
-        throw new Error(`No ${roleLabel} account matched those login details.`);
+        const existingIdentity = storedUsers.find((item) => {
+          const normalizedEmail = item.email.trim().toLowerCase();
+          const normalizedPhone = normalizePhoneNumber(item.phoneNumber);
+
+          return normalizedEmail === normalizedIdentifier || normalizedPhone === normalizedIdentifier;
+        });
+
+        if (existingIdentity && existingIdentity.role !== requestedRole) {
+          throw new Error(
+            roleConflictMessage(
+              existingIdentity.role,
+              requestedRole,
+              normalizedIdentifier.includes('@') ? 'email' : 'phone number',
+            ),
+          );
+        }
+
+        throw new Error(`No ${authRoleLabel(requestedRole)} account matched those login details.`);
       }
 
       throw new Error('Incorrect email, phone number, or password.');
@@ -775,13 +810,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const normalizedEmail = values.email.trim().toLowerCase();
     const normalizedPhone = normalizePhoneNumber(values.phoneNumber);
+    const existingEmailUser = storedUsers.find(
+      (item) => item.email.trim().toLowerCase() === normalizedEmail,
+    );
 
-    if (storedUsers.some((item) => item.email.toLowerCase() === normalizedEmail)) {
-      throw new Error('An account with that email already exists. Please log in instead.');
+    if (existingEmailUser) {
+      throw new Error(roleConflictMessage(existingEmailUser.role, values.role, 'email'));
     }
 
-    if (storedUsers.some((item) => normalizePhoneNumber(item.phoneNumber) === normalizedPhone)) {
-      throw new Error('An account with that phone number already exists. Please log in instead.');
+    const existingPhoneUser = storedUsers.find(
+      (item) => normalizePhoneNumber(item.phoneNumber) === normalizedPhone,
+    );
+
+    if (existingPhoneUser) {
+      throw new Error(roleConflictMessage(existingPhoneUser.role, values.role, 'phone number'));
     }
 
     return undefined;
@@ -1007,16 +1049,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
       throw new Error('Dispatch password must be at least 6 characters.');
     }
 
-    if (storedUsers.some((user) => user.email.trim().toLowerCase() === email)) {
-      throw new Error('A user account with that email already exists.');
+    const existingEmailUser = storedUsers.find(
+      (user) => user.email.trim().toLowerCase() === email,
+    );
+
+    if (existingEmailUser) {
+      throw new Error(roleConflictMessage(existingEmailUser.role, 'dispatch', 'email'));
     }
 
-    if (
-      storedUsers.some(
-        (user) => normalizePhoneNumber(user.phoneNumber) === normalizePhoneNumber(phoneNumber),
-      )
-    ) {
-      throw new Error('A user account with that phone number already exists.');
+    const existingPhoneUser = storedUsers.find(
+      (user) => normalizePhoneNumber(user.phoneNumber) === normalizePhoneNumber(phoneNumber),
+    );
+
+    if (existingPhoneUser) {
+      throw new Error(roleConflictMessage(existingPhoneUser.role, 'dispatch', 'phone number'));
     }
 
     if (isSupabaseConfigured) {

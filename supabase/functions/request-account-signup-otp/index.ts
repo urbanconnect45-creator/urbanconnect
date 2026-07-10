@@ -12,6 +12,12 @@ type RequestPayload = {
   businessCluster?: string;
 };
 
+type ProfileRow = {
+  id: string;
+  email: string;
+  role?: 'resident' | 'businessOwner' | 'dispatch';
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -30,6 +36,26 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 function isValidEmail(value?: string) {
   return Boolean(value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
+}
+
+function roleLabel(role?: ProfileRow['role']) {
+  if (role === 'businessOwner') {
+    return 'store owner';
+  }
+
+  if (role === 'dispatch') {
+    return 'dispatch';
+  }
+
+  return 'customer';
+}
+
+function duplicateAccountMessage(existingRole: ProfileRow['role'], requestedRole: RequestPayload['role']) {
+  return `This email is registered as a ${roleLabel(
+    existingRole,
+  )} account. Use the ${roleLabel(existingRole)} login, or use a different email for ${roleLabel(
+    requestedRole,
+  )}.`;
 }
 
 async function hashCode(email: string, code: string, secret: string) {
@@ -105,14 +131,18 @@ serve(async (request) => {
   };
 
   const profileResponse = await fetch(
-    `${supabaseUrl}/rest/v1/app_users?select=id,email&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(email)}&limit=1`,
     { headers: serviceHeaders },
   );
-  const profileRows = profileResponse.ok ? await profileResponse.json().catch(() => []) : [];
+  const profileRows = profileResponse.ok
+    ? ((await profileResponse.json().catch(() => [])) as ProfileRow[])
+    : [];
 
   if (Array.isArray(profileRows) && profileRows.length > 0) {
+    const existingProfile = profileRows[0];
+
     return jsonResponse(
-      { error: 'This email is already registered. Use a different email address.' },
+      { error: duplicateAccountMessage(existingProfile.role, role) },
       409,
     );
   }
@@ -130,7 +160,10 @@ serve(async (request) => {
 
   if (authUserExists) {
     return jsonResponse(
-      { error: 'This email is already registered. Use a different email address.' },
+      {
+        error:
+          'This email already has a Supabase login but no View2Connect role profile. Use the original portal or contact admin to repair the account.',
+      },
       409,
     );
   }

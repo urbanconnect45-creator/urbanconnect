@@ -935,22 +935,12 @@ async function fetchProfileByEmail(email: string, accessToken?: string) {
   return rows[0] ? profileToAppUser(rows[0]) : undefined;
 }
 
-async function fetchProfileByEmailAndRole(email: string, role: UserRole, accessToken?: string) {
-  const rows = await supabaseRequest<SupabaseProfileRow[]>(
-    `/rest/v1/app_users?select=*&email=eq.${encodeURIComponent(
-      email.trim().toLowerCase(),
-    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
-    { accessToken },
-  );
-
-  return rows[0] ? profileToAppUser(rows[0]) : undefined;
-}
-
-async function fetchProfileByPhoneAndRole(phoneNumber: string, role: UserRole) {
+async function fetchProfileByPhone(phoneNumber: string, accessToken?: string) {
   const rows = await supabaseRequest<SupabaseProfileRow[]>(
     `/rest/v1/app_users?select=*&phone_number=eq.${encodeURIComponent(
       phoneNumber.trim(),
-    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
+    )}&limit=1`,
+    { accessToken },
   );
 
   return rows[0] ? profileToAppUser(rows[0]) : undefined;
@@ -1013,12 +1003,23 @@ async function resolveSupabaseEmail(identifier: string, requiredRole?: UserRole)
     const email = normalizedIdentifier.toLowerCase();
 
     if (requiredRole) {
-      const profile = await fetchProfileByEmailAndRole(email, requiredRole);
+      const profile = await fetchProfileByEmail(email);
 
       if (!profile) {
         throw new SupabaseApiError(
           `No ${roleLabel(requiredRole)} account was found for this email.`,
           404,
+        );
+      }
+
+      if (profile.role !== requiredRole) {
+        throw new SupabaseApiError(
+          `This email is registered as a ${roleLabel(
+            profile.role,
+          )} account. Use the ${roleLabel(profile.role)} login, or use a different email for ${roleLabel(
+            requiredRole,
+          )}.`,
+          403,
         );
       }
     }
@@ -1027,12 +1028,23 @@ async function resolveSupabaseEmail(identifier: string, requiredRole?: UserRole)
   }
 
   if (requiredRole) {
-    const profile = await fetchProfileByPhoneAndRole(normalizedIdentifier, requiredRole);
+    const profile = await fetchProfileByPhone(normalizedIdentifier);
 
     if (!profile) {
       throw new SupabaseApiError(
         `No ${roleLabel(requiredRole)} account was found for this phone number.`,
         404,
+      );
+    }
+
+    if (profile.role !== requiredRole) {
+      throw new SupabaseApiError(
+        `This phone number is registered as a ${roleLabel(
+          profile.role,
+        )} account. Use the ${roleLabel(profile.role)} login, or use a different phone number for ${roleLabel(
+          requiredRole,
+        )}.`,
+        403,
       );
     }
 
