@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
   Alert,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -16,11 +15,9 @@ import { AppButton } from '../components/AppButton';
 import { AuthPageBackground } from '../components/AuthPageBackground';
 import { FormField } from '../components/FormField';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
-import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { estates } from '../data/estates';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
-import { getSupabaseOAuthUrl, isSupabaseConfigured } from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -71,7 +68,6 @@ export function DispatchLoginScreen() {
   const [resetPasswordDraft, setResetPasswordDraft] = useState('');
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
-  const [isOpeningGoogle, setIsOpeningGoogle] = useState(false);
   const [authMode, setAuthMode] = useState<DispatchAuthMode>('login');
   const [signupStep, setSignupStep] = useState<DispatchSignupStep>('details');
   const [signupDraft, setSignupDraft] = useState({
@@ -333,38 +329,6 @@ export function DispatchLoginScreen() {
     }
   };
 
-  const openGoogleAuth = async (mode: DispatchAuthMode) => {
-    if (isUrbanConnectLocalTestMode) {
-      Alert.alert(
-        'Local test mode',
-        'Google sign-in is disabled while Supabase calls are turned off.',
-      );
-      return;
-    }
-
-    if (!isSupabaseConfigured) {
-      Alert.alert('Supabase not configured', 'Add your Supabase URL and publishable key first.');
-      return;
-    }
-
-    try {
-      setIsOpeningGoogle(true);
-      setError(null);
-      setSignupError(null);
-      const oauthMode = mode === 'signup' ? '&oauthMode=signup' : '';
-      await Linking.openURL(
-        getSupabaseOAuthUrl('google', `/auth/callback?oauthRole=dispatch${oauthMode}`),
-      );
-    } catch {
-      Alert.alert(
-        'Google login unavailable',
-        'Enable Google in Supabase Auth, then try again.',
-      );
-    } finally {
-      setIsOpeningGoogle(false);
-    }
-  };
-
   return (
     <AuthPageBackground contentContainerStyle={styles.page}>
       <ScrollView
@@ -373,57 +337,65 @@ export function DispatchLoginScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.shell, isWideLayout && styles.shellWide]}>
-          <View style={[styles.heroPanel, isWideLayout && styles.heroPanelWide]}>
-            <View style={styles.brandRow}>
-              <UrbanConnectLogo inverted />
-              <View style={styles.portalBadge}>
-                <Ionicons color={colors.white} name="car-sport-outline" size={16} />
-                <Text style={styles.portalBadgeText}>Dispatch portal</Text>
-              </View>
-            </View>
-            <View style={styles.heroCopy}>
-              <Text style={styles.heroEyebrow}>Delivery operations</Text>
-              <Text style={styles.heroTitle}>Dispatch Login</Text>
-              <Text style={styles.heroSubtitle}>Access your delivery dashboard.</Text>
-              <Text style={styles.heroBody}>
-                Sign in with the dispatch account approved for pickups, delivery updates, and
-                arrival confirmations.
-              </Text>
-            </View>
-            <View style={styles.heroStats}>
-              {dispatchStats.map((item) => (
-                <View key={item.label} style={styles.heroStatCard}>
-                  <Text style={styles.heroStatValue}>{item.value}</Text>
-                  <Text style={styles.heroStatLabel}>{item.label}</Text>
+          {isWideLayout ? (
+            <View style={[styles.heroPanel, styles.heroPanelWide]}>
+              <View style={styles.brandRow}>
+                <UrbanConnectLogo inverted />
+                <View style={styles.portalBadge}>
+                  <Ionicons color={colors.white} name="car-sport-outline" size={16} />
+                  <Text style={styles.portalBadgeText}>Dispatch portal</Text>
                 </View>
-              ))}
-            </View>
-            <View style={styles.heroList}>
-              <View style={styles.heroListItem}>
-                <Ionicons color={colors.white} name="navigate-outline" size={18} />
-                <Text style={styles.heroListText}>Accept assigned jobs and follow the queue.</Text>
               </View>
-              <View style={styles.heroListItem}>
-                <Ionicons color={colors.white} name="checkmark-done-outline" size={18} />
-                <Text style={styles.heroListText}>Update picked-up and arrived statuses fast.</Text>
+              <View style={styles.heroCopy}>
+                <Text style={styles.heroEyebrow}>Delivery operations</Text>
+                <Text style={styles.heroTitle}>Dispatch Login</Text>
+                <Text style={styles.heroSubtitle}>Access your delivery dashboard.</Text>
+                <Text style={styles.heroBody}>
+                  Sign in with the dispatch account approved for pickups, delivery updates, and
+                  arrival confirmations.
+                </Text>
               </View>
-              <View style={styles.heroListItem}>
-                <Ionicons color={colors.white} name="shield-checkmark-outline" size={18} />
-                <Text style={styles.heroListText}>
-                  Dispatch access stays separate from customer and seller accounts.
+              <View style={styles.heroStats}>
+                {dispatchStats.map((item) => (
+                  <View key={item.label} style={styles.heroStatCard}>
+                    <Text style={styles.heroStatValue}>{item.value}</Text>
+                    <Text style={styles.heroStatLabel}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.heroList}>
+                <View style={styles.heroListItem}>
+                  <Ionicons color={colors.white} name="navigate-outline" size={18} />
+                  <Text style={styles.heroListText}>Accept assigned jobs and follow the queue.</Text>
+                </View>
+                <View style={styles.heroListItem}>
+                  <Ionicons color={colors.white} name="checkmark-done-outline" size={18} />
+                  <Text style={styles.heroListText}>Update picked-up and arrived statuses fast.</Text>
+                </View>
+                <View style={styles.heroListItem}>
+                  <Ionicons color={colors.white} name="shield-checkmark-outline" size={18} />
+                  <Text style={styles.heroListText}>
+                    Dispatch access stays separate from customer and seller accounts.
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.noticeCard}>
+                <Ionicons color={colors.white} name="information-circle-outline" size={18} />
+                <Text style={styles.noticeText}>
+                  Dispatch riders can create an account here, then use Dispatch Login for delivery
+                  work only.
                 </Text>
               </View>
             </View>
-            <View style={styles.noticeCard}>
-              <Ionicons color={colors.white} name="information-circle-outline" size={18} />
-              <Text style={styles.noticeText}>
-                Dispatch riders can create an account here, then use Dispatch Login for delivery
-                work only.
-              </Text>
-            </View>
-          </View>
+          ) : null}
 
-          <View style={[styles.authCard, isWideLayout && styles.authCardWide]}>
+          <View
+            style={[
+              styles.authCard,
+              !isWideLayout && styles.authCardMobile,
+              isWideLayout && styles.authCardWide,
+            ]}
+          >
             {authMode === 'login' ? (
               <>
                 <View style={styles.authHeader}>
@@ -479,27 +451,6 @@ export function DispatchLoginScreen() {
                   onPress={() => void handleLogin()}
                   style={styles.primaryButton}
                 />
-
-                <View style={styles.dividerRow}>
-                  <View style={styles.divider} />
-                  <Text style={styles.dividerText}>or continue with</Text>
-                  <View style={styles.divider} />
-                </View>
-
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => void openGoogleAuth('login')}
-                  style={({ pressed }) => [
-                    styles.googleButton,
-                    pressed && styles.pressed,
-                    isOpeningGoogle && styles.googleButtonDisabled,
-                  ]}
-                >
-                  <Ionicons color={colors.text} name="logo-google" size={20} />
-                  <Text style={styles.googleButtonText}>
-                    {isOpeningGoogle ? 'Opening Google...' : 'Login with Google'}
-                  </Text>
-                </Pressable>
 
                 <Pressable
                   accessibilityRole="button"
@@ -591,31 +542,6 @@ export function DispatchLoginScreen() {
                   }
                   style={styles.primaryButton}
                 />
-
-                {signupStep === 'details' ? (
-                  <>
-                    <View style={styles.dividerRow}>
-                      <View style={styles.divider} />
-                      <Text style={styles.dividerText}>or create with</Text>
-                      <View style={styles.divider} />
-                    </View>
-
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => void openGoogleAuth('signup')}
-                      style={({ pressed }) => [
-                        styles.googleButton,
-                        pressed && styles.pressed,
-                        isOpeningGoogle && styles.googleButtonDisabled,
-                      ]}
-                    >
-                      <Ionicons color={colors.text} name="logo-google" size={20} />
-                      <Text style={styles.googleButtonText}>
-                        {isOpeningGoogle ? 'Opening Google...' : 'Create with Google'}
-                      </Text>
-                    </Pressable>
-                  </>
-                ) : null}
 
                 {signupStep === 'verification' ? (
                   <Pressable
@@ -880,6 +806,9 @@ function createStyles(colors: AppColors) {
       padding: spacing.xxl,
       ...shadows.card,
     },
+    authCardMobile: {
+      padding: spacing.lg,
+    },
     authCardWide: {
       flexShrink: 0,
       width: 470,
@@ -937,40 +866,6 @@ function createStyles(colors: AppColors) {
     },
     primaryButton: {
       width: '100%',
-    },
-    dividerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      marginTop: spacing.xs,
-    },
-    divider: {
-      flex: 1,
-      height: 1,
-      backgroundColor: colors.border,
-    },
-    dividerText: {
-      ...typography.caption,
-      color: colors.textMuted,
-    },
-    googleButton: {
-      minHeight: 54,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.sm,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      paddingHorizontal: spacing.md,
-    },
-    googleButtonDisabled: {
-      opacity: 0.7,
-    },
-    googleButtonText: {
-      ...typography.bodyStrong,
-      color: colors.text,
     },
     helperText: {
       ...typography.caption,

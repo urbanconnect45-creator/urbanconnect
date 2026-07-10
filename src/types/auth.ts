@@ -19,6 +19,7 @@ export type AdminPermission = (typeof adminPermissions)[number];
 
 export type AppUser = {
   id: string;
+  userNumber?: number;
   firstName: string;
   lastName: string;
   fullName: string;

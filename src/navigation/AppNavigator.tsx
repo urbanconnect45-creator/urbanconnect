@@ -501,7 +501,11 @@ export function AppNavigator() {
       return;
     }
 
-    if (user.role === 'dispatch' && mainRoute !== 'DispatchMode') {
+    if (
+      user.role === 'dispatch' &&
+      mainRoute !== 'DispatchMode' &&
+      mainRoute !== 'Settings'
+    ) {
       setMainRoute('DispatchMode');
       return;
     }
@@ -836,6 +840,7 @@ export function AppNavigator() {
           screen === 'Stores' ||
           screen === 'Professions' ||
           screen === 'Food' ||
+          screen === 'DispatchMode' ||
           screen === 'SellerMode' ||
           screen === 'RegisterBusiness' ||
           screen === 'Subscription' ||
@@ -985,6 +990,12 @@ export function AppNavigator() {
   const operaMiniBlockedSecurePage = operaMiniBrowser && secureWebRouteRequested;
   const browsingPublicStore =
     publicStoreWebEntrypoint && !user && !adminUser && !showGuestAuthPage;
+  const loginAnnouncementAudience =
+    user?.role === 'businessOwner'
+      ? 'Store owner'
+      : user?.role === 'dispatch'
+        ? 'Dispatch'
+        : 'Customer';
 
   let content: React.ReactNode;
 
@@ -1470,13 +1481,6 @@ export function AppNavigator() {
                   placement="bottom"
                 />
                 <NavButton
-                  active={mainRoute === 'Account'}
-                  icon={routeMeta.Account.icon}
-                  label={routeMeta.Account.label}
-                  onPress={() => navigation.navigate('Account')}
-                  placement="bottom"
-                />
-                <NavButton
                   active={mainRoute === 'Settings'}
                   icon={routeMeta.Settings.icon}
                   label={routeMeta.Settings.label}
@@ -1542,14 +1546,6 @@ export function AppNavigator() {
                       icon={routeMeta.DispatchMode.icon}
                       label={routeMeta.DispatchMode.label}
                       onPress={() => navigation.navigate('DispatchMode')}
-                      placement="sidebar"
-                    />
-                    <NavButton
-                      active={mainRoute === 'Account'}
-                      compact={compactSidebar}
-                      icon={routeMeta.Account.icon}
-                      label={routeMeta.Account.label}
-                      onPress={() => navigation.navigate('Account')}
                       placement="sidebar"
                     />
                     <NavButton
@@ -2050,7 +2046,7 @@ export function AppNavigator() {
                 <Ionicons color={colors.white} name="megaphone-outline" size={22} />
               </View>
               <View style={styles.topBarCopy}>
-                <Text style={styles.modalEyebrow}>View2Connect notice</Text>
+                <Text style={styles.modalEyebrow}>{loginAnnouncementAudience} notice</Text>
                 <Text style={styles.modalTitle}>
                   {securitySettings.loginAnnouncementTitle}
                 </Text>
@@ -2093,6 +2089,36 @@ export function AppNavigator() {
               contentContainerStyle={styles.menuStack}
               showsVerticalScrollIndicator={false}
             >
+              {isDispatchUser ? (
+                <>
+                  <Pressable
+                    onPress={() => runMenuAction(() => navigation.navigate('DispatchMode'))}
+                    style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                  >
+                    <View style={styles.menuIconShell}>
+                      <Ionicons color={colors.primary} name="bicycle-outline" size={18} />
+                    </View>
+                    <View style={styles.menuCopy}>
+                      <Text style={styles.menuTitle}>Dispatch</Text>
+                      <Text style={styles.menuMeta}>Open delivery jobs and rider alerts.</Text>
+                    </View>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => runMenuAction(() => navigation.navigate('Settings'))}
+                    style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                  >
+                    <View style={styles.menuIconShell}>
+                      <Ionicons color={colors.primary} name="settings-outline" size={18} />
+                    </View>
+                    <View style={styles.menuCopy}>
+                      <Text style={styles.menuTitle}>Settings</Text>
+                      <Text style={styles.menuMeta}>Notification, policy, and agreement settings.</Text>
+                    </View>
+                  </Pressable>
+                </>
+              ) : (
+                <>
               <Pressable
                 onPress={() => runMenuAction(() => navigation.navigate('Dashboard'))}
                 style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
@@ -2172,8 +2198,8 @@ export function AppNavigator() {
                     <Ionicons color={colors.primary} name="sparkles-outline" size={18} />
                   </View>
                   <View style={styles.menuCopy}>
-                    <Text style={styles.menuTitle}>Subscription benefits</Text>
-                    <Text style={styles.menuMeta}>Pay for customer benefits from your account.</Text>
+                    <Text style={styles.menuTitle}>Benefits</Text>
+                    <Text style={styles.menuMeta}>Open your customer benefits page.</Text>
                   </View>
                 </Pressable>
               ) : null}
@@ -2226,6 +2252,8 @@ export function AppNavigator() {
                   ))}
                 </View>
               </View>
+                </>
+              )}
 
             </ScrollView>
 

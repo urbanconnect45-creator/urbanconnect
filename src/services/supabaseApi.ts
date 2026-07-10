@@ -6,6 +6,7 @@ import type {
   Business,
   BusinessMedia,
   DispatchDeliveryJob,
+  DispatchRiderProfile,
   DynamicDepositAccount,
   FlutterwaveBank,
   FlutterwaveCheckoutSession,
@@ -78,6 +79,7 @@ export type SupabaseSession = {
 
 type SupabaseProfileRow = {
   id: string;
+  user_number?: number | string | null;
   first_name: string;
   last_name: string;
   full_name: string;
@@ -428,6 +430,18 @@ type SupabaseDeliveryJobRow = {
   updated_at: string;
 };
 
+type SupabaseRiderProfileRow = {
+  auth_user_id: string;
+  full_name: string;
+  email: string;
+  phone_number: string;
+  vehicle_type?: string | null;
+  plate_number?: string | null;
+  status: DispatchRiderProfile['status'];
+  created_at: string;
+  updated_at: string;
+};
+
 export class SupabaseApiError extends Error {
   status: number;
 
@@ -763,6 +777,9 @@ function profileToAppUser(row: SupabaseProfileRow): AppUser {
 
   return {
     id: row.id,
+    ...(row.user_number !== undefined && row.user_number !== null
+      ? { userNumber: Number(row.user_number) }
+      : {}),
     firstName: row.first_name,
     lastName: row.last_name,
     fullName: row.full_name,
@@ -2985,6 +3002,20 @@ function deliveryJobRowToJob(row: SupabaseDeliveryJobRow): DispatchDeliveryJob {
   };
 }
 
+function riderProfileRowToProfile(row: SupabaseRiderProfileRow): DispatchRiderProfile {
+  return {
+    authUserId: row.auth_user_id,
+    fullName: row.full_name,
+    email: row.email,
+    phoneNumber: row.phone_number,
+    vehicleType: row.vehicle_type ?? null,
+    plateNumber: row.plate_number ?? null,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function groupSupportMessages(messages: SupportMessage[]) {
   return messages.reduce<Record<string, SupportMessage[]>>((accumulator, message) => {
     accumulator[message.conversationId] = [
@@ -3072,6 +3103,15 @@ export async function fetchDispatchDeliveryJobs(accessToken: string) {
   );
 
   return jobs.map(deliveryJobRowToJob);
+}
+
+export async function fetchDispatchRiderProfile(accessToken: string) {
+  const profiles = await supabaseRequest<SupabaseRiderProfileRow[]>(
+    '/rest/v1/rider_profiles?select=*&limit=1',
+    { accessToken },
+  );
+
+  return profiles[0] ? riderProfileRowToProfile(profiles[0]) : null;
 }
 
 export async function acceptDispatchDeliveryJob(accessToken: string, targetJobId: string) {

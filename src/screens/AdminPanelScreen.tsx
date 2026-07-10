@@ -804,6 +804,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
             normalizedSearch.length === 0
               ? true
               : [
+                  user.userNumber,
                   user.fullName,
                   user.email,
                   user.phoneNumber,
@@ -1229,6 +1230,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     users.forEach((user) => {
       if (
         matches([
+          user.userNumber,
           user.id,
           user.fullName,
           user.email,
@@ -1249,7 +1251,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
         results.push({
           id: `user-${user.id}`,
           title: user.fullName,
-          meta: `${user.role} - ${user.email} - UID ${user.id}`,
+          meta: `${user.role} - ${user.email} - No. ${
+            user.userNumber ?? 'pending'
+          } - UID ${user.id}`,
           section: userSection,
         });
       }
@@ -1444,8 +1448,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const exportUsers = () => {
     downloadCsv(
       'urbanconnect-users-report.csv',
-      ['name', 'email', 'phone', 'role', 'status', 'estate', 'createdAt'],
+      ['userNumber', 'name', 'email', 'phone', 'role', 'status', 'estate', 'createdAt'],
       filteredUsers.map((user) => ({
+        userNumber: user.userNumber ?? '',
         name: user.fullName,
         email: user.email,
         phone: user.phoneNumber,
@@ -3683,7 +3688,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         <Text style={styles.recordTitle}>Create dispatch account</Text>
                         <Text style={styles.recordMeta}>
                           Dispatch access is private. Create accounts here, then riders use
-                          Dispatch Login with email/password or approved Google.
+                          Dispatch Login with email/password only.
                         </Text>
                       </View>
                       <View style={styles.recordBadge}>
@@ -3799,7 +3804,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         <View style={styles.recordTopRow}>
                           <View style={styles.recordCopy}>
                             <Text style={styles.recordTitle}>{user.fullName}</Text>
-                            <Text style={styles.recordMeta}>{user.email}</Text>
+                            <Text style={styles.recordMeta}>
+                              No. {user.userNumber ?? 'pending'} - {user.email}
+                            </Text>
                           </View>
                           <View style={styles.recordBadge}>
                             <Text style={styles.recordBadgeText}>{userRoleLabel(user.role)}</Text>
@@ -3825,7 +3832,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         </View>
                         <Text style={styles.recordMeta}>{user.phoneNumber}</Text>
                         <Text style={styles.recordMeta}>
-                          UID {user.id} - {estateLookup[user.estateId] ?? user.estateId} - Joined{' '}
+                          Auth UID {user.id} - {estateLookup[user.estateId] ?? user.estateId} - Joined{' '}
                           {formatDateTime(user.createdAt)}
                         </Text>
                         {user.role === 'businessOwner' ? (

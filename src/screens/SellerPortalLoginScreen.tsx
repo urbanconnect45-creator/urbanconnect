@@ -5,7 +5,6 @@ import { Alert, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensi
 import { AppButton } from '../components/AppButton';
 import { AuthPageBackground } from '../components/AuthPageBackground';
 import { FormField } from '../components/FormField';
-import { SocialAuthButtons } from '../components/SocialAuthButtons';
 import { useAuth } from '../hooks/useAuth';
 import type { AppColors } from '../theme';
 import { shadows, spacing, typography } from '../theme';
@@ -131,7 +130,6 @@ export function SellerPortalLoginScreen() {
           />
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           <AppButton label="Open dashboard" loading={isLoading} onPress={() => void handleLogin()} />
-          <SocialAuthButtons webRedirectPath="/seller-portal/?oauthRole=businessOwner" />
         </View>
       </View>
     </AuthPageBackground>

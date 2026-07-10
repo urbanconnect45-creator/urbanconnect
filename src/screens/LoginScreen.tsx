@@ -17,7 +17,6 @@ import { AuthPageBackground } from '../components/AuthPageBackground';
 import { AuthVisualPanel } from '../components/AuthVisualPanel';
 import { FormField } from '../components/FormField';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
-import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import {
   privacyPolicySections,
   privacyPolicyTitle,
@@ -307,15 +306,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
           title={copy.visualTitle}
           wide
         />
-      ) : (
-        <View style={styles.mobileBrand}>
-          <UrbanConnectLogo />
-          <View style={styles.mobileCacBadge}>
-            <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
-            <Text style={styles.mobileCacText}>CAC registered</Text>
-          </View>
-        </View>
-      )}
+      ) : null}
 
       <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
         <View
@@ -456,9 +447,11 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
               variant="secondary"
             />
           ) : null}
-          <Text style={styles.copyright}>
-            Copyright © 2026 View2Connect. CAC registered. All rights reserved.
-          </Text>
+          {isWideWeb ? (
+            <Text style={styles.copyright}>
+              Copyright © 2026 View2Connect. CAC registered. All rights reserved.
+            </Text>
+          ) : null}
         </View>
       </View>
 

@@ -509,12 +509,27 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [setSupabaseSession, setUser]);
 
   const notifyUserLogin = (loggedInUser: AppUser) => {
+    const roleNotificationCopy =
+      loggedInUser.role === 'businessOwner'
+        ? {
+            title: 'Store owner dashboard opened',
+            body: 'Welcome back to your seller portal. Review orders, catalog updates, payouts, and store notifications.',
+          }
+        : loggedInUser.role === 'dispatch'
+          ? {
+              title: 'Dispatch dashboard opened',
+              body: 'Welcome back to dispatch. Complete KYC if required, then review delivery jobs and rider alerts.',
+            }
+          : {
+              title: 'Customer account opened',
+              body: 'Welcome back to View2Connect. You can shop products, food, stores, and customer benefits.',
+            };
     const title = securitySettings.loginAnnouncementEnabled
-      ? securitySettings.loginAnnouncementTitle
-      : 'Welcome back to View2Connect';
+      ? `${authRoleLabel(loggedInUser.role)} notice: ${securitySettings.loginAnnouncementTitle}`
+      : roleNotificationCopy.title;
     const body = securitySettings.loginAnnouncementEnabled
       ? securitySettings.loginAnnouncementBody
-      : 'Welcome back to View2Connect. You can shop products, food, and local services.';
+      : roleNotificationCopy.body;
 
     appendNotification({
       userId: loggedInUser.id,

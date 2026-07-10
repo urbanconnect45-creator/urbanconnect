@@ -396,6 +396,18 @@ export type DispatchDeliveryJob = {
   updatedAt: string;
 };
 
+export type DispatchRiderProfile = {
+  authUserId: string;
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  vehicleType?: string | null;
+  plateNumber?: string | null;
+  status: 'pending' | 'active' | 'suspended';
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type OrderProgressSettings = {
   code: string;
   updatedAt: string;

@@ -16,7 +16,6 @@ import { AppButton } from '../components/AppButton';
 import { AuthPageBackground } from '../components/AuthPageBackground';
 import { AuthVisualPanel } from '../components/AuthVisualPanel';
 import { FormField } from '../components/FormField';
-import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import { estates } from '../data/estates';
 import {
   privacyPolicySections,
@@ -237,15 +236,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
             title="One quick verification, then you are connected."
             wide
           />
-        ) : (
-          <View style={styles.mobileBrand}>
-            <UrbanConnectLogo />
-            <View style={styles.mobileCacBadge}>
-              <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
-              <Text style={styles.mobileCacText}>CAC registered</Text>
-            </View>
-          </View>
-        )}
+        ) : null}
 
         <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
           <View
@@ -316,9 +307,11 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
                 variant="secondary"
               />
             ) : null}
-            <Text style={styles.copyright}>
-              Copyright © 2026 View2Connect. CAC registered. All rights reserved.
-            </Text>
+            {isWideWeb ? (
+              <Text style={styles.copyright}>
+                Copyright © 2026 View2Connect. CAC registered. All rights reserved.
+              </Text>
+            ) : null}
           </View>
         </View>
       </AuthPageBackground>
@@ -335,15 +328,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
           title="Join the marketplace built for everyday local shopping."
           wide
         />
-      ) : (
-        <View style={styles.mobileBrand}>
-          <UrbanConnectLogo />
-          <View style={styles.mobileCacBadge}>
-            <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
-            <Text style={styles.mobileCacText}>CAC registered</Text>
-          </View>
-        </View>
-      )}
+      ) : null}
 
       <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
         <View
@@ -479,9 +464,11 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               variant="secondary"
             />
           ) : null}
-          <Text style={styles.copyright}>
-            Copyright © 2026 View2Connect. CAC registered. All rights reserved.
-          </Text>
+          {isWideWeb ? (
+            <Text style={styles.copyright}>
+              Copyright © 2026 View2Connect. CAC registered. All rights reserved.
+            </Text>
+          ) : null}
         </View>
       </View>
 

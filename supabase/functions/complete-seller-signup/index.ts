@@ -21,6 +21,7 @@ type CompletePayload = {
 type AuthUser = {
   id: string;
   email?: string;
+  phone?: string;
 };
 
 type AppUserRow = {
@@ -70,6 +71,30 @@ function scopedAuthEmail(email: string, role: 'businessOwner') {
   const safeDomain = domainPart.replace(/[^a-z0-9.-]+/gi, '-').slice(0, 120) || 'view2connect.local';
 
   return `${safeLocal}+v2c-${role}@${safeDomain}`.toLowerCase();
+}
+
+function toSupabasePhone(value: string) {
+  const trimmedValue = value.trim();
+
+  if (/^\+[1-9]\d{7,14}$/.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  const digits = trimmedValue.replace(/\D/g, '');
+
+  if (/^0\d{10}$/.test(digits)) {
+    return `+234${digits.slice(1)}`;
+  }
+
+  if (/^234\d{10}$/.test(digits)) {
+    return `+${digits}`;
+  }
+
+  if (/^\d{10}$/.test(digits)) {
+    return `+234${digits}`;
+  }
+
+  return null;
 }
 
 async function hashCode(email: string, code: string, secret: string) {
@@ -203,6 +228,10 @@ serve(async (request) => {
   const roleAuthUserExists = usersPayload.users?.some(
     (user) => user.email?.trim().toLowerCase() === authEmail,
   );
+  const supabasePhone = toSupabasePhone(phone);
+  const authPhoneExists = supabasePhone
+    ? usersPayload.users?.some((user) => user.phone === supabasePhone)
+    : false;
   const existingProfileResponse = await fetch(
     `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&email=eq.${encodeURIComponent(
       email,
@@ -261,6 +290,9 @@ serve(async (request) => {
     headers: serviceHeaders,
     body: JSON.stringify({
       email: authEmail,
+      ...(supabasePhone && !authPhoneExists
+        ? { phone: supabasePhone, phone_confirm: true }
+        : {}),
       password,
       email_confirm: true,
       user_metadata: userMetadata,

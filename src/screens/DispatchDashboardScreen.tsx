@@ -8,10 +8,11 @@ import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import {
   acceptDispatchDeliveryJob,
   fetchDispatchDeliveryJobs,
+  fetchDispatchRiderProfile,
   markDispatchDeliveryArrived,
   markDispatchDeliveryPickedUp,
 } from '../services/supabaseApi';
-import type { DispatchDeliveryJob } from '../types/business';
+import type { DispatchDeliveryJob, DispatchRiderProfile } from '../types/business';
 import type { AppColors } from '../theme';
 import { radii, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -46,6 +47,7 @@ export function DispatchDashboardScreen() {
     (notification) => !notification.readAt,
   ).length;
   const [jobs, setJobs] = useState<DispatchDeliveryJob[]>([]);
+  const [riderProfile, setRiderProfile] = useState<DispatchRiderProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionJobId, setActionJobId] = useState<string | null>(null);
@@ -53,6 +55,7 @@ export function DispatchDashboardScreen() {
   const loadJobs = async () => {
     if (!supabaseAccessToken) {
       setJobs([]);
+      setRiderProfile(null);
       setError('Sign in again to load the dispatch queue.');
       return;
     }
@@ -60,8 +63,12 @@ export function DispatchDashboardScreen() {
     try {
       setIsLoading(true);
       setError(null);
-      const nextJobs = await fetchDispatchDeliveryJobs(supabaseAccessToken);
+      const [nextJobs, nextRiderProfile] = await Promise.all([
+        fetchDispatchDeliveryJobs(supabaseAccessToken),
+        fetchDispatchRiderProfile(supabaseAccessToken).catch(() => null),
+      ]);
       setJobs(nextJobs);
+      setRiderProfile(nextRiderProfile);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load the dispatch queue.');
     } finally {
@@ -79,6 +86,14 @@ export function DispatchDashboardScreen() {
   ) => {
     if (!supabaseAccessToken) {
       setError('Sign in again to update delivery jobs.');
+      return;
+    }
+
+    if (action === 'accept' && riderProfile?.status !== 'active') {
+      const message =
+        'Finish dispatch KYC and wait for admin activation before accepting delivery jobs.';
+      setError(message);
+      Alert.alert('Dispatch KYC required', message);
       return;
     }
 
@@ -100,7 +115,13 @@ export function DispatchDashboardScreen() {
       await loadJobs();
       Alert.alert('Delivery updated', `${job.sellerName} was moved to ${nextStatus.toLowerCase()}.`);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : 'Unable to update the job.');
+      const message =
+        actionError instanceof Error ? actionError.message : 'Unable to update the job.';
+      setError(
+        /active rider account required/i.test(message)
+          ? 'Finish dispatch KYC and wait for admin activation before accepting delivery jobs.'
+          : message,
+      );
     } finally {
       setActionJobId(null);
     }
@@ -109,6 +130,9 @@ export function DispatchDashboardScreen() {
   if (!user) {
     return null;
   }
+
+  const riderReady = riderProfile?.status === 'active';
+  const riderStatusLabel = riderProfile?.status ?? 'pending';
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
@@ -130,6 +154,36 @@ export function DispatchDashboardScreen() {
       <View style={styles.toolbar}>
         <AppButton label={isLoading ? 'Refreshing...' : 'Refresh queue'} loading={isLoading} onPress={() => void loadJobs()} />
         <AppButton label="Sign out" onPress={signOut} variant="ghost" />
+      </View>
+
+      <View style={[styles.readinessCard, riderReady && styles.readinessCardReady]}>
+        <View
+          style={[
+            styles.readinessIcon,
+            riderReady ? styles.readinessIconReady : styles.readinessIconPending,
+          ]}
+        >
+          <Ionicons
+            color={riderReady ? colors.success : colors.warning}
+            name={riderReady ? 'checkmark-circle-outline' : 'shield-checkmark-outline'}
+            size={22}
+          />
+        </View>
+        <View style={styles.cardTitleCopy}>
+          <Text style={styles.cardTitle}>
+            {riderReady ? 'Ready for delivery jobs' : 'Finish dispatch KYC'}
+          </Text>
+          <Text style={styles.cardBody}>
+            {riderReady
+              ? 'Your rider profile is active. You can accept available jobs and update delivery progress.'
+              : 'Complete rider KYC, vehicle details, and admin activation before accepting rides.'}
+          </Text>
+          <Text style={styles.cardMeta}>
+            Status: {riderStatusLabel}
+            {riderProfile?.vehicleType ? ` - Vehicle: ${riderProfile.vehicleType}` : ''}
+            {riderProfile?.plateNumber ? ` - Plate: ${riderProfile.plateNumber}` : ''}
+          </Text>
+        </View>
       </View>
 
       {error ? (
@@ -217,6 +271,7 @@ export function DispatchDashboardScreen() {
               <View style={styles.actionRow}>
                 {job.status === 'available' ? (
                   <AppButton
+                    disabled={!riderReady}
                     label={actionJobId === job.id ? 'Accepting...' : 'Accept job'}
                     loading={actionJobId === job.id}
                     onPress={() => void runJobAction(job, 'accept')}
@@ -316,6 +371,36 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
+    },
+    readinessCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.md,
+      borderRadius: radii.lg,
+      backgroundColor: '#FFF8EA',
+      borderWidth: 1,
+      borderColor: colors.warning,
+      padding: spacing.lg,
+    },
+    readinessCardReady: {
+      backgroundColor: '#EDFDF8',
+      borderColor: colors.success,
+    },
+    readinessIcon: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      borderWidth: 1,
+    },
+    readinessIconPending: {
+      backgroundColor: '#FFF3D6',
+      borderColor: colors.warning,
+    },
+    readinessIconReady: {
+      backgroundColor: '#E1FAF1',
+      borderColor: colors.success,
     },
     errorBox: {
       flexDirection: 'row',
