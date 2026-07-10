@@ -45,6 +45,14 @@
       "destination": "/app/index.html"
     },
     {
+      "source": "/dispatch-login",
+      "destination": "/app/index.html"
+    },
+    {
+      "source": "/dispatch-login/(.*)",
+      "destination": "/app/index.html"
+    },
+    {
       "source": "/seller-portal",
       "destination": "/seller-portal/index.html"
     },

@@ -353,7 +353,7 @@ export function DispatchLoginScreen() {
       setSignupError(null);
       const oauthMode = mode === 'signup' ? '&oauthMode=signup' : '';
       await Linking.openURL(
-        getSupabaseOAuthUrl('google', `/dispatch-login/?oauthRole=dispatch${oauthMode}`),
+        getSupabaseOAuthUrl('google', `/auth/callback?oauthRole=dispatch${oauthMode}`),
       );
     } catch {
       Alert.alert(
