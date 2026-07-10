@@ -4,6 +4,7 @@ import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
 import { useAuth } from '../hooks/useAuth';
+import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import {
   acceptDispatchDeliveryJob,
   fetchDispatchDeliveryJobs,
@@ -39,6 +40,11 @@ export function DispatchDashboardScreen() {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const { signOut, supabaseAccessToken, user } = useAuth();
+  const { getNotificationsForUser, markNotificationsRead } = useBusinessDirectory();
+  const dispatchNotifications = getNotificationsForUser(user);
+  const unreadDispatchNotificationCount = dispatchNotifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
   const [jobs, setJobs] = useState<DispatchDeliveryJob[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +138,44 @@ export function DispatchDashboardScreen() {
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : null}
+
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleCopy}>
+            <Text style={styles.cardTitle}>Dispatch notifications</Text>
+            <Text style={styles.cardMeta}>
+              {unreadDispatchNotificationCount > 0
+                ? `${unreadDispatchNotificationCount} unread alert${unreadDispatchNotificationCount > 1 ? 's' : ''}`
+                : 'Delivery alerts and job updates appear here.'}
+            </Text>
+          </View>
+          {dispatchNotifications.length > 0 ? (
+            <AppButton
+              label="Mark read"
+              onPress={() => markNotificationsRead(user.id)}
+              variant="ghost"
+            />
+          ) : null}
+        </View>
+        {dispatchNotifications.length > 0 ? (
+          dispatchNotifications.slice(0, 3).map((notification) => (
+            <View key={notification.id} style={styles.notificationItem}>
+              <View style={styles.cardTitleCopy}>
+                <Text style={styles.cardTitle}>{notification.title}</Text>
+                <Text style={styles.cardBody}>{notification.body}</Text>
+                <Text style={styles.cardMeta}>{formatDateTime(notification.createdAt)}</Text>
+              </View>
+              {!notification.readAt ? (
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusText}>New</Text>
+                </View>
+              ) : null}
+            </View>
+          ))
+        ) : (
+          <Text style={styles.body}>No dispatch notifications yet.</Text>
+        )}
+      </View>
 
       <View style={styles.list}>
         {jobs.length > 0 ? (
@@ -366,6 +410,15 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
+    },
+    notificationItem: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: spacing.md,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
     },
     emptyState: {
       alignItems: 'flex-start',

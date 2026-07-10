@@ -16,7 +16,7 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Business, OwnerBusinessProfile } from '../types/business';
-import { isPublicBusiness } from '../utils/businessState';
+import { isPublicBusiness, isSubscriptionActive } from '../utils/businessState';
 
 const fallbackStoreImage =
   'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?auto=format&fit=crop&w=700&q=82';
@@ -71,6 +71,33 @@ function buildStoreGroups(
       ...(business.ownerUserId ? { ownerUserId: business.ownerUserId } : {}),
     });
   });
+
+  profiles
+    .filter(
+      (profile) =>
+        Boolean(profile.riverParkVerified) &&
+        isSubscriptionActive(profile.subscriptionStatus, profile.subscriptionNextBillingAt),
+    )
+    .forEach((profile) => {
+      const key =
+        profile.ownerUserId ||
+        profile.accountEmail.trim().toLowerCase() ||
+        profile.ownerName.trim().toLowerCase();
+
+      if (groups.has(key)) {
+        return;
+      }
+
+      groups.set(key, {
+        id: key,
+        name: profile.ownerName || profile.accountName,
+        address: profile.address || 'Digital store',
+        imageUrl: profile.coverImage || fallbackStoreImage,
+        listings: [],
+        categories: ['Digital store'],
+        ownerUserId: profile.ownerUserId,
+      });
+    });
 
   return [...groups.values()].sort(
     (left, right) => right.listings.length - left.listings.length || left.name.localeCompare(right.name),

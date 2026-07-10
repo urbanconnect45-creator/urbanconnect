@@ -303,6 +303,73 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
             </Text>
           </View>
         </Pressable>
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: securityPreference.notificationsEnabled }}
+          onPress={() =>
+            updateSecurityPreference({
+              notificationsEnabled: !securityPreference.notificationsEnabled,
+            })
+          }
+          style={({ pressed }) => [styles.settingsRow, pressed && styles.rowPressed]}
+        >
+          <View style={styles.iconShell}>
+            <Ionicons color={colors.primary} name="notifications-outline" size={20} />
+          </View>
+          <View style={styles.copy}>
+            <Text style={styles.rowTitle}>Notifications</Text>
+            <Text style={styles.rowMeta}>Control in-app alert popups and sounds for this account.</Text>
+          </View>
+          <View
+            style={[
+              styles.statusPill,
+              securityPreference.notificationsEnabled && styles.statusPillActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusPillText,
+                securityPreference.notificationsEnabled && styles.statusPillTextActive,
+              ]}
+            >
+              {securityPreference.notificationsEnabled ? 'On' : 'Off'}
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: securityPreference.orderNotificationsEnabled }}
+          onPress={() =>
+            updateSecurityPreference({
+              orderNotificationsEnabled: !securityPreference.orderNotificationsEnabled,
+            })
+          }
+          style={({ pressed }) => [styles.settingsRow, pressed && styles.rowPressed]}
+        >
+          <View style={styles.iconShell}>
+            <Ionicons color={colors.primary} name="receipt-outline" size={20} />
+          </View>
+          <View style={styles.copy}>
+            <Text style={styles.rowTitle}>Order alerts</Text>
+            <Text style={styles.rowMeta}>Control popups for order and delivery notifications.</Text>
+          </View>
+          <View
+            style={[
+              styles.statusPill,
+              securityPreference.orderNotificationsEnabled && styles.statusPillActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusPillText,
+                securityPreference.orderNotificationsEnabled && styles.statusPillTextActive,
+              ]}
+            >
+              {securityPreference.orderNotificationsEnabled ? 'On' : 'Off'}
+            </Text>
+          </View>
+        </Pressable>
 
         {user ? (
           <Pressable

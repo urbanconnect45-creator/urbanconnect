@@ -92,6 +92,13 @@ serve(async (request) => {
   const businessName = payload.businessName?.trim() || '';
   const businessCluster = payload.businessCluster?.trim() || '';
 
+  if (role === 'businessOwner') {
+    return jsonResponse(
+      { error: 'Use the seller registration page for store owner account creation.' },
+      400,
+    );
+  }
+
   if (
     !isValidEmail(email) ||
     !/^\d{8}$/.test(code) ||
@@ -99,17 +106,9 @@ serve(async (request) => {
     !firstName ||
     !lastName ||
     !phoneNumber ||
-    (role !== 'resident' && role !== 'dispatch') ||
-    (role === 'dispatch' && !businessCluster && !estateId)
+    (role !== 'resident' && role !== 'dispatch')
   ) {
     return jsonResponse({ error: 'Complete all signup fields and enter the 8-digit code.' }, 400);
-  }
-
-  if (role === 'businessOwner') {
-    return jsonResponse(
-      { error: 'Use the seller registration page for store owner account creation.' },
-      400,
-    );
   }
 
   const serviceHeaders = {
@@ -231,9 +230,9 @@ serve(async (request) => {
     password_hash: 'supabase-auth-managed',
     role,
     estate_id: estateId,
-    business_name: role === 'dispatch' ? null : businessName || null,
+    business_name: businessName || null,
     business_cluster: businessCluster || null,
-    river_park_verified: role === 'resident',
+    river_park_verified: role === 'resident' || role === 'dispatch',
     status: 'active',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

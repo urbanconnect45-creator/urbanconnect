@@ -7,6 +7,7 @@ export type MainTabParamList = {
   SellerMode: undefined;
   RegisterBusiness: undefined;
   Subscription: undefined;
+  CustomerBenefits: undefined;
   Chats: undefined;
   Account: undefined;
   ProfileEdit: undefined;

@@ -413,13 +413,37 @@ enabled = true
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
-[functions.verify-seller-bank-account]
+[functions.flutterwave-banks]
 enabled = true
 verify_jwt = false
-import_map = "./functions/verify-seller-bank-account/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/flutterwave-banks/index.ts"
+
+[functions.verify-seller-payout-account]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/verify-seller-payout-account/index.ts"
+
+[functions.request-account-signup-otp]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/request-account-signup-otp/index.ts"
+
+[functions.complete-account-signup]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/complete-account-signup/index.ts"
+
+[functions.admin-create-dispatch-account]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/admin-create-dispatch-account/index.ts"
+
+[functions.verify-seller-bank-account]
+enabled = true
+verify_jwt = true
 entrypoint = "./functions/verify-seller-bank-account/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/verify-seller-bank-account/*.html" ]
+
+[functions.verify-business-cac]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/verify-business-cac/index.ts"

@@ -103,6 +103,14 @@ function createListingEditForm(business: Business): ListingEditForm {
   };
 }
 
+function planBenefitsForCycle(cycle: string) {
+  if (cycle === 'weekly') {
+    return ['Short listing visibility', 'Good for testing products', 'Customer-care listing review'];
+  }
+
+  return ['Steady marketplace visibility', 'Better for active sellers', 'Customer-care listing review'];
+}
+
 export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
   const { signOut, user } = useAuth();
   const {
@@ -118,6 +126,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     getOrdersForUser,
     getWithdrawalsForOwner,
     isRiverParkVerifiedForUser,
+    paymentPlans,
     startAddFundsFlutterwaveCheckout,
     updateBusinessListing,
   } = useBusinessDirectory();
@@ -790,6 +799,47 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           </>
         )}
       </View>
+
+      {user.role === 'resident' ? (
+        <View style={styles.card}>
+          <View style={styles.subscriptionHeader}>
+            <View style={styles.subscriptionIcon}>
+              <Ionicons color={colors.white} name="card-outline" size={22} />
+            </View>
+            <View style={styles.itemCopy}>
+              <Text style={styles.sectionTitle}>Customer subscription benefits</Text>
+              <Text style={styles.bodyText}>
+                Pay for customer benefits from your View2Connect account balance. Admin controls
+                the plan names, prices, and benefit text.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.planChoiceGrid}>
+            {paymentPlans.map((plan) => (
+              <View key={plan.cycle} style={styles.planChoice}>
+                <Text style={styles.planChoiceTitle}>{plan.title}</Text>
+                <Text style={styles.planChoiceAmount}>
+                  {formatCurrency(plan.amount)} / {plan.cycle}
+                </Text>
+                <Text style={styles.bodyText}>{plan.description}</Text>
+                <View style={styles.planBenefitList}>
+                  {planBenefitsForCycle(plan.cycle).map((benefit) => (
+                    <View key={benefit} style={styles.planBenefitItem}>
+                      <Ionicons color={colors.primary} name="checkmark-circle-outline" size={16} />
+                      <Text style={styles.planChoiceAmount}>{benefit}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+          <AppButton
+            label="Open benefits"
+            onPress={() => navigation.navigate('CustomerBenefits')}
+            variant="secondary"
+          />
+        </View>
+      ) : null}
 
       {isBusinessOwner ? (
         <View style={styles.card}>
@@ -1754,6 +1804,15 @@ function createStyles(colors: AppColors) {
     },
     planChoiceTitleActive: {
       color: colors.white,
+    },
+    planBenefitList: {
+      gap: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    planBenefitItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
     },
     sectionTitle: {
       ...typography.section,

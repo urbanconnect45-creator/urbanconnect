@@ -29,6 +29,7 @@ import { BusinessDetailsScreen } from '../screens/BusinessDetailsScreen';
 import { CatalogAdminScreen } from '../screens/CatalogAdminScreen';
 import { CartScreen } from '../screens/CartScreen';
 import { ChatsScreen } from '../screens/ChatsScreen';
+import { CustomerBenefitsScreen } from '../screens/CustomerBenefitsScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { DispatchDashboardScreen } from '../screens/DispatchDashboardScreen';
 import { DispatchLoginScreen } from '../screens/DispatchLoginScreen';
@@ -150,6 +151,12 @@ const routeMeta: Record<
     label: 'Pay',
     title: 'Subscription',
     subtitle: 'Manage business subscription payment and listing visibility.',
+  },
+  CustomerBenefits: {
+    icon: 'sparkles-outline',
+    label: 'Benefits',
+    title: 'Customer benefits',
+    subtitle: 'Manage customer subscription benefits and account balance payment.',
   },
   Chats: {
     icon: 'headset-outline',
@@ -282,6 +289,23 @@ function isSellerWebEntrypoint() {
   return pathname.replace(/\/+$/, '') === '/seller-portal';
 }
 
+function isDispatchWebEntrypoint() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const location =
+    (globalThis as { location?: { pathname?: string; search?: string } }).location ?? {};
+  const pathname = location.pathname?.toLowerCase() ?? '';
+  const normalizedPathname = pathname.replace(/\/+$/, '');
+
+  if (normalizedPathname === '/dispatch-login') {
+    return true;
+  }
+
+  return new URLSearchParams(location.search ?? '').get('oauthRole') === 'dispatch';
+}
+
 function isPublicStoreWebEntrypoint() {
   if (Platform.OS !== 'web') {
     return false;
@@ -292,6 +316,17 @@ function isPublicStoreWebEntrypoint() {
     '';
 
   return pathname.replace(/\/+$/, '') === '';
+}
+
+function isOperaMiniWebBrowser() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const userAgent =
+    (globalThis as { navigator?: { userAgent?: string } }).navigator?.userAgent ?? '';
+
+  return /opera mini|opr\/mini|opios/i.test(userAgent);
 }
 
 export function AppNavigator() {
@@ -318,9 +353,11 @@ export function AppNavigator() {
   const adminWebEntrypoint = useMemo(() => isAdminWebEntrypoint(), []);
   const catalogAdminWebEntrypoint = useMemo(() => isCatalogAdminWebEntrypoint(), []);
   const sellerWebEntrypoint = useMemo(() => isSellerWebEntrypoint(), []);
+  const dispatchWebEntrypoint = useMemo(() => isDispatchWebEntrypoint(), []);
   const publicStoreWebEntrypoint = useMemo(() => isPublicStoreWebEntrypoint(), []);
+  const operaMiniBrowser = useMemo(() => isOperaMiniWebBrowser(), []);
   const [authRoute, setAuthRoute] = useState<AuthRoute>(() =>
-    adminWebEntrypoint ? 'AdminLogin' : 'Login',
+    adminWebEntrypoint ? 'AdminLogin' : dispatchWebEntrypoint ? 'DispatchLogin' : 'Login',
   );
   const [mainRoute, setMainRoute] = useState<MainRoute>('Dashboard');
   const [businessDetailsId, setBusinessDetailsId] = useState<string | null>(null);
@@ -431,7 +468,9 @@ export function AppNavigator() {
 
   useEffect(() => {
     if (!user) {
-      setAuthRoute(adminWebEntrypoint ? 'AdminLogin' : 'Login');
+      setAuthRoute(
+        adminWebEntrypoint ? 'AdminLogin' : dispatchWebEntrypoint ? 'DispatchLogin' : 'Login',
+      );
 
       if (!publicStoreWebEntrypoint) {
         setMainRoute('Dashboard');
@@ -474,7 +513,7 @@ export function AppNavigator() {
     ) {
       setMainRoute('Dashboard');
     }
-  }, [adminWebEntrypoint, mainRoute, publicStoreWebEntrypoint, user]);
+  }, [adminWebEntrypoint, dispatchWebEntrypoint, mainRoute, publicStoreWebEntrypoint, user]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || !publicStoreWebEntrypoint || !user) {
@@ -933,6 +972,17 @@ export function AppNavigator() {
   const sellerToolsBlockedOnMobileWeb = Platform.OS === 'web' && width < 900;
   const adminWebBlockedOnMobile =
     adminWebEntrypoint && !catalogAdminWebEntrypoint && width < 900;
+  const secureWebRouteRequested =
+    adminWebEntrypoint ||
+    sellerWebEntrypoint ||
+    catalogAdminWebEntrypoint ||
+    authRoute === 'DispatchLogin' ||
+    mainRoute === 'DispatchMode' ||
+    mainRoute === 'SellerMode' ||
+    mainRoute === 'Subscription' ||
+    isWithdrawalRoute ||
+    isTransactionsRoute;
+  const operaMiniBlockedSecurePage = operaMiniBrowser && secureWebRouteRequested;
   const browsingPublicStore =
     publicStoreWebEntrypoint && !user && !adminUser && !showGuestAuthPage;
 
@@ -943,7 +993,21 @@ export function AppNavigator() {
     setAuthRoute(adminWebEntrypoint ? 'AdminLogin' : 'Login');
   };
 
-  if (adminWebBlockedOnMobile) {
+  if (operaMiniBlockedSecurePage) {
+    content = (
+      <View style={styles.adminMobileBlocked}>
+        <UrbanConnectLogo />
+        <View style={styles.adminMobileBlockedCard}>
+          <Ionicons color={colors.primary} name="alert-circle-outline" size={34} />
+          <Text style={styles.adminMobileBlockedTitle}>Unsupported browser for secure pages</Text>
+          <Text style={styles.adminMobileBlockedText}>
+            Opera Mini can block secure auth, admin, seller, dispatch, and payment features.
+            Please use Chrome, Safari, Edge, Firefox, or the full Opera Browser.
+          </Text>
+        </View>
+      </View>
+    );
+  } else if (adminWebBlockedOnMobile) {
     content = (
       <View style={styles.adminMobileBlocked}>
         <UrbanConnectLogo />
@@ -1064,6 +1128,8 @@ export function AppNavigator() {
     content = <ChatsScreen navigation={navigation} />;
   } else if (mainRoute === 'Subscription' && user.role === 'businessOwner') {
     content = <SubscriptionScreen navigation={navigation} />;
+  } else if (mainRoute === 'CustomerBenefits') {
+    content = <CustomerBenefitsScreen navigation={navigation} />;
   } else if (mainRoute === 'ProfileEdit') {
     content = <ProfileEditScreen navigation={navigation} />;
   } else if (mainRoute === 'Settings') {
@@ -1135,13 +1201,19 @@ export function AppNavigator() {
       ? userNotifications.filter((notification) => openNotificationIds.includes(notification.id))
       : unreadNotifications;
   const unreadNotificationCount = unreadNotifications.length;
+  const alertableUnreadNotifications = userSecurityPreference.orderNotificationsEnabled
+    ? unreadNotifications
+    : unreadNotifications.filter((notification) => notification.contextType !== 'order');
+  const alertableUnreadCount = userSecurityPreference.notificationsEnabled
+    ? alertableUnreadNotifications.length
+    : 0;
   useEffect(() => {
     const previousIds = new Set(previousUnreadIds.current);
-    const newUnreadNotifications = unreadNotifications.filter(
+    const newUnreadNotifications = alertableUnreadNotifications.filter(
       (notification) => !previousIds.has(notification.id),
     );
 
-    if (unreadNotificationCount > previousUnreadCount.current) {
+    if (alertableUnreadCount > previousUnreadCount.current) {
       try {
         if (typeof window !== 'undefined') {
           const audioContext = new (window.AudioContext ||
@@ -1168,9 +1240,15 @@ export function AppNavigator() {
       markNotificationsRead(user.id);
     }
 
-    previousUnreadCount.current = unreadNotificationCount;
-    previousUnreadIds.current = unreadNotifications.map((notification) => notification.id);
-  }, [adminUser, markNotificationsRead, unreadNotifications, unreadNotificationCount, user]);
+    previousUnreadCount.current = alertableUnreadCount;
+    previousUnreadIds.current = alertableUnreadNotifications.map((notification) => notification.id);
+  }, [
+    adminUser,
+    alertableUnreadCount,
+    alertableUnreadNotifications,
+    markNotificationsRead,
+    user,
+  ]);
   const openNotifications = () => {
     setOpenNotificationIds(unreadNotifications.map((notification) => notification.id));
     setShowNotifications(true);
@@ -2084,6 +2162,21 @@ export function AppNavigator() {
                   <Text style={styles.menuMeta}>Open your account and activity.</Text>
                 </View>
               </Pressable>
+
+              {user?.role === 'resident' ? (
+                <Pressable
+                  onPress={() => runMenuAction(() => navigation.navigate('CustomerBenefits'))}
+                  style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                >
+                  <View style={styles.menuIconShell}>
+                    <Ionicons color={colors.primary} name="sparkles-outline" size={18} />
+                  </View>
+                  <View style={styles.menuCopy}>
+                    <Text style={styles.menuTitle}>Subscription benefits</Text>
+                    <Text style={styles.menuMeta}>Pay for customer benefits from your account.</Text>
+                  </View>
+                </Pressable>
+              ) : null}
 
               <Pressable
                 onPress={() => runMenuAction(() => navigation.navigate('Cart'))}

@@ -17,12 +17,15 @@ import { AuthPageBackground } from '../components/AuthPageBackground';
 import { FormField } from '../components/FormField';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import { isUrbanConnectLocalTestMode } from '../config/runtime';
+import { estates } from '../data/estates';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import { getSupabaseOAuthUrl, isSupabaseConfigured } from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import type { SignUpFormValues } from '../types/auth';
+import { riverParkClusters } from '../types/business';
 
 type PasswordResetState = {
   identifier: string;
@@ -30,6 +33,9 @@ type PasswordResetState = {
   code: string;
   expiresAt: number;
 };
+
+type DispatchAuthMode = 'login' | 'signup';
+type DispatchSignupStep = 'details' | 'verification';
 
 function looksLikeEmail(value: string) {
   return /\S+@\S+\.\S+/.test(value);
@@ -50,7 +56,7 @@ function generateVerificationCode() {
 export function DispatchLoginScreen() {
   const { width } = useWindowDimensions();
   const { appendEmailLog } = useBusinessDirectory();
-  const { resetPassword, signIn, users } = useAuth();
+  const { requestSignUpVerification, resetPassword, signIn, signUp, users } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const isWideLayout = width >= 980;
@@ -66,9 +72,131 @@ export function DispatchLoginScreen() {
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
   const [isOpeningGoogle, setIsOpeningGoogle] = useState(false);
+  const [authMode, setAuthMode] = useState<DispatchAuthMode>('login');
+  const [signupStep, setSignupStep] = useState<DispatchSignupStep>('details');
+  const [signupDraft, setSignupDraft] = useState({
+    fullName: '',
+    email: '',
+    phoneNumber: '',
+    password: '',
+    confirmPassword: '',
+  });
+  const [signupCode, setSignupCode] = useState('');
+  const [signupError, setSignupError] = useState<string | null>(null);
+  const [isSignupLoading, setIsSignupLoading] = useState(false);
+  const dispatchStats = [
+    { label: 'Queue', value: 'Live' },
+    { label: 'Updates', value: 'Fast' },
+    { label: 'Access', value: 'Approved' },
+  ];
 
   const validateIdentifier = (value: string) =>
     looksLikeEmail(value.trim()) || looksLikePhone(value.trim());
+
+  const updateSignupDraft = (field: keyof typeof signupDraft, value: string) => {
+    setSignupDraft((currentDraft) => ({ ...currentDraft, [field]: value }));
+    setSignupError(null);
+  };
+
+  const buildDispatchSignupValues = (): SignUpFormValues => {
+    const nameParts = signupDraft.fullName.trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] ?? '';
+    const lastName = nameParts.slice(1).join(' ') || 'Rider';
+
+    return {
+      firstName,
+      lastName,
+      phoneNumber: signupDraft.phoneNumber.trim(),
+      email: signupDraft.email.trim().toLowerCase(),
+      password: signupDraft.password,
+      confirmPassword: signupDraft.confirmPassword,
+      role: 'dispatch',
+      estateId: estates[0]?.id ?? 'river-park',
+      businessName: '',
+      businessCluster: riverParkClusters[0],
+    };
+  };
+
+  const validateDispatchSignup = () => {
+    const values = buildDispatchSignupValues();
+
+    if (!values.firstName) {
+      throw new Error('Enter the dispatch rider full name.');
+    }
+
+    if (!looksLikeEmail(values.email)) {
+      throw new Error('Enter a valid dispatch email address.');
+    }
+
+    if (!looksLikePhone(values.phoneNumber)) {
+      throw new Error('Enter a valid dispatch phone number.');
+    }
+
+    if (values.password.length < 8) {
+      throw new Error('Password must be at least 8 characters.');
+    }
+
+    if (values.password !== values.confirmPassword) {
+      throw new Error('Passwords do not match.');
+    }
+
+    return values;
+  };
+
+  const sendDispatchSignupCode = async () => {
+    try {
+      const values = validateDispatchSignup();
+      setIsSignupLoading(true);
+      setSignupError(null);
+      await requestSignUpVerification(values);
+      setSignupStep('verification');
+      setSignupCode('');
+      Alert.alert(
+        'Verification code sent',
+        `Enter the 8 digit code sent to ${values.email}. Your dispatch account will be created after the code is confirmed.`,
+      );
+    } catch (signupFailure) {
+      setSignupError(
+        signupFailure instanceof Error
+          ? signupFailure.message
+          : 'Unable to send dispatch verification code.',
+      );
+    } finally {
+      setIsSignupLoading(false);
+    }
+  };
+
+  const completeDispatchSignup = async () => {
+    try {
+      const values = validateDispatchSignup();
+
+      if (!/^\d{8}$/.test(signupCode.trim())) {
+        throw new Error('Enter the 8 digit verification code.');
+      }
+
+      setIsSignupLoading(true);
+      setSignupError(null);
+      await signUp(values, signupCode.trim());
+    } catch (signupFailure) {
+      setSignupError(
+        signupFailure instanceof Error
+          ? signupFailure.message
+          : 'Unable to create dispatch account right now.',
+      );
+    } finally {
+      setIsSignupLoading(false);
+    }
+  };
+
+  const showLoginMode = () => {
+    setAuthMode('login');
+    setSignupError(null);
+  };
+
+  const showSignupMode = () => {
+    setAuthMode('signup');
+    setSignupError(null);
+  };
 
   const handleLogin = async () => {
     const currentIdentifier = identifier.trim();
@@ -205,7 +333,7 @@ export function DispatchLoginScreen() {
     }
   };
 
-  const openGoogleLogin = async () => {
+  const openGoogleAuth = async (mode: DispatchAuthMode) => {
     if (isUrbanConnectLocalTestMode) {
       Alert.alert(
         'Local test mode',
@@ -222,7 +350,11 @@ export function DispatchLoginScreen() {
     try {
       setIsOpeningGoogle(true);
       setError(null);
-      await Linking.openURL(getSupabaseOAuthUrl('google', '/app/?oauthRole=dispatch'));
+      setSignupError(null);
+      const oauthMode = mode === 'signup' ? '&oauthMode=signup' : '';
+      await Linking.openURL(
+        getSupabaseOAuthUrl('google', `/dispatch-login/?oauthRole=dispatch${oauthMode}`),
+      );
     } catch {
       Alert.alert(
         'Google login unavailable',
@@ -243,13 +375,14 @@ export function DispatchLoginScreen() {
         <View style={[styles.shell, isWideLayout && styles.shellWide]}>
           <View style={[styles.heroPanel, isWideLayout && styles.heroPanelWide]}>
             <View style={styles.brandRow}>
-              <UrbanConnectLogo compact />
-              <View style={styles.dispatchBadge}>
-                <Ionicons color={colors.white} name="bicycle-outline" size={16} />
-                <Text style={styles.dispatchBadgeText}>Dispatch</Text>
+              <UrbanConnectLogo inverted />
+              <View style={styles.portalBadge}>
+                <Ionicons color={colors.white} name="car-sport-outline" size={16} />
+                <Text style={styles.portalBadgeText}>Dispatch portal</Text>
               </View>
             </View>
             <View style={styles.heroCopy}>
+              <Text style={styles.heroEyebrow}>Delivery operations</Text>
               <Text style={styles.heroTitle}>Dispatch Login</Text>
               <Text style={styles.heroSubtitle}>Access your delivery dashboard.</Text>
               <Text style={styles.heroBody}>
@@ -257,107 +390,252 @@ export function DispatchLoginScreen() {
                 arrival confirmations.
               </Text>
             </View>
+            <View style={styles.heroStats}>
+              {dispatchStats.map((item) => (
+                <View key={item.label} style={styles.heroStatCard}>
+                  <Text style={styles.heroStatValue}>{item.value}</Text>
+                  <Text style={styles.heroStatLabel}>{item.label}</Text>
+                </View>
+              ))}
+            </View>
             <View style={styles.heroList}>
               <View style={styles.heroListItem}>
-                <Ionicons color={colors.primary} name="navigate-outline" size={18} />
+                <Ionicons color={colors.white} name="navigate-outline" size={18} />
                 <Text style={styles.heroListText}>Accept assigned jobs and follow the queue.</Text>
               </View>
               <View style={styles.heroListItem}>
-                <Ionicons color={colors.primary} name="checkmark-done-outline" size={18} />
+                <Ionicons color={colors.white} name="checkmark-done-outline" size={18} />
                 <Text style={styles.heroListText}>Update picked-up and arrived statuses fast.</Text>
               </View>
               <View style={styles.heroListItem}>
-                <Ionicons color={colors.primary} name="shield-checkmark-outline" size={18} />
+                <Ionicons color={colors.white} name="shield-checkmark-outline" size={18} />
                 <Text style={styles.heroListText}>
                   Dispatch access stays separate from customer and seller accounts.
                 </Text>
               </View>
             </View>
             <View style={styles.noticeCard}>
-              <Ionicons color={colors.primary} name="information-circle-outline" size={18} />
+              <Ionicons color={colors.white} name="information-circle-outline" size={18} />
               <Text style={styles.noticeText}>
-                Dispatch accounts are created by View2Connect Admin. Contact admin if you need
-                access.
+                Dispatch riders can create an account here, then use Dispatch Login for delivery
+                work only.
               </Text>
             </View>
           </View>
 
           <View style={[styles.authCard, isWideLayout && styles.authCardWide]}>
-            <View style={styles.authHeader}>
-              <Text style={styles.cardTitle}>Sign in</Text>
-              <Text style={styles.cardSubtitle}>
-                Use your dispatch email or phone number.
-              </Text>
-            </View>
+            {authMode === 'login' ? (
+              <>
+                <View style={styles.authHeader}>
+                  <View style={styles.cardBadge}>
+                    <Ionicons color={colors.primary} name="shield-checkmark-outline" size={16} />
+                    <Text style={styles.cardBadgeText}>Dispatch account access</Text>
+                  </View>
+                  <Text style={styles.cardTitle}>Sign in</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Use your dispatch email or phone number.
+                  </Text>
+                </View>
 
-            <FormField
-              autoCapitalize="none"
-              keyboardType={looksLikePhone(identifier) ? 'phone-pad' : 'default'}
-              label="Email or phone number"
-              onChangeText={(value) => {
-                setIdentifier(value);
-                setError(null);
-              }}
-              placeholder="dispatch@example.com or 08012345678"
-              value={identifier}
-            />
-            <FormField
-              label="Password"
-              onChangeText={(value) => {
-                setPassword(value);
-                setError(null);
-              }}
-              placeholder="Enter password"
-              secureTextEntry
-              value={password}
-            />
+                <FormField
+                  autoCapitalize="none"
+                  keyboardType={looksLikePhone(identifier) ? 'phone-pad' : 'default'}
+                  label="Email or phone number"
+                  onChangeText={(value) => {
+                    setIdentifier(value);
+                    setError(null);
+                  }}
+                  placeholder="dispatch@example.com or 08012345678"
+                  value={identifier}
+                />
+                <FormField
+                  label="Password"
+                  onChangeText={(value) => {
+                    setPassword(value);
+                    setError(null);
+                  }}
+                  placeholder="Enter password"
+                  secureTextEntry
+                  value={password}
+                />
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setResetIdentifier(identifier);
-                setShowPasswordReset(true);
-                setResetError(null);
-              }}
-              style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}
-            >
-              <Text style={styles.inlineLinkText}>Forgot Password?</Text>
-            </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setResetIdentifier(identifier);
+                    setShowPasswordReset(true);
+                    setResetError(null);
+                  }}
+                  style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}
+                >
+                  <Text style={styles.inlineLinkText}>Forgot Password?</Text>
+                </Pressable>
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+                {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-            <AppButton
-              label="Login"
-              loading={isLoading}
-              onPress={() => void handleLogin()}
-              style={styles.primaryButton}
-            />
+                <AppButton
+                  label="Login"
+                  loading={isLoading}
+                  onPress={() => void handleLogin()}
+                  style={styles.primaryButton}
+                />
 
-            <View style={styles.dividerRow}>
-              <View style={styles.divider} />
-              <Text style={styles.dividerText}>or continue with</Text>
-              <View style={styles.divider} />
-            </View>
+                <View style={styles.dividerRow}>
+                  <View style={styles.divider} />
+                  <Text style={styles.dividerText}>or continue with</Text>
+                  <View style={styles.divider} />
+                </View>
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => void openGoogleLogin()}
-              style={({ pressed }) => [
-                styles.googleButton,
-                pressed && styles.pressed,
-                isOpeningGoogle && styles.googleButtonDisabled,
-              ]}
-            >
-              <Ionicons color={colors.text} name="logo-google" size={20} />
-              <Text style={styles.googleButtonText}>
-                {isOpeningGoogle ? 'Opening Google...' : 'Login with Google'}
-              </Text>
-            </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void openGoogleAuth('login')}
+                  style={({ pressed }) => [
+                    styles.googleButton,
+                    pressed && styles.pressed,
+                    isOpeningGoogle && styles.googleButtonDisabled,
+                  ]}
+                >
+                  <Ionicons color={colors.text} name="logo-google" size={20} />
+                  <Text style={styles.googleButtonText}>
+                    {isOpeningGoogle ? 'Opening Google...' : 'Login with Google'}
+                  </Text>
+                </Pressable>
 
-            <Text style={styles.helperText}>
-              Only dispatch accounts can enter this portal. Customer and seller accounts are
-              blocked automatically.
-            </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={showSignupMode}
+                  style={({ pressed }) => [styles.secondaryLink, pressed && styles.pressed]}
+                >
+                  <Text style={styles.secondaryLinkText}>Create dispatch account</Text>
+                </Pressable>
+
+                <Text style={styles.helperText}>
+                  Customer, seller, and admin accounts are blocked automatically.
+                </Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.authHeader}>
+                  <View style={styles.cardBadge}>
+                    <Ionicons color={colors.primary} name="person-add-outline" size={16} />
+                    <Text style={styles.cardBadgeText}>New dispatch rider</Text>
+                  </View>
+                  <Text style={styles.cardTitle}>Create dispatch account</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Enter rider details, then confirm the email code.
+                  </Text>
+                </View>
+
+                <FormField
+                  label="Full name"
+                  onChangeText={(value) => updateSignupDraft('fullName', value)}
+                  placeholder="Dispatch rider name"
+                  value={signupDraft.fullName}
+                />
+                <FormField
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  label="Email"
+                  onChangeText={(value) => updateSignupDraft('email', value)}
+                  placeholder="dispatch@example.com"
+                  value={signupDraft.email}
+                />
+                <FormField
+                  keyboardType="phone-pad"
+                  label="Phone number"
+                  onChangeText={(value) => updateSignupDraft('phoneNumber', value)}
+                  placeholder="08012345678"
+                  value={signupDraft.phoneNumber}
+                />
+                <FormField
+                  label="Password"
+                  onChangeText={(value) => updateSignupDraft('password', value)}
+                  placeholder="At least 8 characters"
+                  secureTextEntry
+                  value={signupDraft.password}
+                />
+                <FormField
+                  label="Confirm password"
+                  onChangeText={(value) => updateSignupDraft('confirmPassword', value)}
+                  placeholder="Repeat password"
+                  secureTextEntry
+                  value={signupDraft.confirmPassword}
+                />
+
+                {signupStep === 'verification' ? (
+                  <FormField
+                    keyboardType="numeric"
+                    label="Email verification code"
+                    onChangeText={(value) => {
+                      setSignupCode(value.replace(/[^\d]/g, '').slice(0, 8));
+                      setSignupError(null);
+                    }}
+                    placeholder="00000000"
+                    value={signupCode}
+                  />
+                ) : null}
+
+                {signupError ? <Text style={styles.errorText}>{signupError}</Text> : null}
+
+                <AppButton
+                  label={
+                    signupStep === 'verification'
+                      ? 'Create dispatch account'
+                      : 'Send verification code'
+                  }
+                  loading={isSignupLoading}
+                  onPress={() =>
+                    signupStep === 'verification'
+                      ? void completeDispatchSignup()
+                      : void sendDispatchSignupCode()
+                  }
+                  style={styles.primaryButton}
+                />
+
+                {signupStep === 'details' ? (
+                  <>
+                    <View style={styles.dividerRow}>
+                      <View style={styles.divider} />
+                      <Text style={styles.dividerText}>or create with</Text>
+                      <View style={styles.divider} />
+                    </View>
+
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => void openGoogleAuth('signup')}
+                      style={({ pressed }) => [
+                        styles.googleButton,
+                        pressed && styles.pressed,
+                        isOpeningGoogle && styles.googleButtonDisabled,
+                      ]}
+                    >
+                      <Ionicons color={colors.text} name="logo-google" size={20} />
+                      <Text style={styles.googleButtonText}>
+                        {isOpeningGoogle ? 'Opening Google...' : 'Create with Google'}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : null}
+
+                {signupStep === 'verification' ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void sendDispatchSignupCode()}
+                    style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.inlineLinkText}>Resend code</Text>
+                  </Pressable>
+                ) : null}
+
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={showLoginMode}
+                  style={({ pressed }) => [styles.secondaryLink, pressed && styles.pressed]}
+                >
+                  <Text style={styles.secondaryLinkText}>Back to Dispatch login</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -468,28 +746,29 @@ function createStyles(colors: AppColors) {
     },
     shell: {
       width: '100%',
-      maxWidth: 1080,
+      maxWidth: 1180,
       alignSelf: 'center',
       gap: spacing.lg,
     },
     shellWide: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'stretch',
       gap: spacing.xl,
     },
     heroPanel: {
       gap: spacing.lg,
-      borderRadius: 12,
-      backgroundColor: 'rgba(255,255,255,0.92)',
+      borderRadius: 16,
+      backgroundColor: colors.overlay,
       borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.xl,
+      borderColor: 'rgba(255,255,255,0.08)',
+      padding: spacing.xxl,
       ...shadows.card,
     },
     heroPanelWide: {
       flex: 1,
       minWidth: 0,
-      paddingVertical: spacing.xxl,
+      minHeight: 620,
+      justifyContent: 'space-between',
     },
     brandRow: {
       flexDirection: 'row',
@@ -498,16 +777,18 @@ function createStyles(colors: AppColors) {
       gap: spacing.md,
       flexWrap: 'wrap',
     },
-    dispatchBadge: {
+    portalBadge: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.xs,
       borderRadius: radii.pill,
-      backgroundColor: colors.primary,
+      backgroundColor: 'rgba(255,255,255,0.14)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.18)',
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.xs,
     },
-    dispatchBadgeText: {
+    portalBadgeText: {
       ...typography.caption,
       color: colors.white,
       fontWeight: '800',
@@ -515,19 +796,46 @@ function createStyles(colors: AppColors) {
     heroCopy: {
       gap: spacing.xs,
     },
+    heroEyebrow: {
+      ...typography.eyebrow,
+      color: '#F2C45A',
+    },
     heroTitle: {
-      fontSize: 32,
-      lineHeight: 36,
+      fontSize: 38,
+      lineHeight: 44,
       fontWeight: '900',
-      color: colors.text,
+      color: colors.white,
     },
     heroSubtitle: {
       ...typography.section,
-      color: colors.primary,
+      color: '#E7DFFF',
     },
     heroBody: {
       ...typography.body,
-      color: colors.textMuted,
+      color: '#D6DFE2',
+      maxWidth: 520,
+    },
+    heroStats: {
+      flexDirection: 'row',
+      gap: spacing.md,
+      flexWrap: 'wrap',
+    },
+    heroStatCard: {
+      minWidth: 110,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.12)',
+      backgroundColor: 'rgba(255,255,255,0.08)',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+    },
+    heroStatValue: {
+      ...typography.section,
+      color: colors.white,
+    },
+    heroStatLabel: {
+      ...typography.caption,
+      color: '#D6DFE2',
     },
     heroList: {
       gap: spacing.md,
@@ -536,48 +844,66 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       alignItems: 'flex-start',
       gap: spacing.sm,
-      borderRadius: 8,
-      backgroundColor: colors.primarySoft,
+      borderRadius: 12,
+      backgroundColor: 'rgba(255,255,255,0.08)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.08)',
       padding: spacing.md,
     },
     heroListText: {
       flex: 1,
       ...typography.body,
-      color: colors.text,
+      color: colors.white,
     },
     noticeCard: {
       flexDirection: 'row',
       alignItems: 'flex-start',
       gap: spacing.sm,
-      borderRadius: 8,
+      borderRadius: 12,
       borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
+      borderColor: 'rgba(255,255,255,0.12)',
+      backgroundColor: 'rgba(255,255,255,0.06)',
       padding: spacing.md,
     },
     noticeText: {
       flex: 1,
       ...typography.caption,
-      color: colors.textMuted,
+      color: '#E7DFFF',
     },
     authCard: {
       width: '100%',
       gap: spacing.md,
-      borderRadius: 12,
+      borderRadius: 16,
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: spacing.xl,
+      padding: spacing.xxl,
       ...shadows.card,
     },
     authCardWide: {
       flexShrink: 0,
-      width: 420,
+      width: 470,
       maxWidth: '100%',
       alignSelf: 'center',
     },
     authHeader: {
       gap: spacing.xs,
+    },
+    cardBadge: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: radii.pill,
+      backgroundColor: colors.primarySoft,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      marginBottom: spacing.xs,
+    },
+    cardBadgeText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
     },
     cardTitle: {
       ...typography.section,
@@ -592,6 +918,20 @@ function createStyles(colors: AppColors) {
       paddingVertical: 2,
     },
     inlineLinkText: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    secondaryLink: {
+      minHeight: 46,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: spacing.md,
+    },
+    secondaryLinkText: {
       ...typography.bodyStrong,
       color: colors.primary,
     },

@@ -65,6 +65,10 @@ type CompleteAccountSignupResponse = {
   profile?: SupabaseProfileRow;
 };
 
+type CreateDispatchAccountResponse = {
+  profile?: SupabaseProfileRow;
+};
+
 export type SupabaseSession = {
   accessToken: string;
   refreshToken?: string;
@@ -765,7 +769,10 @@ function profileToAppUser(row: SupabaseProfileRow): AppUser {
     phoneNumber: row.phone_number,
     role,
     estateId: row.estate_id,
-    riverParkVerified: Boolean(row.river_park_verified),
+    riverParkVerified:
+      role === 'businessOwner' || role === 'dispatch'
+        ? true
+        : Boolean(row.river_park_verified),
     status: row.status ?? 'active',
     createdAt: row.created_at,
     ...(businessName ? { businessName } : {}),
@@ -802,7 +809,8 @@ function buildSignupMetadata(values: SignUpFormValues) {
     business_name: values.role === 'businessOwner' ? values.businessName.trim() : null,
     business_cluster: values.role === 'businessOwner' ? values.businessCluster : null,
     accepted_user_agreement: true,
-    river_park_verified: values.role === 'resident',
+    river_park_verified:
+      values.role === 'resident' || values.role === 'businessOwner' || values.role === 'dispatch',
   };
 }
 
@@ -853,9 +861,43 @@ function buildProfilePayload(
     estate_id: values?.estateId ?? String(metadata.estate_id ?? 'river-park'),
     ...(businessName ? { business_name: businessName } : {}),
     ...(businessCluster ? { business_cluster: businessCluster } : {}),
-    river_park_verified: role === 'resident',
+    river_park_verified: role === 'resident' || role === 'businessOwner' || role === 'dispatch',
     status: 'active',
     created_at: new Date().toISOString(),
+  };
+}
+
+function buildOAuthSignupValues(
+  authUser: SupabaseAuthUser,
+  role: UserRole,
+): SignUpFormValues {
+  const metadata = authUser.user_metadata ?? {};
+  const metadataFullName = String(metadata.full_name ?? metadata.name ?? '').trim();
+  const nameParts = metadataFullName.split(/\s+/).filter(Boolean);
+  const firstName = String(
+    metadata.first_name ?? metadata.firstName ?? nameParts[0] ?? 'View2Connect',
+  ).trim() || 'View2Connect';
+  const metadataLastName = String(
+    metadata.last_name ?? metadata.lastName ?? nameParts.slice(1).join(' '),
+  ).trim();
+  const lastName = metadataLastName || (role === 'dispatch' ? 'Dispatch' : 'User');
+  const fallbackPassword = 'supabase-oauth-managed';
+
+  return {
+    firstName,
+    lastName,
+    phoneNumber: authUser.phone || String(metadata.phone_number ?? '').trim(),
+    email: authUser.email?.trim().toLowerCase() ?? '',
+    password: fallbackPassword,
+    confirmPassword: fallbackPassword,
+    role,
+    estateId: String(metadata.estate_id ?? 'river-park'),
+    businessName:
+      role === 'businessOwner' ? String(metadata.business_name ?? '').trim() : '',
+    businessCluster:
+      role === 'businessOwner'
+        ? ((String(metadata.business_cluster ?? '').trim() || 'Cluster 1') as RiverParkCluster)
+        : 'Cluster 1',
   };
 }
 
@@ -1091,6 +1133,18 @@ async function getOrCreateProfile(
     !existingEmailProfile && authUser.email && accessToken
       ? await fetchProfileByEmail(authUser.email).catch(() => undefined)
       : undefined;
+  const emailProfile = existingEmailProfile ?? publicEmailProfile;
+
+  if (emailProfile && existingProfile && existingProfile.id !== emailProfile.id) {
+    if (values) {
+      throw new SupabaseApiError(
+        'This email is already registered. Please sign in with the existing account instead.',
+        409,
+      );
+    }
+
+    return syncProfileNameFromAuth(emailProfile, authUser, accessToken);
+  }
 
   if (existingProfile) {
     return values
@@ -1098,16 +1152,17 @@ async function getOrCreateProfile(
       : syncProfileNameFromAuth(existingProfile, authUser, accessToken);
   }
 
-  if (existingEmailProfile) {
-    return values
-      ? updateExistingProfileFromSignup(existingEmailProfile, authUser, values, accessToken)
-      : syncProfileNameFromAuth(existingEmailProfile, authUser, accessToken);
-  }
+  if (emailProfile) {
+    if (values && emailProfile.id !== authUser.id) {
+      throw new SupabaseApiError(
+        'This email is already registered. Please sign in with the existing account instead.',
+        409,
+      );
+    }
 
-  if (publicEmailProfile) {
     return values
-      ? updateExistingProfileFromSignup(publicEmailProfile, authUser, values, accessToken)
-      : syncProfileNameFromAuth(publicEmailProfile, authUser, accessToken);
+      ? updateExistingProfileFromSignup(emailProfile, authUser, values, accessToken)
+      : syncProfileNameFromAuth(emailProfile, authUser, accessToken);
   }
 
   return upsertProfile(authUser, values, accessToken);
@@ -1289,6 +1344,45 @@ export async function signUpWithSupabase(
   };
 }
 
+export async function createDispatchAccountWithSupabase(values: {
+  adminEmail: string;
+  adminPassword: string;
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  password: string;
+  estateId: string;
+  businessCluster?: string;
+}) {
+  const response = await supabaseRequest<CreateDispatchAccountResponse>(
+    '/functions/v1/admin-create-dispatch-account',
+    {
+      method: 'POST',
+      body: {
+        adminEmail: values.adminEmail.trim().toLowerCase(),
+        adminPassword: values.adminPassword,
+        fullName: values.fullName.trim(),
+        email: values.email.trim().toLowerCase(),
+        phoneNumber: values.phoneNumber.trim(),
+        password: values.password,
+        estateId: values.estateId,
+        businessCluster: values.businessCluster?.trim() ?? '',
+      },
+    },
+  );
+
+  if (!response.profile) {
+    throw new SupabaseApiError('The dispatch account was created, but no profile was returned.', 502);
+  }
+
+  const user = profileToAppUser(response.profile);
+
+  return {
+    user,
+    storedUser: { ...user, password: '' },
+  };
+}
+
 export async function syncSupabaseSessionProfile(accessToken: string) {
   const authUser = await supabaseRequest<SupabaseAuthUser>('/auth/v1/user', {
     accessToken,
@@ -1396,6 +1490,13 @@ export async function completeSupabaseOAuth(url: string) {
   const params = parseAuthCallbackParams(url);
   const accessToken = params.get('access_token');
   const requestedRole = params.get('oauthRole');
+  const oauthMode = params.get('oauthMode');
+  const requestedUserRole: UserRole | undefined =
+    requestedRole === 'resident' ||
+    requestedRole === 'businessOwner' ||
+    requestedRole === 'dispatch'
+      ? requestedRole
+      : undefined;
 
   if (!accessToken) {
     return undefined;
@@ -1407,22 +1508,80 @@ export async function completeSupabaseOAuth(url: string) {
   const authUser = await supabaseRequest<SupabaseAuthUser>('/auth/v1/user', {
     accessToken,
   });
-  const user = await getOrCreateProfile(authUser, accessToken);
+  let user: AppUser;
 
-  if (requestedRole && user.role !== requestedRole) {
-    await signOutSupabase(accessToken).catch(() => undefined);
+  if (requestedUserRole) {
+    const existingProfile = await fetchProfile(authUser.id, accessToken).catch(() => undefined);
+    const existingEmailProfile = authUser.email
+      ? await fetchProfileByEmail(authUser.email, accessToken).catch(() => undefined)
+      : undefined;
+    const publicEmailProfile =
+      !existingEmailProfile && authUser.email
+        ? await fetchProfileByEmail(authUser.email).catch(() => undefined)
+        : undefined;
+    const matchingProfile = existingEmailProfile ?? publicEmailProfile ?? existingProfile;
+    const isSignupFlow = oauthMode === 'signup' || requestedUserRole === 'resident';
 
-    if (requestedRole === 'dispatch') {
+    if (matchingProfile && matchingProfile.role !== requestedUserRole) {
+      const profileCreatedAt = new Date(matchingProfile.createdAt).getTime();
+      const looksLikeFreshOAuthDefault =
+        isSignupFlow &&
+        requestedUserRole !== 'resident' &&
+        matchingProfile.role === 'resident' &&
+        matchingProfile.id === authUser.id &&
+        Number.isFinite(profileCreatedAt) &&
+        Date.now() - profileCreatedAt < 5 * 60 * 1000;
+
+      if (looksLikeFreshOAuthDefault) {
+        user = await updateExistingProfileFromSignup(
+          matchingProfile,
+          authUser,
+          buildOAuthSignupValues(authUser, requestedUserRole),
+          accessToken,
+        );
+      } else {
+        await signOutSupabase(accessToken).catch(() => undefined);
+
+        throw new SupabaseApiError(
+          `This email is already registered as a ${roleLabel(
+            matchingProfile.role,
+          )} account. Use that portal instead.`,
+          403,
+        );
+      }
+    } else if (!matchingProfile && !isSignupFlow) {
+      await signOutSupabase(accessToken).catch(() => undefined);
+
+      if (requestedUserRole === 'dispatch') {
+        throw new SupabaseApiError(
+          'This account is not registered as a dispatch account.',
+          403,
+        );
+      }
+
       throw new SupabaseApiError(
-        'This account is not registered as a dispatch account.',
+        'This account is not registered for this portal.',
         403,
       );
-    }
+    } else if (matchingProfile) {
+      user = await syncProfileNameFromAuth(matchingProfile, authUser, accessToken);
+    } else {
+      if (!authUser.email) {
+        await signOutSupabase(accessToken).catch(() => undefined);
+        throw new SupabaseApiError(
+          'Google did not return an email address for this account.',
+          400,
+        );
+      }
 
-    throw new SupabaseApiError(
-      'This account is not registered for this portal.',
-      403,
-    );
+      user = await getOrCreateProfile(
+        authUser,
+        accessToken,
+        buildOAuthSignupValues(authUser, requestedUserRole),
+      );
+    }
+  } else {
+    user = await getOrCreateProfile(authUser, accessToken);
   }
 
   const parsedExpiresIn = expiresIn ? Number(expiresIn) : undefined;
@@ -1957,6 +2116,40 @@ export async function saveVerifiedSellerPayoutAccountToSupabase(
 
   return response.account;
 }
+
+export async function verifyCacBusinessRegistration(
+  accessToken: string,
+  values: {
+    ownerUserId: string;
+    cacNumber: string;
+  },
+) {
+  const response = await supabaseRequest<{
+    business?: {
+      cacNumber: string;
+      businessName: string;
+      verifiedAt: string;
+    };
+  }>('/functions/v1/verify-business-cac', {
+    method: 'POST',
+    accessToken,
+    body: {
+      ownerUserId: values.ownerUserId,
+      cacNumber: values.cacNumber,
+    },
+  });
+
+  if (!response.business?.businessName) {
+    throw new SupabaseApiError(
+      'CAC API did not return the verified business name.',
+      502,
+    );
+  }
+
+  return response.business;
+}
+
+export const verifyFlutterwaveBusinessCac = verifyCacBusinessRegistration;
 
 export async function createFlutterwaveVirtualAccount(
   owner: AppUser,

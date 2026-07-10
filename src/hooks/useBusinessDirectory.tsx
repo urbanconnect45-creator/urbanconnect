@@ -52,7 +52,11 @@ import type {
 } from '../types/business';
 import { riverParkClusters } from '../types/business';
 import { buildBusinessMedia, isLocalOnlyMediaUrl } from '../utils/businessMedia';
-import { getBusinessStatusLabel, isPublicBusiness } from '../utils/businessState';
+import {
+  getBusinessStatusLabel,
+  isPublicBusiness,
+  isSubscriptionActive,
+} from '../utils/businessState';
 import {
   DYNAMIC_DEPOSIT_EXPIRY_MINUTES,
   MINIMUM_ADD_FUNDS_DEPOSIT,
@@ -188,6 +192,10 @@ type BusinessDirectoryContextValue = {
     durationMinutes?: number,
     amountOverride?: number,
   ) => SubscriptionPayment;
+  payCustomerBenefitSubscriptionWithAccount: (
+    customer: AppUser,
+    cycle: PaymentPlanCycle,
+  ) => SubscriptionPayment;
   startOwnerSubscriptionFlutterwaveCheckout: (
     owner: AppUser,
     cycle: PaymentPlanCycle,
@@ -233,12 +241,17 @@ type BusinessDirectoryContextValue = {
     actorName?: string,
     actorRole?: AuditActorRole,
   ) => void;
+  approveStoreApplicationForOwner: (
+    owner: AppUser,
+    actorName?: string,
+    actorRole?: AuditActorRole,
+  ) => void;
   updateOwnerBusinessProfile: (
     owner: AppUser,
     values: OwnerBusinessProfileValues,
     actorName?: string,
     actorRole?: AuditActorRole,
-  ) => void;
+  ) => Promise<void>;
   setVerifiedSellerPayoutAccount: (
     owner: AppUser,
     account: VerifiedSellerPayoutAccount,
@@ -1121,6 +1134,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return false;
     }
 
+    if (user.role === 'businessOwner' && (user.status ?? 'active') === 'active') {
+      return true;
+    }
+
     const ownerProfile = getOwnerBusinessProfile(user);
     const ownerKeys = [
       user.id,
@@ -1261,7 +1278,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const missingEmailForNotification = (notification: NotificationRecipientLookup) => {
     const safeId = notification.userId.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-    const prefix = notification.audience === 'businessOwner' ? 'business-owner' : 'resident';
+    const prefix =
+      notification.audience === 'businessOwner'
+        ? 'business-owner'
+        : notification.audience === 'dispatch'
+          ? 'dispatch'
+          : 'resident';
 
     return `${prefix}-${safeId || 'unknown'}@missing-email.urbanconnect.local`.toLowerCase();
   };
@@ -1326,7 +1348,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       ...(notification.contextType === 'listing' && notification.contextId
         ? { businessId: notification.contextId }
         : {}),
-      recipientType: notification.audience === 'businessOwner' ? 'owner' : 'buyer',
+      recipientType:
+        notification.audience === 'businessOwner'
+          ? 'owner'
+          : notification.audience === 'dispatch'
+            ? 'dispatch'
+            : 'buyer',
       recipientName: notification.userName,
       recipientEmail: resolveRequiredNotificationRecipientEmail(notification),
       subject: notification.title,
@@ -2291,6 +2318,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     };
 
     const existingProfile = getOwnerBusinessProfile(owner);
+
+
     const nextProfile: OwnerBusinessProfile = {
       ...(existingProfile ?? {}),
       id: existingProfile?.id ?? owner.id,
@@ -2398,6 +2427,87 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientEmail: owner.email,
       subject: `${durationLabel} subscription active`,
       body: `Your View2Connect account balance paid ${formatCurrency(amount)}. All listings on this account are active until ${formatDateTimeForEmail(nextBillingAt)}.`,
+    });
+
+    return payment;
+  };
+
+  const payCustomerBenefitSubscriptionWithAccount = (
+    customer: AppUser,
+    cycle: PaymentPlanCycle,
+  ) => {
+    if (customer.role !== 'resident') {
+      throw new Error('Customer benefits are available only from a customer account.');
+    }
+
+    const plan = getPaymentPlanByCycle(cycle);
+    const amount = plan.amount;
+    const balance = getAvailableAccountBalanceForUser(customer);
+    const createdAt = new Date().toISOString();
+    const nextBillingDate = new Date(createdAt);
+    nextBillingDate.setDate(nextBillingDate.getDate() + (cycle === 'weekly' ? 7 : 30));
+    const nextBillingAt = nextBillingDate.toISOString();
+
+    if (amount > balance) {
+      throw new Error(
+        `Your account balance is ${formatCurrency(balance)}. Add funds before subscribing for ${formatCurrency(amount)}.`,
+      );
+    }
+
+    const reference = `UC-CUST-SUB-${Date.now()}`;
+    const payment: SubscriptionPayment = {
+      id: reference,
+      reference,
+      ownerUserId: customer.id,
+      ownerName: customer.fullName,
+      ownerEmail: customer.email,
+      cycle,
+      amount,
+      currency: 'NGN',
+      status: 'paid',
+      paidAt: createdAt,
+      rawPayload: JSON.stringify({
+        method: 'accountBalance',
+        subscriptionType: 'customerBenefits',
+        planTitle: plan.title,
+        nextBillingAt,
+      }),
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    setSubscriptionPayments((currentPayments) => [
+      payment,
+      ...currentPayments.filter((currentPayment) => currentPayment.reference !== reference),
+    ]);
+
+    if (isSupabaseConfigured) {
+      void saveSubscriptionPaymentToSupabase(payment).catch(() => undefined);
+    }
+
+    appendAuditLog(
+      customer.fullName,
+      'system',
+      'Customer benefits subscription paid',
+      `${customer.fullName} paid ${formatCurrency(amount)} for ${plan.title}.`,
+    );
+    appendNotification({
+      userId: customer.id,
+      userName: customer.fullName,
+      recipientEmail: customer.email,
+      audience: 'resident',
+      title: 'Benefits subscription active',
+      body: `${plan.title} is active until ${formatDateTimeForEmail(nextBillingAt)}.`,
+      contextType: 'general',
+      contextId: reference,
+      createdAt,
+    });
+    appendEmailLog({
+      recipientType: 'buyer',
+      recipientName: customer.fullName,
+      recipientEmail: customer.email,
+      subject: 'View2Connect benefits active',
+      body: `Your ${plan.title} subscription is active until ${formatDateTimeForEmail(nextBillingAt)}.`,
     });
 
     return payment;
@@ -2596,6 +2706,125 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         contextId: profile.ownerUserId,
       });
     }
+  };
+
+  const approveStoreApplicationForOwner = (
+    owner: AppUser,
+    actorName = 'View2Connect Owner',
+    actorRole: AuditActorRole = 'owner',
+  ) => {
+    if (!canEditSensitiveData(actorRole) || owner.role !== 'businessOwner') {
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    const existingProfile = getOwnerBusinessProfile(owner);
+    const profileSubscriptionActive = isSubscriptionActive(
+      existingProfile?.subscriptionStatus,
+      existingProfile?.subscriptionNextBillingAt,
+    );
+
+
+    const nextProfile: OwnerBusinessProfile = {
+      ...(existingProfile ?? {
+        id: owner.id,
+        ownerUserId: owner.id,
+        accountName: owner.businessName ?? owner.fullName,
+        accountEmail: owner.email,
+        ownerName: owner.businessName ?? owner.fullName,
+        phone: owner.phoneNumber,
+        whatsapp: owner.phoneNumber,
+        email: owner.email,
+        website: '',
+        instagram: '',
+        address: owner.businessCluster ?? '',
+        coverImage: '',
+        galleryImages: '',
+        galleryVideos: '',
+      }),
+      subscriptionStatus:
+        profileSubscriptionActive && existingProfile?.subscriptionStatus
+          ? existingProfile.subscriptionStatus
+          : 'active',
+      riverParkVerified: true,
+      updatedAt,
+    };
+    const ownerKeys = [
+      owner.id,
+      owner.email,
+      owner.fullName,
+      owner.businessName,
+      nextProfile.accountEmail,
+      nextProfile.email,
+      nextProfile.accountName,
+      nextProfile.ownerName,
+    ]
+      .map((ownerKey) => ownerKey?.trim().toLowerCase())
+      .filter((ownerKey): ownerKey is string => Boolean(ownerKey));
+
+    setOwnerBusinessProfiles((currentProfiles) => {
+      const existingIndex = currentProfiles.findIndex((profile) =>
+        [
+          profile.ownerUserId,
+          profile.accountEmail,
+          profile.email,
+          profile.accountName,
+          profile.ownerName,
+        ]
+          .map((ownerKey) => ownerKey?.trim().toLowerCase())
+          .some((ownerKey) => Boolean(ownerKey && ownerKeys.includes(ownerKey))),
+      );
+
+      if (existingIndex === -1) {
+        return [nextProfile, ...currentProfiles];
+      }
+
+      return currentProfiles.map((profile, index) =>
+        index === existingIndex ? nextProfile : profile,
+      );
+    });
+
+    if (isSupabaseConfigured) {
+      void saveOwnerBusinessProfileToSupabase(nextProfile).catch(() => undefined);
+    }
+
+    setBusinesses((currentBusinesses) =>
+      currentBusinesses.map((business) => {
+        const matchesOwner = [business.ownerUserId, business.ownerEmail, business.ownerName]
+          .map((ownerKey) => ownerKey?.trim().toLowerCase())
+          .some((ownerKey) => Boolean(ownerKey && ownerKeys.includes(ownerKey)));
+
+        if (!matchesOwner) {
+          return business;
+        }
+
+        const nextBusiness: Business = {
+          ...business,
+          status: 'active',
+          verified: true,
+          riverParkVerified: true,
+          subscriptionStatus:
+            isSubscriptionActive(business.subscriptionStatus, business.subscriptionNextBillingAt) &&
+            business.subscriptionStatus
+              ? business.subscriptionStatus
+              : 'active',
+          updatedAt,
+        };
+
+        if (isSupabaseConfigured) {
+          void saveBusinessToSupabase(nextBusiness).catch(() => undefined);
+        }
+
+        return nextBusiness;
+      }),
+    );
+
+    appendAuditLog(
+      actorName,
+      actorRole,
+      'Store application listings activated',
+      `${owner.businessName ?? owner.fullName} was approved and matching listings were marked public-ready.`,
+    );
   };
 
   function formatDateTimeForEmail(value: string) {
@@ -2902,18 +3131,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return productForSave;
   };
 
-  const updateOwnerBusinessProfile = (
+  const updateOwnerBusinessProfile = async (
     owner: AppUser,
     values: OwnerBusinessProfileValues,
     actorName = owner.fullName,
     actorRole: AuditActorRole = 'owner',
   ) => {
-    const ownerKeys = [owner.id, owner.email, owner.fullName, owner.businessName].filter(
-      (ownerKey): ownerKey is string => Boolean(ownerKey),
-    );
+    const ownerKeys = [owner.id, owner.email, owner.fullName, owner.businessName]
+      .map((ownerKey) => ownerKey?.trim().toLowerCase())
+      .filter((ownerKey): ownerKey is string => Boolean(ownerKey));
     const profileEmail = values.email.trim().toLowerCase();
     const updatedAt = new Date().toISOString();
     const existingProfile = getOwnerBusinessProfile(owner);
+
+
     const nextProfile: OwnerBusinessProfile = {
       ...(existingProfile ?? {}),
       id: existingProfile?.id ?? owner.id,
@@ -2937,9 +3168,15 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     setOwnerBusinessProfiles((currentProfiles) => {
       const existingIndex = currentProfiles.findIndex(
         (profile) =>
-          profile.ownerUserId === owner.id ||
-          profile.accountEmail === owner.email ||
-          profile.accountName === owner.fullName,
+          [
+            profile.ownerUserId,
+            profile.accountEmail,
+            profile.email,
+            profile.accountName,
+            profile.ownerName,
+          ]
+            .map((ownerKey) => ownerKey?.trim().toLowerCase())
+            .some((ownerKey) => Boolean(ownerKey && ownerKeys.includes(ownerKey))),
       );
 
       if (existingIndex === -1) {
@@ -2952,17 +3189,14 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     });
 
     if (isSupabaseConfigured) {
-      void saveOwnerBusinessProfileToSupabase(nextProfile).catch(() => undefined);
+      await saveOwnerBusinessProfileToSupabase(nextProfile);
     }
 
     setBusinesses((currentBusinesses) =>
       currentBusinesses.map((business) => {
-        const matchesOwner = ownerKeys.some(
-          (ownerKey) =>
-            ownerKey === business.ownerUserId ||
-            ownerKey === business.ownerEmail ||
-            ownerKey === business.ownerName,
-        );
+        const matchesOwner = [business.ownerUserId, business.ownerEmail, business.ownerName]
+          .map((ownerKey) => ownerKey?.trim().toLowerCase())
+          .some((ownerKey) => Boolean(ownerKey && ownerKeys.includes(ownerKey)));
 
         if (!matchesOwner) {
           return business;
@@ -3022,6 +3256,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     account: VerifiedSellerPayoutAccount,
   ) => {
     const existingProfile = getOwnerBusinessProfile(owner);
+
+
     const nextProfile: OwnerBusinessProfile = {
       ...(existingProfile ?? {
         id: owner.id,
@@ -4898,6 +5134,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       isSubscriptionExemptForUser,
       confirmOwnerSubscription,
       payOwnerSubscriptionWithAccount,
+      payCustomerBenefitSubscriptionWithAccount,
       startOwnerSubscriptionFlutterwaveCheckout,
       getWithdrawalsForOwner,
       getVirtualAccountForOwner,
@@ -4909,6 +5146,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       requestWithdrawal,
       notifyBusinessOwnerInspection,
       setOwnerRiverParkVerification,
+      approveStoreApplicationForOwner,
       updateOwnerBusinessProfile,
       setVerifiedSellerPayoutAccount,
       getBusinessById,
@@ -4965,7 +5203,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       verifiedUserIdsFromNotifications,
       updatePaymentPlan,
       confirmBusinessSubscription,
+      approveStoreApplicationForOwner,
       updateOwnerBusinessProfile,
+      payCustomerBenefitSubscriptionWithAccount,
     ],
   );
 

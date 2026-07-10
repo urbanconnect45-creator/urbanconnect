@@ -41,6 +41,8 @@ export type UserSecurityPreference = {
   biometricEnabled: boolean;
   passcodeEnabled: boolean;
   passcode: string;
+  notificationsEnabled: boolean;
+  orderNotificationsEnabled: boolean;
   updatedAt: string;
 };
 

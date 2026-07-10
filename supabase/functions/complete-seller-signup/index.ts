@@ -257,7 +257,7 @@ serve(async (request) => {
     estate_id: 'river-park',
     business_name: businessName,
     business_cluster: area,
-    river_park_verified: false,
+    river_park_verified: true,
     status: 'active',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -306,7 +306,7 @@ serve(async (request) => {
         verified_amount: 0,
         subscription_next_billing_at: isFreePlan ? freePlanEndsAt : null,
         subscription_item_count: 1,
-        river_park_verified: false,
+        river_park_verified: true,
         updated_at: new Date().toISOString(),
       }),
     },
@@ -351,7 +351,7 @@ serve(async (request) => {
   const planLabel = isFreePlan
     ? 'Free Plan for 3 months with standard placement'
     : `Gold Plan application (${sellerType === 'store' ? 'NGN 15,000' : 'NGN 5,000'})`;
-  const welcomeBody = `Your store owner email is verified and your seller application is saved. You selected the ${planLabel}. Admin review is still required before listings become public. Use this dedicated store owner account for the seller dashboard.`;
+  const welcomeBody = `Your store owner email is verified and your seller dashboard is ready. You selected the ${planLabel}. Product and listing approval remain separate before items become public. Use this dedicated store owner account for the seller dashboard.`;
 
   await Promise.all([
     fetch(`${supabaseUrl}/rest/v1/notifications`, {
@@ -376,8 +376,8 @@ serve(async (request) => {
         id: `audit-seller-registration-${applicationId}`,
         actor_name: ownerName,
         actor_role: 'system',
-        action: 'Seller application submitted',
-        details: `${businessName} selected the ${selectedPlan} plan and is pending admin review.`,
+        action: 'Seller account verified',
+        details: `${businessName} selected the ${selectedPlan} plan and can access the seller dashboard. Listing approval remains separate.`,
         created_at: createdAt,
       }),
     }),

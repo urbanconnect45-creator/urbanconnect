@@ -69,6 +69,9 @@ type AdminSectionKey =
   | 'codes'
   | 'emails'
   | 'users'
+  | 'customers'
+  | 'storeOwners'
+  | 'dispatchAccounts'
   | 'applications'
   | 'managedCatalogs'
   | 'listings'
@@ -85,6 +88,40 @@ type AdminPinPrompt = {
 
 const userRoleOptions = ['All', 'resident', 'businessOwner', 'dispatch'] as const;
 const userStatusOptions = ['All', 'active', 'suspended'] as const;
+const managedCatalogFallbackImage =
+  'https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?auto=format&fit=crop&w=1200&q=80';
+const userRolePageConfigs = {
+  customers: {
+    role: 'resident',
+    title: 'Customers',
+    subtitle: 'Only customer shopping accounts from the database.',
+    countLabel: 'customers',
+    emptyText: 'Customer accounts will appear here after signup.',
+  },
+  storeOwners: {
+    role: 'businessOwner',
+    title: 'Store Owners',
+    subtitle: 'Only seller and store-owner accounts. Seller verification is automatic after OTP.',
+    countLabel: 'store owners',
+    emptyText: 'Store owner accounts will appear here after seller registration.',
+  },
+  dispatchAccounts: {
+    role: 'dispatch',
+    title: 'Dispatch',
+    subtitle: 'Only dispatch rider accounts for delivery dashboard access.',
+    countLabel: 'dispatch accounts',
+    emptyText: 'Dispatch accounts will appear here after signup or owner creation.',
+  },
+} as const satisfies Record<
+  'customers' | 'storeOwners' | 'dispatchAccounts',
+  {
+    role: Exclude<(typeof userRoleOptions)[number], 'All'>;
+    title: string;
+    subtitle: string;
+    countLabel: string;
+    emptyText: string;
+  }
+>;
 const listingTypeOptions = ['All', 'product', 'profession'] as const;
 const listingStatusOptions = ['All', 'active'] as const;
 const verificationOptions = ['All', 'Verified', 'Unverified'] as const;
@@ -118,7 +155,9 @@ const adminSections: Array<{
   { key: 'finance', label: 'Finance', icon: 'cash-outline' },
   { key: 'payments', label: 'Payments', icon: 'card-outline' },
   { key: 'codes', label: 'Codes', icon: 'keypad-outline' },
-  { key: 'users', label: 'Users', icon: 'people-outline' },
+  { key: 'customers', label: 'Customers', icon: 'people-outline' },
+  { key: 'storeOwners', label: 'Store owners', icon: 'storefront-outline' },
+  { key: 'dispatchAccounts', label: 'Dispatch', icon: 'bicycle-outline' },
   { key: 'applications', label: 'Store applications', icon: 'clipboard-outline' },
   { key: 'managedCatalogs', label: 'Managed catalogs', icon: 'albums-outline' },
   { key: 'listings', label: 'Listings', icon: 'storefront-outline' },
@@ -467,10 +506,10 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     adminUsers,
     signOutAdmin,
     setUserStatus,
-    setUserRiverParkVerification,
     users,
     setAdminAccountActive,
     createCustomerCareAccount,
+    createDispatchAccount,
     updateAdminPassword,
   } = useAuth();
   const { colors } = useAppTheme();
@@ -502,8 +541,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     deleteSupportConversation,
     deleteLatestSupportConversation,
     sendSupportReply,
-    setOwnerRiverParkVerification,
     toggleBusinessVerification,
+    approveStoreApplicationForOwner,
     updateBusinessReorderLevel,
     updateEmailLogContent,
     updateOrderStatus,
@@ -520,7 +559,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
   const [activeSection, setActiveSection] = useState<AdminSectionKey>('overview');
   const [searchValue, setSearchValue] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState<(typeof userRoleOptions)[number]>('All');
   const [userStatusFilter, setUserStatusFilter] =
     useState<(typeof userStatusOptions)[number]>('All');
   const [liveUserProfiles, setLiveUserProfiles] = useState<AppUser[]>([]);
@@ -569,10 +607,18 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     email: '',
     password: '',
   });
+  const [dispatchDraft, setDispatchDraft] = useState({
+    fullName: '',
+    email: '',
+    phoneNumber: '',
+    password: '',
+    adminPassword: '',
+  });
   const [customerCarePasswordDrafts, setCustomerCarePasswordDrafts] = useState<Record<string, string>>(
     {},
   );
   const [customerCareError, setCustomerCareError] = useState<string | null>(null);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [adminPasswordDraft, setAdminPasswordDraft] = useState('');
   const [adminPasswordConfirmDraft, setAdminPasswordConfirmDraft] = useState('');
   const [adminPasswordError, setAdminPasswordError] = useState<string | null>(null);
@@ -585,8 +631,24 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const visibleSections = isOwnerAdmin
     ? adminSections.filter((section) => section.key !== 'chats')
     : adminSections.filter((section) =>
-        ['overview', 'orders', 'payments', 'emails', 'users', 'listings', 'chats'].includes(section.key),
+        [
+          'overview',
+          'orders',
+          'payments',
+          'emails',
+          'customers',
+          'storeOwners',
+          'dispatchAccounts',
+          'listings',
+          'chats',
+        ].includes(section.key),
       );
+  const activeUserPageConfig =
+    activeSection === 'customers' ||
+    activeSection === 'storeOwners' ||
+    activeSection === 'dispatchAccounts'
+      ? userRolePageConfigs[activeSection]
+      : null;
 
   useEffect(() => {
     if (!visibleSections.some((section) => section.key === activeSection)) {
@@ -655,7 +717,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   };
 
   useEffect(() => {
-    if (activeSection !== 'users') {
+    if (!activeUserPageConfig) {
       return undefined;
     }
 
@@ -665,7 +727,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     }, 5000);
 
     return () => clearInterval(refreshInterval);
-  }, [activeSection]);
+  }, [activeUserPageConfig]);
 
   const adminVisibleUsers = useMemo(() => {
     const usersById = new Map(users.map((user) => [user.id, user] as const));
@@ -733,7 +795,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     () =>
       [...adminVisibleUsers]
         .filter((user) => {
-          const matchesRole = userRoleFilter === 'All' ? true : user.role === userRoleFilter;
+          const matchesRole = activeUserPageConfig
+            ? user.role === activeUserPageConfig.role
+            : true;
           const matchesStatus =
             userStatusFilter === 'All' ? true : (user.status ?? 'active') === userStatusFilter;
           const matchesSearch =
@@ -758,7 +822,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
           (leftUser, rightUser) =>
             new Date(rightUser.createdAt).getTime() - new Date(leftUser.createdAt).getTime(),
         ),
-    [adminVisibleUsers, normalizedSearch, userRoleFilter, userStatusFilter],
+    [activeUserPageConfig, adminVisibleUsers, normalizedSearch, userStatusFilter],
   );
 
   const filteredListings = useMemo(
@@ -1175,11 +1239,18 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
           user.businessCluster,
         ])
       ) {
+        const userSection =
+          user.role === 'businessOwner'
+            ? 'storeOwners'
+            : user.role === 'dispatch'
+              ? 'dispatchAccounts'
+              : 'customers';
+
         results.push({
           id: `user-${user.id}`,
           title: user.fullName,
           meta: `${user.role} - ${user.email} - UID ${user.id}`,
-          section: 'users',
+          section: userSection,
         });
       }
     });
@@ -1486,8 +1557,29 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
-  const ownerProfileForUser = (userId: string) =>
-    ownerBusinessProfiles.find((profile) => profile.ownerUserId === userId);
+  const ownerProfileForUser = (userId: string) => {
+    const matchedUser = adminVisibleUsers.find((item) => item.id === userId);
+    const ownerKeys = [
+      userId,
+      matchedUser?.email,
+      matchedUser?.fullName,
+      matchedUser?.businessName,
+    ]
+      .map((ownerKey) => ownerKey?.trim().toLowerCase())
+      .filter((ownerKey): ownerKey is string => Boolean(ownerKey));
+
+    return ownerBusinessProfiles.find((profile) =>
+      [
+        profile.ownerUserId,
+        profile.accountEmail,
+        profile.email,
+        profile.accountName,
+        profile.ownerName,
+      ]
+        .map((ownerKey) => ownerKey?.trim().toLowerCase())
+        .some((ownerKey) => Boolean(ownerKey && ownerKeys.includes(ownerKey))),
+    );
+  };
 
   const ownerListingsForUser = (userId: string) =>
     businesses.filter((business) => {
@@ -1553,12 +1645,12 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return 'Rejected';
     }
 
-    return isRiverParkVerifiedForUser(applicant.id) ? 'Approved' : 'Pending';
+    return 'Pending';
   };
 
   const reviewStoreApplication = (
     applicant: AppUser,
-    decision: 'approved' | 'rejected' | 'changesRequested',
+    decision: 'approved' | 'changesRequested',
   ) => {
     if (!isOwnerAdmin) {
       return;
@@ -1573,43 +1665,26 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
               requestedMessage ||
               'Your store application has been approved. You can submit products for listing review.',
           }
-        : decision === 'rejected'
-          ? {
-              title: 'Store application rejected',
-              body:
-                requestedMessage ||
-                'Your store application was not approved. Contact customer care before applying again.',
-            }
-          : {
-              title: 'Store application changes requested',
-              body:
-                requestedMessage ||
-                'Admin needs more information about your store. Update your seller details or contact customer care.',
-            };
+        : {
+            title: 'Store application changes requested',
+            body:
+              requestedMessage ||
+              'Admin needs more information about your store. Update your seller details or contact customer care.',
+          };
 
     runAdminChange(
       'Admin PIN',
       `Enter the PIN to mark ${applicant.businessName ?? applicant.fullName} as ${decisionCopy.title.toLowerCase()}.`,
       () => {
-        const approved = decision === 'approved';
         setUserStatus(
           applicant.id,
-          decision === 'rejected' ? 'suspended' : 'active',
+          'active',
           adminUser.fullName,
           adminUser.role,
         );
-        setUserRiverParkVerification(
-          applicant.id,
-          approved,
-          adminUser.fullName,
-          adminUser.role,
-        );
-        setOwnerRiverParkVerification(
-          applicant.id,
-          approved,
-          adminUser.fullName,
-          adminUser.role,
-        );
+        if (decision === 'approved') {
+          approveStoreApplicationForOwner(applicant, adminUser.fullName, adminUser.role);
+        }
         appendNotification({
           userId: applicant.id,
           userName: applicant.fullName,
@@ -1637,6 +1712,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
           ...currentDrafts,
           [applicant.id]: '',
         }));
+        Alert.alert('Store application updated', decisionCopy.title);
       },
     );
   };
@@ -1858,6 +1934,64 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
             error instanceof Error ? error.message : 'Unable to create this account.',
           );
         }
+      },
+    );
+  };
+
+  const handleCreateDispatchAccount = () => {
+    if (!isOwnerAdmin) {
+      return;
+    }
+
+    const fullName = dispatchDraft.fullName.trim();
+    const email = dispatchDraft.email.trim();
+    const phoneNumber = dispatchDraft.phoneNumber.trim();
+    const password = dispatchDraft.password.trim();
+    const adminPassword = dispatchDraft.adminPassword.trim();
+
+    if (!fullName || !email || !phoneNumber || !password) {
+      setDispatchError('Add the dispatch name, email, phone number, and password.');
+      return;
+    }
+
+    if (isSupabaseConfigured && !adminPassword) {
+      setDispatchError('Enter your owner admin password to create this account online.');
+      return;
+    }
+
+    runAdminChange(
+      'Admin PIN',
+      `Enter the PIN before creating dispatch access for ${fullName}.`,
+      () => {
+        void createDispatchAccount(
+          {
+            fullName,
+            email,
+            phoneNumber,
+            password,
+            estateId: 'river-park',
+            adminEmail: adminUser.email,
+            adminPassword,
+          },
+          adminUser.fullName,
+          adminUser.role,
+        )
+          .then((account) => {
+            setDispatchDraft({
+              fullName: '',
+              email: '',
+              phoneNumber: '',
+              password: '',
+              adminPassword: '',
+            });
+            setDispatchError(null);
+            Alert.alert('Dispatch account created', `${account.fullName} can now use Dispatch Login.`);
+          })
+          .catch((error) => {
+            setDispatchError(
+              error instanceof Error ? error.message : 'Unable to create this dispatch account.',
+            );
+          });
       },
     );
   };
@@ -2962,7 +3096,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                 {isOwnerAdmin ? (
                   <SectionPanel
                     title="Payment plans"
-                    subtitle="Edit the base plans and review the exact duration options shown under the Pay icon in business accounts."
+                    subtitle="Edit base prices and benefit copy for business subscriptions and customer benefits."
                   >
                     <View style={styles.planGrid}>
                       {paymentPlans.map((plan) => {
@@ -3009,7 +3143,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                                 onChangeText={(value) =>
                                   syncPaymentPlanDraft(plan.cycle, { description: value })
                                 }
-                                placeholder="Short description"
+                                placeholder="Description or benefits, separate benefits with semicolons"
                                 placeholderTextColor="#8A8A8A"
                                 style={[styles.planInput, styles.planTextarea]}
                                 textAlignVertical="top"
@@ -3532,37 +3666,100 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
               </>
             ) : null}
 
-            {activeSection === 'users' ? (
+            {activeUserPageConfig ? (
               <SectionPanel
-                title="Users"
-                subtitle="Search customers, store owners, and dispatch accounts across the estate."
-                action={<Text style={styles.panelCount}>{formatNumber(filteredUsers.length)} users</Text>}
+                title={activeUserPageConfig.title}
+                subtitle={activeUserPageConfig.subtitle}
+                action={
+                  <Text style={styles.panelCount}>
+                    {formatNumber(filteredUsers.length)} {activeUserPageConfig.countLabel}
+                  </Text>
+                }
               >
-                <View style={styles.filterWrap}>
-                  {userRoleOptions.map((role) => {
-                    const isActive = userRoleFilter === role;
-                    return (
-                      <Pressable
-                        key={role}
-                        onPress={() => setUserRoleFilter(role)}
-                        style={({ pressed }) => [
-                          styles.filterChip,
-                          isActive && styles.filterChipActive,
-                          pressed && styles.filterChipPressed,
-                        ]}
-                        >
-                        <Text
-                          style={[
-                            styles.filterChipText,
-                            isActive && styles.filterChipTextActive,
-                          ]}
-                        >
-                          {role === 'All' ? 'All roles' : userRoleLabel(role)}
+                {activeSection === 'dispatchAccounts' && isOwnerAdmin ? (
+                  <View style={styles.recordCard}>
+                    <View style={styles.recordTopRow}>
+                      <View style={styles.recordCopy}>
+                        <Text style={styles.recordTitle}>Create dispatch account</Text>
+                        <Text style={styles.recordMeta}>
+                          Dispatch access is private. Create accounts here, then riders use
+                          Dispatch Login with email/password or approved Google.
                         </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                      </View>
+                      <View style={styles.recordBadge}>
+                        <Text style={styles.recordBadgeText}>Owner only</Text>
+                      </View>
+                    </View>
+                    <View style={styles.customerCareFormGrid}>
+                      <TextInput
+                        onChangeText={(fullName) =>
+                          setDispatchDraft((currentDraft) => ({ ...currentDraft, fullName }))
+                        }
+                        placeholder="Dispatch rider name"
+                        placeholderTextColor="#8A8A8A"
+                        style={[styles.compactInput, styles.customerCareInput]}
+                        value={dispatchDraft.fullName}
+                      />
+                      <TextInput
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        onChangeText={(email) =>
+                          setDispatchDraft((currentDraft) => ({ ...currentDraft, email }))
+                        }
+                        placeholder="Dispatch email"
+                        placeholderTextColor="#8A8A8A"
+                        style={[styles.compactInput, styles.customerCareInput]}
+                        value={dispatchDraft.email}
+                      />
+                      <TextInput
+                        keyboardType="phone-pad"
+                        onChangeText={(phoneNumber) =>
+                          setDispatchDraft((currentDraft) => ({
+                            ...currentDraft,
+                            phoneNumber,
+                          }))
+                        }
+                        placeholder="Phone number"
+                        placeholderTextColor="#8A8A8A"
+                        style={[styles.compactInput, styles.customerCareInput]}
+                        value={dispatchDraft.phoneNumber}
+                      />
+                      <TextInput
+                        onChangeText={(password) =>
+                          setDispatchDraft((currentDraft) => ({ ...currentDraft, password }))
+                        }
+                        placeholder="Dispatch password"
+                        placeholderTextColor="#8A8A8A"
+                        secureTextEntry
+                        style={[styles.compactInput, styles.customerCareInput]}
+                        value={dispatchDraft.password}
+                      />
+                      {isSupabaseConfigured ? (
+                        <TextInput
+                          onChangeText={(adminPassword) =>
+                            setDispatchDraft((currentDraft) => ({
+                              ...currentDraft,
+                              adminPassword,
+                            }))
+                          }
+                          placeholder="Owner admin password"
+                          placeholderTextColor="#8A8A8A"
+                          secureTextEntry
+                          style={[styles.compactInput, styles.customerCareInput]}
+                          value={dispatchDraft.adminPassword}
+                        />
+                      ) : null}
+                    </View>
+                    {dispatchError ? <Text style={styles.errorText}>{dispatchError}</Text> : null}
+                    <View style={styles.inlineActionRow}>
+                      <MonoButton
+                        dark
+                        label="Create dispatch account"
+                        onPress={handleCreateDispatchAccount}
+                      />
+                    </View>
+                  </View>
+                ) : null}
 
                 <View style={styles.filterWrap}>
                   {userStatusOptions.map((status) => {
@@ -3592,7 +3789,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
                 <View style={styles.recordStack}>
                   {filteredUsers.map((user) => {
-                    const riverParkVerified = isRiverParkVerifiedForUser(user.id);
                     const ownerSubscriptionStatus = subscriptionStatusForUser(user.id);
                     const ownerSubscriptionWindow = subscriptionWindowForUser(user.id);
                     const accountStartingBalance = getAccountStartingBalance(user);
@@ -3639,9 +3835,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             </Text>
                             <View style={styles.totalStack}>
                               <View style={styles.totalRow}>
-                                <Text style={styles.totalLabel}>Seller verification</Text>
+                                <Text style={styles.totalLabel}>Seller account</Text>
                                 <Text style={styles.totalValue}>
-                                  {riverParkVerified ? 'Verified' : 'Pending'}
+                                  {(user.status ?? 'active') === 'active'
+                                    ? 'Verified automatically'
+                                    : 'Suspended'}
                                 </Text>
                               </View>
                               <View style={styles.totalRow}>
@@ -3684,32 +3882,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                               label={(user.status ?? 'active') === 'active' ? 'Suspend' : 'Restore'}
                               onPress={() => toggleUserStatus(user.id, user.status)}
                             />
-                            {user.role === 'businessOwner' ? (
-                              <MonoButton
-                                dark={!riverParkVerified}
-                                label={riverParkVerified ? 'Mark seller pending' : 'Verify seller'}
-                                onPress={() =>
-                                  runAdminChange(
-                                    'Admin PIN',
-                                    'Enter the PIN before changing seller verification.',
-                                    () => {
-                                      setUserRiverParkVerification(
-                                        user.id,
-                                        !riverParkVerified,
-                                        adminUser.fullName,
-                                        adminUser.role,
-                                      );
-                                      setOwnerRiverParkVerification(
-                                        user.id,
-                                        !riverParkVerified,
-                                        adminUser.fullName,
-                                        adminUser.role,
-                                      );
-                                    },
-                                  )
-                                }
-                              />
-                            ) : null}
                           </View>
                         ) : (
                           <Text style={styles.recordMeta}>Status changes are owner only.</Text>
@@ -3717,6 +3889,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                       </View>
                     );
                   })}
+                  {filteredUsers.length === 0 ? (
+                    <Text style={styles.emptyPanelText}>{activeUserPageConfig.emptyText}</Text>
+                  ) : null}
                 </View>
               </SectionPanel>
             ) : null}
@@ -3785,7 +3960,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                                   [applicant.id]: value,
                                 }))
                               }
-                              placeholder="Optional approval note, rejection reason, or changes required"
+                              placeholder="Optional approval note or changes required"
                               placeholderTextColor="#8A8A8A"
                               style={[styles.compactInput, styles.replyInput]}
                               value={applicationMessageDrafts[applicant.id] ?? ''}
@@ -3802,11 +3977,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                                 onPress={() =>
                                   reviewStoreApplication(applicant, 'changesRequested')
                                 }
-                              />
-                              <MonoButton
-                                dark={false}
-                                label="Reject"
-                                onPress={() => reviewStoreApplication(applicant, 'rejected')}
                               />
                             </View>
                           </>
@@ -3838,7 +4008,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                   </Text>
                 }
               >
-                <View style={styles.recordStack}>
+                <View style={styles.managedCatalogGrid}>
                   {catalogManagedStores.map((seller) => {
                     const profile = ownerProfileForUser(seller.id);
                     const storeProducts = businesses.filter(
@@ -3846,40 +4016,78 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         business.ownerUserId === seller.id &&
                         business.tags.includes('Admin managed catalog'),
                     );
+                    const storeTitle = seller.businessName ?? profile?.accountName ?? seller.fullName;
+                    const coverImage =
+                      profile?.coverImage?.trim() ||
+                      storeProducts[0]?.imageUrl ||
+                      managedCatalogFallbackImage;
 
                     return (
-                      <View key={seller.id} style={styles.recordCard}>
-                        <View style={styles.recordTopRow}>
-                          <View style={styles.recordCopy}>
-                            <Text style={styles.recordTitle}>
-                              {seller.businessName ?? profile?.accountName ?? seller.fullName}
-                            </Text>
-                            <Text style={styles.recordMeta}>
-                              {seller.fullName} - {seller.email}
-                            </Text>
+                      <View key={seller.id} style={styles.managedStoreCard}>
+                        <Image
+                          resizeMode="cover"
+                          source={{ uri: coverImage }}
+                          style={styles.managedStoreCover}
+                        />
+                        <View style={styles.managedStoreBody}>
+                          <View style={styles.recordTopRow}>
+                            <View style={styles.recordCopy}>
+                              <Text style={styles.recordTitle}>{storeTitle}</Text>
+                              <Text style={styles.recordMeta}>
+                                {seller.fullName} - {seller.email}
+                              </Text>
+                            </View>
+                            <View style={[styles.recordBadge, styles.recordBadgeSuccess]}>
+                              <Text
+                                style={[
+                                  styles.recordBadgeText,
+                                  styles.recordBadgeTextSuccess,
+                                ]}
+                              >
+                                Access granted
+                              </Text>
+                            </View>
                           </View>
-                          <View style={[styles.recordBadge, styles.recordBadgeSuccess]}>
-                            <Text
-                              style={[
-                                styles.recordBadgeText,
-                                styles.recordBadgeTextSuccess,
-                              ]}
-                            >
-                              Access granted
-                            </Text>
+                          <Text style={styles.recordMeta}>
+                            {profile?.address ?? seller.businessCluster ?? 'Address not added'}
+                          </Text>
+                          <View style={styles.managedStoreStats}>
+                            <View style={styles.managedStoreStat}>
+                              <Text style={styles.managedStoreStatValue}>
+                                {formatNumber(storeProducts.length)}
+                              </Text>
+                              <Text style={styles.managedStoreStatLabel}>Products</Text>
+                            </View>
+                            <View style={styles.managedStoreStat}>
+                              <Text style={styles.managedStoreStatValue}>
+                                {storeProducts[0]?.category ?? 'Catalog'}
+                              </Text>
+                              <Text style={styles.managedStoreStatLabel}>Preview category</Text>
+                            </View>
                           </View>
-                        </View>
-                        <Text style={styles.recordMeta}>
-                          {profile?.address ?? seller.businessCluster ?? 'Address not added'}
-                          {' - '}
-                          {formatNumber(storeProducts.length)} managed products
-                        </Text>
-                        <View style={styles.inlineActionRow}>
-                          <MonoButton
-                            dark
-                            label="Open store catalog"
-                            onPress={() => openManagedCatalog(seller.id)}
-                          />
+                          <View style={styles.managedProductPreviewRow}>
+                            {storeProducts.slice(0, 3).map((product) => (
+                              <Image
+                                key={product.id}
+                                resizeMode="cover"
+                                source={{ uri: product.imageUrl }}
+                                style={styles.managedProductThumb}
+                              />
+                            ))}
+                            {storeProducts.length === 0 ? (
+                              <View style={styles.managedProductEmpty}>
+                                <Ionicons color={colors.textMuted} name="cube-outline" size={18} />
+                                <Text style={styles.recordMeta}>No products yet</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <View style={styles.inlineActionRow}>
+                            <MonoButton
+                              dark
+                              label="Open store catalog"
+                              onPress={() => openManagedCatalog(seller.id)}
+                            />
+                          </View>
                         </View>
                       </View>
                     );
@@ -5340,6 +5548,77 @@ function createStyles(colors: AppColors) {
       borderWidth: 1,
       borderColor: colors.border,
       padding: spacing.md,
+    },
+    managedCatalogGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+    },
+    managedStoreCard: {
+      flexGrow: 0,
+      flexShrink: 1,
+      flexBasis: '48%',
+      minWidth: 320,
+      overflow: 'hidden',
+      borderRadius: radii.lg,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      ...shadows.soft,
+    },
+    managedStoreCover: {
+      width: '100%',
+      height: 220,
+      backgroundColor: '#E7E7E7',
+    },
+    managedStoreBody: {
+      gap: spacing.sm,
+      padding: spacing.md,
+    },
+    managedStoreStats: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+    },
+    managedStoreStat: {
+      flex: 1,
+      minWidth: 120,
+      borderRadius: radii.md,
+      backgroundColor: '#F3F3F3',
+      borderWidth: 1,
+      borderColor: '#D6D6D6',
+      padding: spacing.sm,
+    },
+    managedStoreStatValue: {
+      ...typography.bodyStrong,
+      color: colors.text,
+    },
+    managedStoreStatLabel: {
+      ...typography.caption,
+      color: colors.textMuted,
+    },
+    managedProductPreviewRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+      minHeight: 54,
+    },
+    managedProductThumb: {
+      width: 54,
+      height: 54,
+      borderRadius: radii.sm,
+      backgroundColor: '#E7E7E7',
+    },
+    managedProductEmpty: {
+      minHeight: 54,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: radii.md,
+      backgroundColor: '#F3F3F3',
+      borderWidth: 1,
+      borderColor: '#D6D6D6',
+      paddingHorizontal: spacing.md,
     },
     recordCardPressed: {
       opacity: 0.92,

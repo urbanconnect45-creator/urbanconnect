@@ -80,7 +80,7 @@ function accountCopy(role: Extract<UserRole, 'resident' | 'dispatch'>) {
       visualSubtitle: 'Accept assigned jobs and keep delivery progress organized.',
       maintenance: 'Dispatch login is paused while the owner keeps the marketplace in maintenance mode.',
       accountLabel: 'dispatch',
-      createLabel: 'Create dispatch account',
+      createLabel: 'Dispatch access',
     };
   }
 
@@ -123,6 +123,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const copy = accountCopy(accountRole);
+  const allowPublicSignup = accountRole !== 'dispatch';
 
   const currentIdentifier = loginMode === 'email' ? email.trim() : phoneNumber.trim();
 
@@ -426,16 +427,28 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
               By continuing, you agree to the View2Connect user agreement and privacy policy.
             </Text>
           </Pressable>
-          <SocialAuthButtons />
+          <SocialAuthButtons webRedirectPath="/auth/callback?oauthRole=resident" />
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Need an account?</Text>
-          <AppButton
-            label={copy.createLabel}
-            onPress={() => navigation.navigate('Signup')}
-            variant="ghost"
-          />
+          {allowPublicSignup ? (
+            <>
+              <Text style={styles.footerText}>Need an account?</Text>
+              <AppButton
+                label={copy.createLabel}
+                onPress={() => navigation.navigate('Signup')}
+                variant="ghost"
+              />
+            </>
+          ) : (
+            <View style={styles.noticeCard}>
+              <Text style={styles.noticeTitle}>Dispatch access is private</Text>
+              <Text style={styles.noticeText}>
+                Use the Dispatch Login page to create or access a rider account. Customer and
+                seller accounts cannot enter dispatch.
+              </Text>
+            </View>
+          )}
           {isPublicStoreWeb ? (
             <AppButton
               label="Continue shopping"

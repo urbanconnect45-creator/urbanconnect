@@ -26,6 +26,7 @@ import {
   isSupabaseConfigured,
   saveVerifiedSellerPayoutAccountToSupabase,
   uploadMediaUriToSupabaseStorage,
+  verifyFlutterwaveBusinessCac as verifyCacBusinessRegistration,
   verifySellerPayoutAccount,
 } from '../services/supabaseApi';
 import { splitInputList } from '../utils/businessMedia';
@@ -586,6 +587,7 @@ export function StoreOwnerDashboardScreen() {
     centralCatalogProducts,
     currentEstateId,
     deleteOwnedBusinessListing,
+    getNotificationsForUser,
     getOrdersForOwner,
     getOwnerBusinessProfile,
     hasCatalogManagementAccess,
@@ -593,6 +595,7 @@ export function StoreOwnerDashboardScreen() {
     getWithdrawalsForOwner,
     isBusinessOwnedByUser,
     isSubscriptionExemptForUser,
+    markNotificationsRead,
     registerBusiness,
     requestWithdrawal,
     setVerifiedSellerPayoutAccount,
@@ -649,6 +652,10 @@ export function StoreOwnerDashboardScreen() {
   const [payoutBanksRequested, setPayoutBanksRequested] = useState(false);
   const [isVerifyingPayoutAccount, setIsVerifyingPayoutAccount] = useState(false);
   const [isSavingPayoutAccount, setIsSavingPayoutAccount] = useState(false);
+  const [cacNumber, setCacNumber] = useState('');
+  const [cacBusinessName, setCacBusinessName] = useState('');
+  const [cacError, setCacError] = useState<string | null>(null);
+  const [isVerifyingCac, setIsVerifyingCac] = useState(false);
   const [kycType, setKycType] = useState<WithdrawalKycType>('bvn');
   const [kycNumber, setKycNumber] = useState('');
   const [idDocumentUri, setIdDocumentUri] = useState('');
@@ -668,6 +675,7 @@ export function StoreOwnerDashboardScreen() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   useEffect(() => {
     if (!showSellerWelcome || Platform.OS !== 'web') {
@@ -692,6 +700,10 @@ export function StoreOwnerDashboardScreen() {
   }, [showSellerWelcome]);
 
   const ownerProfile = getOwnerBusinessProfile(user);
+  const sellerNotifications = getNotificationsForUser(user);
+  const unreadSellerNotificationCount = sellerNotifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
   const catalogAccessGranted = Boolean(user && hasCatalogManagementAccess(user.id));
   const normalizedPayoutBankSearch = payoutBankSearch.trim().toLowerCase();
   const selectedPayoutBank =
@@ -699,12 +711,11 @@ export function StoreOwnerDashboardScreen() {
     (normalizedPayoutBankSearch
       ? payoutBanks.find((bank) => bank.name.toLowerCase() === normalizedPayoutBankSearch)
       : undefined);
-  const canSearchPayoutBanks = payoutAccountNumber.length === 10;
   const visiblePayoutBanks = payoutBanks
     .filter((bank) =>
-      canSearchPayoutBanks && normalizedPayoutBankSearch
+      normalizedPayoutBankSearch
         ? bank.name.toLowerCase().includes(normalizedPayoutBankSearch)
-        : false,
+        : true,
     )
     .slice(0, 3);
   const payoutAccountVerified = Boolean(
@@ -1618,17 +1629,86 @@ export function StoreOwnerDashboardScreen() {
     setIdDocumentName(asset.fileName ?? `id-document-${Date.now()}.jpg`);
   };
 
-  const saveProfile = () => {
+  const saveProfile = async () => {
     if (!user) {
       return;
     }
 
     try {
-      updateOwnerBusinessProfile(user, profileDraft, user.fullName, 'businessOwner');
+      setIsSavingProfile(true);
       setProfileError(null);
-      setProfileMessage('Profile saved.');
+      setProfileMessage(null);
+
+      const uploadedCoverImage = await persistPickedMediaUri(
+        profileDraft.coverImage.trim(),
+        'identity',
+        'store-cover',
+      );
+      const uploadedGalleryImages = await Promise.all(
+        splitInputList(profileDraft.galleryImages).map((uri, index) =>
+          persistPickedMediaUri(uri, 'identity', `gallery-image-${index + 1}`),
+        ),
+      );
+      const nextProfileDraft: OwnerBusinessProfileValues = {
+        ...profileDraft,
+        coverImage: uploadedCoverImage,
+        galleryImages: uploadedGalleryImages.join(', '),
+      };
+
+      setProfileDraft(nextProfileDraft);
+      await updateOwnerBusinessProfile(user, nextProfileDraft, user.fullName, 'businessOwner');
+      setProfileMessage('Profile saved. Your cover photo is now available to admin managed catalogs.');
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : 'Unable to save profile.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const verifyBusinessCac = async () => {
+    if (!user || !supabaseAccessToken) {
+      setCacError('Sign in again before verifying your CAC business number.');
+      return;
+    }
+
+    const cleanCacNumber = cacNumber.trim().toUpperCase();
+
+    if (!/^[A-Z0-9/-]{4,24}$/.test(cleanCacNumber)) {
+      setCacError('Enter a valid CAC business number.');
+      return;
+    }
+
+    try {
+      setIsVerifyingCac(true);
+      setCacError(null);
+      const verifiedBusiness = await verifyCacBusinessRegistration(supabaseAccessToken, {
+        ownerUserId: user.id,
+        cacNumber: cleanCacNumber,
+      });
+      const nextProfileDraft = {
+        ...profileDraft,
+        ownerName: verifiedBusiness.businessName,
+      };
+
+      setCacNumber(verifiedBusiness.cacNumber);
+      setCacBusinessName(verifiedBusiness.businessName);
+      setProfileDraft(nextProfileDraft);
+      await updateOwnerBusinessProfile(user, nextProfileDraft, user.fullName, 'businessOwner');
+      setProfileError(null);
+      setProfileMessage('Profile name updated from verified CAC business name.');
+      Alert.alert(
+        'CAC business verified',
+        `${verifiedBusiness.businessName} was confirmed and added to your store profile.`,
+      );
+    } catch (error) {
+      setCacBusinessName('');
+      setCacError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to verify this CAC business number right now.',
+      );
+    } finally {
+      setIsVerifyingCac(false);
     }
   };
 
@@ -1794,6 +1874,47 @@ export function StoreOwnerDashboardScreen() {
     );
   };
 
+  const renderSellerNotifications = () => (
+    <View style={styles.panel}>
+      <View style={styles.panelHeader}>
+        <View>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          <Text style={styles.mutedText}>
+            {unreadSellerNotificationCount > 0
+              ? `${formatNumber(unreadSellerNotificationCount)} unread alert${unreadSellerNotificationCount > 1 ? 's' : ''}`
+              : 'Order and catalog alerts appear here.'}
+          </Text>
+        </View>
+        {sellerNotifications.length > 0 ? (
+          <AppButton
+            label="Mark read"
+            onPress={() => markNotificationsRead(user.id)}
+            variant="ghost"
+          />
+        ) : null}
+      </View>
+      <View style={styles.itemList}>
+        {sellerNotifications.slice(0, 4).map((notification) => (
+          <View key={notification.id} style={styles.listCard}>
+            <View style={styles.listHeader}>
+              <Text style={styles.itemTitle}>{notification.title}</Text>
+              {!notification.readAt ? (
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusText}>New</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.mutedText}>{notification.body}</Text>
+            <Text style={styles.mutedText}>{formatDateTime(notification.createdAt)}</Text>
+          </View>
+        ))}
+        {sellerNotifications.length === 0
+          ? renderEmpty('No notifications yet', 'Order, payout, and listing alerts will show here.')
+          : null}
+      </View>
+    </View>
+  );
+
   const renderDashboard = () => (
     <View style={styles.pageStack}>
       <View style={styles.hero}>
@@ -1819,6 +1940,10 @@ export function StoreOwnerDashboardScreen() {
         {renderStatCard('Review queue', formatNumber(pendingListings.length), 'time-outline')}
         {renderStatCard('Orders', formatNumber(ownerOrders.length), 'receipt-outline')}
         {renderStatCard('Available payout', formatCurrency(availableToWithdraw), 'wallet-outline', 'secondary')}
+      </View>
+
+      <View style={styles.workspaceGrid}>
+        {renderSellerNotifications()}
       </View>
 
       <View style={styles.workspaceGrid}>
@@ -2452,6 +2577,51 @@ export function StoreOwnerDashboardScreen() {
           {renderStatCard('Available', formatCurrency(availableToWithdraw), 'wallet-outline')}
           {renderStatCard('Withdrawn', formatCurrency(withdrawnTotal), 'arrow-up-circle-outline')}
         </View>
+        <View style={styles.payoutFlowCard}>
+          <View style={styles.payoutStepHeader}>
+            <View style={styles.payoutStepBadge}>
+              <Ionicons color={colors.primary} name="briefcase-outline" size={18} />
+            </View>
+            <View style={styles.previewCopy}>
+              <Text style={styles.rowTitle}>CAC business verification</Text>
+              <Text style={styles.mutedText}>
+                Confirm your registered business name before saving payout details.
+              </Text>
+            </View>
+          </View>
+          <FormField
+            autoCapitalize="characters"
+            label="CAC business number"
+            onChangeText={(value) => {
+              setCacNumber(value.toUpperCase());
+              setCacBusinessName('');
+              setCacError(null);
+            }}
+            placeholder="RC123456 or BN123456"
+            value={cacNumber}
+          />
+          <AppButton
+            disabled={!supabaseAccessToken || cacNumber.trim().length < 4}
+            label={isVerifyingCac ? 'Verifying CAC...' : 'Verify CAC business'}
+            loading={isVerifyingCac}
+            onPress={() => void verifyBusinessCac()}
+          />
+          {cacBusinessName ? (
+            <View style={styles.verifiedAccountCard}>
+              <Ionicons color={colors.success} name="shield-checkmark-outline" size={24} />
+              <View style={styles.previewCopy}>
+                <Text style={styles.mutedText}>Registered business name</Text>
+                <Text style={styles.verifiedAccountName}>{cacBusinessName}</Text>
+                <Text style={styles.mutedText}>Your store profile name has been updated.</Text>
+              </View>
+            </View>
+          ) : null}
+          {cacError ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{cacError}</Text>
+            </View>
+          ) : null}
+        </View>
         {payoutAccountVerified ? (
           <View style={styles.infoBox}>
             <Text style={styles.rowTitle}>{ownerProfile?.payoutAccountName}</Text>
@@ -2502,20 +2672,16 @@ export function StoreOwnerDashboardScreen() {
             <View style={styles.errorBox}>
               <Text style={styles.errorText}>{payoutBankListError}</Text>
               <AppButton
-                label="Retry"
+                label="Retry loading banks"
                 onPress={() => void loadPayoutBanks()}
                 variant="secondary"
               />
             </View>
+
           ) : null}
 
-          {!payoutBankListError && !canSearchPayoutBanks ? (
-            <Text style={styles.mutedText}>
-              Enter a valid 10-digit account number before searching for the bank.
-            </Text>
-          ) : null}
 
-          {!payoutBankListError && canSearchPayoutBanks && visiblePayoutBanks.length > 0 ? (
+          {!payoutBankListError && visiblePayoutBanks.length > 0 ? (
             <View style={styles.bankSearchResults}>
               {visiblePayoutBanks.map((bank) => {
                 const isSelected = selectedPayoutBankCode === bank.code;
@@ -2540,16 +2706,13 @@ export function StoreOwnerDashboardScreen() {
                     </View>
                     <View style={styles.previewCopy}>
                       <Text style={styles.bankOptionText}>{bank.name}</Text>
-                      <Text style={styles.bankOptionSubtext}>Tap to use this bank</Text>
+                      <Text style={styles.bankOptionSubtext}>Bank code: {bank.code}</Text>
                     </View>
                   </Pressable>
                 );
               })}
             </View>
-          ) : !payoutBankListError &&
-            canSearchPayoutBanks &&
-            payoutBanks.length > 0 &&
-            payoutBankSearch.trim() ? (
+          ) : !payoutBankListError && payoutBanks.length > 0 && payoutBankSearch.trim() ? (
             <Text style={styles.mutedText}>
               No bank matched "{payoutBankSearch.trim()}". Try a shorter bank name.
             </Text>
@@ -2739,6 +2902,63 @@ export function StoreOwnerDashboardScreen() {
         {securityError ? <Text style={styles.errorText}>{securityError}</Text> : null}
         {securityMessage ? <Text style={styles.successText}>{securityMessage}</Text> : null}
       </View>
+
+      <View style={styles.panel}>
+        <View style={styles.panelHeader}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          <Text style={styles.mutedText}>Seller portal alerts</Text>
+        </View>
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: userSecurityPreference.notificationsEnabled }}
+          onPress={() => {
+            updateUserSecurityPreference({
+              notificationsEnabled: !userSecurityPreference.notificationsEnabled,
+            });
+            setSecurityMessage(
+              userSecurityPreference.notificationsEnabled
+                ? 'Notification popups turned off.'
+                : 'Notification popups turned on.',
+            );
+          }}
+          style={({ pressed }) => [styles.infoRow, pressed && styles.pressed]}
+        >
+          <View>
+            <Text style={styles.rowTitle}>In-app alert popups</Text>
+            <Text style={styles.mutedText}>Controls seller notification popups and alert sounds.</Text>
+          </View>
+          <View style={styles.statusPill}>
+            <Text style={styles.statusText}>
+              {userSecurityPreference.notificationsEnabled ? 'On' : 'Off'}
+            </Text>
+          </View>
+        </Pressable>
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: userSecurityPreference.orderNotificationsEnabled }}
+          onPress={() => {
+            updateUserSecurityPreference({
+              orderNotificationsEnabled: !userSecurityPreference.orderNotificationsEnabled,
+            });
+            setSecurityMessage(
+              userSecurityPreference.orderNotificationsEnabled
+                ? 'Order alert popups turned off.'
+                : 'Order alert popups turned on.',
+            );
+          }}
+          style={({ pressed }) => [styles.infoRow, pressed && styles.pressed]}
+        >
+          <View>
+            <Text style={styles.rowTitle}>Order alerts</Text>
+            <Text style={styles.mutedText}>Controls popups for order, delivery, and catalog activity.</Text>
+          </View>
+          <View style={styles.statusPill}>
+            <Text style={styles.statusText}>
+              {userSecurityPreference.orderNotificationsEnabled ? 'On' : 'Off'}
+            </Text>
+          </View>
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -2747,6 +2967,31 @@ export function StoreOwnerDashboardScreen() {
       <View style={styles.panelHeader}>
         <Text style={styles.sectionTitle}>Store profile</Text>
         <Text style={styles.mutedText}>Applied to your listings</Text>
+      </View>
+      <View style={styles.profileCoverPreviewCard}>
+        {profileDraft.coverImage.trim() ? (
+          <Image
+            resizeMode="cover"
+            source={{ uri: profileDraft.coverImage }}
+            style={styles.profileCoverPreviewImage}
+          />
+        ) : (
+          <View style={styles.profileCoverPlaceholder}>
+            <Ionicons color={colors.textMuted} name="image-outline" size={34} />
+            <Text style={styles.previewPlaceholderTitle}>Store cover preview</Text>
+            <Text style={styles.previewPlaceholderText}>
+              Choose a cover photo from your gallery and it will appear here before saving.
+            </Text>
+          </View>
+        )}
+        <View style={styles.profileCoverPreviewBody}>
+          <Text style={styles.rowTitle}>
+            {profileDraft.ownerName.trim() || user.businessName || user.fullName}
+          </Text>
+          <Text style={styles.mutedText}>
+            {profileDraft.address.trim() || 'Pickup/business address preview'}
+          </Text>
+        </View>
       </View>
       <View style={styles.formRow}>
         <View style={styles.formColumn}>
@@ -2823,7 +3068,11 @@ export function StoreOwnerDashboardScreen() {
       </View>
       {profileError ? <Text style={styles.errorText}>{profileError}</Text> : null}
       {profileMessage ? <Text style={styles.successText}>{profileMessage}</Text> : null}
-      <AppButton label="Save profile" onPress={saveProfile} />
+      <AppButton
+        label={isSavingProfile ? 'Saving profile...' : 'Save profile'}
+        loading={isSavingProfile}
+        onPress={() => void saveProfile()}
+      />
     </View>
   );
 
@@ -3639,6 +3888,34 @@ function createStyles(colors: AppColors) {
       ...typography.caption,
       color: colors.textMuted,
       textAlign: 'center',
+    },
+    profileCoverPreviewCard: {
+      gap: spacing.md,
+      overflow: 'hidden',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      ...shadows.soft,
+    },
+    profileCoverPreviewImage: {
+      width: '100%',
+      height: 220,
+      backgroundColor: colors.surfaceMuted,
+    },
+    profileCoverPlaceholder: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      width: '100%',
+      height: 220,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.lg,
+    },
+    profileCoverPreviewBody: {
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.md,
     },
     marketplacePreviewBody: {
       gap: spacing.sm,

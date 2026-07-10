@@ -25,11 +25,13 @@ import type {
   UserSecurityPreference,
   UserStatus,
 } from '../types/auth';
+import { riverParkClusters } from '../types/business';
 import { canAdminEditSensitiveData, isUserActive } from '../utils/businessState';
 import { RANDOM_SIGNUP_PASSWORD } from '../utils/randomSignup';
 import { usePersistentState } from './usePersistentState';
 import {
   completeSupabaseOAuth,
+  createDispatchAccountWithSupabase,
   fetchSupabaseUserProfiles,
   isRecoverableSupabaseSetupError,
   isSupabaseConfigured,
@@ -79,6 +81,20 @@ type AuthContextValue = {
     actorName?: string,
     actorRole?: AdminUser['role'],
   ) => AdminUser;
+  createDispatchAccount: (
+    values: {
+      fullName: string;
+      email: string;
+      phoneNumber: string;
+      password: string;
+      estateId: string;
+      businessCluster?: string;
+      adminEmail?: string;
+      adminPassword?: string;
+    },
+    actorName?: string,
+    actorRole?: AdminUser['role'],
+  ) => Promise<AppUser>;
   updateAdminPassword: (
     adminId: string,
     nextPassword: string,
@@ -112,6 +128,8 @@ const defaultUserSecurityPreference: UserSecurityPreference = {
   biometricEnabled: false,
   passcodeEnabled: false,
   passcode: '',
+  notificationsEnabled: true,
+  orderNotificationsEnabled: true,
   updatedAt: '',
 };
 
@@ -154,7 +172,8 @@ function migrateStoredUser(user: StoredUser): StoredUser {
     lastName,
     fullName: `${firstName} ${lastName}`.trim(),
     phoneNumber: user.phoneNumber?.trim() || `+234${String(user.id).replace(/\D/g, '').slice(0, 10).padEnd(10, '0')}`,
-    riverParkVerified: user.riverParkVerified ?? (user.role === 'resident'),
+    riverParkVerified:
+      user.riverParkVerified ?? (user.role === 'resident' || user.role === 'businessOwner'),
     status: user.status ?? 'active',
     ...(user.businessName ? { businessName: user.businessName } : {}),
     ...(user.businessCluster ? { businessCluster: user.businessCluster } : {}),
@@ -350,7 +369,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const cacheStoredUser = (nextUser: StoredUser) => {
     setStoredUsers((currentUsers) => {
-      const existingUser = currentUsers.find((storedUser) => storedUser.id === nextUser.id);
+      const normalizedNextEmail = nextUser.email.trim().toLowerCase();
+      const normalizedNextPhone = normalizePhoneNumber(nextUser.phoneNumber);
+      const existingUser = currentUsers.find(
+        (storedUser) =>
+          storedUser.id === nextUser.id ||
+          storedUser.email.trim().toLowerCase() === normalizedNextEmail ||
+          Boolean(normalizedNextPhone && normalizePhoneNumber(storedUser.phoneNumber) === normalizedNextPhone),
+      );
       const userWithCachedPassword: StoredUser = {
         ...nextUser,
         password: nextUser.password || existingUser?.password || '',
@@ -358,7 +384,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
       return [
         userWithCachedPassword,
-        ...currentUsers.filter((storedUser) => storedUser.id !== nextUser.id),
+        ...currentUsers.filter((storedUser) => {
+          const sameId = storedUser.id === nextUser.id;
+          const sameEmail = storedUser.email.trim().toLowerCase() === normalizedNextEmail;
+          const samePhone = Boolean(
+            normalizedNextPhone && normalizePhoneNumber(storedUser.phoneNumber) === normalizedNextPhone,
+          );
+
+          return !sameId && !sameEmail && !samePhone;
+        }),
       ];
     });
   };
@@ -788,6 +822,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
         body:
           remoteSignup.user.role === 'businessOwner'
             ? 'Your email is verified and your seller dashboard is ready. Your store application is waiting for admin review.'
+            : remoteSignup.user.role === 'dispatch'
+              ? 'Your email is verified and your dispatch dashboard is ready.'
             : 'Your customer account has been created. You can now shop products, find services, and contact customer care.',
         contextType: 'general',
         contextId: `signup-${remoteSignup.user.id}`,
@@ -927,6 +963,135 @@ export function AuthProvider({ children }: PropsWithChildren) {
     );
 
     return toAdminUser(nextAdmin);
+  };
+
+  const createDispatchAccount = async (
+    values: {
+      fullName: string;
+      email: string;
+      phoneNumber: string;
+      password: string;
+      estateId: string;
+      businessCluster?: string;
+      adminEmail?: string;
+      adminPassword?: string;
+    },
+    actorName = 'View2Connect Owner',
+    actorRole: AdminUser['role'] = 'owner',
+  ) => {
+    if (!canAdminEditSensitiveData(actorRole)) {
+      throw new Error('Only the owner can create dispatch accounts.');
+    }
+
+    const fullName = values.fullName.trim();
+    const email = values.email.trim().toLowerCase();
+    const phoneNumber = values.phoneNumber.trim();
+    const password = values.password.trim();
+    const estateId = values.estateId.trim() || 'river-park';
+    const businessCluster = values.businessCluster?.trim();
+    const matchingCluster = riverParkClusters.find((cluster) => cluster === businessCluster);
+
+    if (!fullName) {
+      throw new Error('Enter the dispatch rider name.');
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('Enter a valid dispatch email.');
+    }
+
+    if (normalizePhoneNumber(phoneNumber).replace(/\D/g, '').length < 10) {
+      throw new Error('Enter a valid dispatch phone number.');
+    }
+
+    if (password.length < 6) {
+      throw new Error('Dispatch password must be at least 6 characters.');
+    }
+
+    if (storedUsers.some((user) => user.email.trim().toLowerCase() === email)) {
+      throw new Error('A user account with that email already exists.');
+    }
+
+    if (
+      storedUsers.some(
+        (user) => normalizePhoneNumber(user.phoneNumber) === normalizePhoneNumber(phoneNumber),
+      )
+    ) {
+      throw new Error('A user account with that phone number already exists.');
+    }
+
+    if (isSupabaseConfigured) {
+      const adminEmail = values.adminEmail?.trim().toLowerCase() ?? '';
+      const adminPassword = values.adminPassword?.trim() ?? '';
+
+      if (!adminEmail || !adminPassword) {
+        throw new Error('Enter your owner admin password before creating a dispatch account.');
+      }
+
+      const remoteDispatch = await createDispatchAccountWithSupabase({
+        adminEmail,
+        adminPassword,
+        fullName,
+        email,
+        phoneNumber,
+        password,
+        estateId,
+        ...(matchingCluster ? { businessCluster: matchingCluster } : {}),
+      });
+      const storedDispatchUser: StoredUser = {
+        ...remoteDispatch.storedUser,
+        password,
+      };
+
+      cacheStoredUser(storedDispatchUser);
+      appendAuditLog(
+        actorName,
+        actorRole,
+        'Dispatch account created',
+        `${fullName} was added as a dispatch rider.`,
+      );
+
+      return remoteDispatch.user;
+    }
+
+    const createdAt = new Date().toISOString();
+    const nameParts = fullName.split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] ?? 'Dispatch';
+    const lastName = nameParts.slice(1).join(' ') || 'Rider';
+    const nextDispatchUser: StoredUser = {
+      id: `dispatch-${Date.now()}`,
+      firstName,
+      lastName,
+      fullName,
+      email,
+      phoneNumber,
+      password,
+      role: 'dispatch',
+      estateId,
+      riverParkVerified: true,
+      status: 'active',
+      createdAt,
+      ...(matchingCluster ? { businessCluster: matchingCluster } : {}),
+    };
+
+    setStoredUsers((currentUsers) => [nextDispatchUser, ...currentUsers]);
+    appendAuditLog(
+      actorName,
+      actorRole,
+      'Dispatch account created',
+      `${fullName} was added as a dispatch rider.`,
+    );
+    appendNotification({
+      userId: nextDispatchUser.id,
+      userName: nextDispatchUser.fullName,
+      recipientEmail: nextDispatchUser.email,
+      audience: 'dispatch',
+      title: 'Dispatch account created',
+      body: 'Your View2Connect dispatch account is ready. Use Dispatch Login to access delivery work.',
+      contextType: 'general',
+      contextId: `dispatch-account-${nextDispatchUser.id}`,
+    });
+
+    return toAppUser(nextDispatchUser);
   };
 
   const updateAdminPassword = (
@@ -1107,6 +1272,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       signOutAdmin,
       setAdminAccountActive,
       createCustomerCareAccount,
+      createDispatchAccount,
       updateAdminPassword,
       setUserStatus,
       setUserRiverParkVerification,
