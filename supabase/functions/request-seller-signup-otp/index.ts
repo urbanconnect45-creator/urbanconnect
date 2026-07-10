@@ -78,7 +78,9 @@ serve(async (request) => {
     'Content-Type': 'application/json',
   };
   const profileResponse = await fetch(
-    `${supabaseUrl}/rest/v1/app_users?select=id,email&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(
+      email,
+    )}&role=eq.businessOwner&limit=1`,
     { headers: serviceHeaders },
   );
   const profileRows = profileResponse.ok
@@ -87,27 +89,7 @@ serve(async (request) => {
 
   if (profileRows.length > 0) {
     return jsonResponse(
-      { error: 'This email is already registered. Use a different email for the store owner account.' },
-      409,
-    );
-  }
-
-  const usersResponse = await fetch(
-    `${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1000`,
-    { headers: serviceHeaders },
-  );
-  const usersPayload = usersResponse.ok
-    ? ((await usersResponse.json().catch(() => ({}))) as {
-        users?: Array<{ email?: string }>;
-      })
-    : {};
-  const authUserExists = usersPayload.users?.some(
-    (user) => user.email?.trim().toLowerCase() === email,
-  );
-
-  if (authUserExists) {
-    return jsonResponse(
-      { error: 'This email is already registered. Use a different email for the store owner account.' },
+      { error: 'A store owner account with this email already exists. Use store owner login instead.' },
       409,
     );
   }

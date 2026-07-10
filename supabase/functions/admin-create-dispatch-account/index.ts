@@ -52,6 +52,14 @@ function splitName(value: string) {
   return { firstName, lastName };
 }
 
+function scopedAuthEmail(email: string, role: 'dispatch') {
+  const [localPart, domainPart = 'view2connect.local'] = email.split('@');
+  const safeLocal = localPart.replace(/[^a-z0-9._-]+/gi, '-').slice(0, 48) || 'account';
+  const safeDomain = domainPart.replace(/[^a-z0-9.-]+/gi, '-').slice(0, 120) || 'view2connect.local';
+
+  return `${safeLocal}+v2c-${role}@${safeDomain}`.toLowerCase();
+}
+
 async function readJson(response: Response) {
   const text = await response.text();
 
@@ -144,7 +152,9 @@ serve(async (request) => {
   }
 
   const existingProfileResponse = await fetch(
-    `${supabaseUrl}/rest/v1/app_users?select=id,email&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(
+      email,
+    )}&role=eq.dispatch&limit=1`,
     { headers: serviceHeaders },
   );
   const existingProfiles = existingProfileResponse.ok
@@ -152,7 +162,21 @@ serve(async (request) => {
     : [];
 
   if (existingProfiles.length > 0) {
-    return jsonResponse({ error: 'A View2Connect account with that email already exists.' }, 409);
+    return jsonResponse({ error: 'A dispatch account with that email already exists.' }, 409);
+  }
+
+  const existingPhoneResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=id,phone_number,role&phone_number=eq.${encodeURIComponent(
+      phoneNumber,
+    )}&role=eq.dispatch&limit=1`,
+    { headers: serviceHeaders },
+  );
+  const existingPhoneProfiles = existingPhoneResponse.ok
+    ? ((await existingPhoneResponse.json()) as Array<{ id: string }>)
+    : [];
+
+  if (existingPhoneProfiles.length > 0) {
+    return jsonResponse({ error: 'A dispatch account with that phone number already exists.' }, 409);
   }
 
   const usersResponse = await fetch(
@@ -160,12 +184,16 @@ serve(async (request) => {
     { headers: serviceHeaders },
   );
   const usersPayload = (await readJson(usersResponse)) as { users?: AuthUser[] };
-  const authUserExists = usersPayload.users?.some(
+  const visibleAuthUserExists = usersPayload.users?.some(
     (user) => user.email?.trim().toLowerCase() === email,
   );
+  const authEmail = visibleAuthUserExists ? scopedAuthEmail(email, 'dispatch') : email;
+  const roleAuthUserExists = usersPayload.users?.some(
+    (user) => user.email?.trim().toLowerCase() === authEmail,
+  );
 
-  if (authUserExists) {
-    return jsonResponse({ error: 'A Supabase Auth account with that email already exists.' }, 409);
+  if (roleAuthUserExists) {
+    return jsonResponse({ error: 'A dispatch auth account with that email already exists.' }, 409);
   }
 
   const { firstName, lastName } = splitName(fullName);
@@ -174,10 +202,11 @@ serve(async (request) => {
     method: 'POST',
     headers: serviceHeaders,
     body: JSON.stringify({
-      email,
+      email: authEmail,
       password,
       email_confirm: true,
       user_metadata: {
+        account_email: email,
         first_name: firstName,
         last_name: lastName,
         full_name: fullName,
@@ -203,6 +232,7 @@ serve(async (request) => {
     last_name: lastName,
     full_name: fullName,
     email,
+    auth_email: authEmail,
     phone_number: phoneNumber,
     password_hash: 'supabase-auth-managed',
     role: 'dispatch',

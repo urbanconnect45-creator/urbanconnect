@@ -82,6 +82,7 @@ type SupabaseProfileRow = {
   last_name: string;
   full_name: string;
   email: string;
+  auth_email?: string | null;
   phone_number: string;
   password_hash?: string | null;
   role: UserRole;
@@ -780,6 +781,10 @@ function profileToAppUser(row: SupabaseProfileRow): AppUser {
   };
 }
 
+function getProfileAuthEmail(row: SupabaseProfileRow) {
+  return optionalString(row.auth_email) ?? row.email;
+}
+
 function profileToStoredUser(row: SupabaseProfileRow): StoredUser {
   return {
     ...profileToAppUser(row),
@@ -851,6 +856,7 @@ function buildProfilePayload(
     last_name: lastName,
     full_name: fullName,
     email: values?.email.trim().toLowerCase() || authUser.email || '',
+    auth_email: authUser.email || values?.email.trim().toLowerCase() || '',
     phone_number:
       values?.phoneNumber.trim() ||
       authUser.phone ||
@@ -926,24 +932,35 @@ async function fetchProfile(userId: string, accessToken?: string) {
   return rows[0] ? profileToAppUser(rows[0]) : undefined;
 }
 
-async function fetchProfileByEmail(email: string, accessToken?: string) {
+async function fetchProfileByAuthEmail(authEmail: string, accessToken?: string) {
   const rows = await supabaseRequest<SupabaseProfileRow[]>(
-    `/rest/v1/app_users?select=*&email=eq.${encodeURIComponent(email.trim().toLowerCase())}&limit=1`,
+    `/rest/v1/app_users?select=*&auth_email=eq.${encodeURIComponent(authEmail.trim().toLowerCase())}&limit=1`,
     { accessToken },
   );
 
   return rows[0] ? profileToAppUser(rows[0]) : undefined;
 }
 
-async function fetchProfileByPhone(phoneNumber: string, accessToken?: string) {
+async function fetchProfileByEmailAndRole(email: string, role: UserRole, accessToken?: string) {
   const rows = await supabaseRequest<SupabaseProfileRow[]>(
-    `/rest/v1/app_users?select=*&phone_number=eq.${encodeURIComponent(
-      phoneNumber.trim(),
-    )}&limit=1`,
+    `/rest/v1/app_users?select=*&email=eq.${encodeURIComponent(
+      email.trim().toLowerCase(),
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
     { accessToken },
   );
 
-  return rows[0] ? profileToAppUser(rows[0]) : undefined;
+  return rows[0] ? { profile: profileToAppUser(rows[0]), authEmail: getProfileAuthEmail(rows[0]) } : undefined;
+}
+
+async function fetchProfileByPhoneAndRole(phoneNumber: string, role: UserRole, accessToken?: string) {
+  const rows = await supabaseRequest<SupabaseProfileRow[]>(
+    `/rest/v1/app_users?select=*&phone_number=eq.${encodeURIComponent(
+      phoneNumber.trim(),
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
+    { accessToken },
+  );
+
+  return rows[0] ? { profile: profileToAppUser(rows[0]), authEmail: getProfileAuthEmail(rows[0]) } : undefined;
 }
 
 async function syncProfileNameFromAuth(
@@ -1003,52 +1020,32 @@ async function resolveSupabaseEmail(identifier: string, requiredRole?: UserRole)
     const email = normalizedIdentifier.toLowerCase();
 
     if (requiredRole) {
-      const profile = await fetchProfileByEmail(email);
+      const result = await fetchProfileByEmailAndRole(email, requiredRole);
 
-      if (!profile) {
+      if (!result) {
         throw new SupabaseApiError(
           `No ${roleLabel(requiredRole)} account was found for this email.`,
           404,
         );
       }
 
-      if (profile.role !== requiredRole) {
-        throw new SupabaseApiError(
-          `This email is registered as a ${roleLabel(
-            profile.role,
-          )} account. Use the ${roleLabel(profile.role)} login, or use a different email for ${roleLabel(
-            requiredRole,
-          )}.`,
-          403,
-        );
-      }
+      return result.authEmail;
     }
 
     return email;
   }
 
   if (requiredRole) {
-    const profile = await fetchProfileByPhone(normalizedIdentifier);
+    const result = await fetchProfileByPhoneAndRole(normalizedIdentifier, requiredRole);
 
-    if (!profile) {
+    if (!result) {
       throw new SupabaseApiError(
         `No ${roleLabel(requiredRole)} account was found for this phone number.`,
         404,
       );
     }
 
-    if (profile.role !== requiredRole) {
-      throw new SupabaseApiError(
-        `This phone number is registered as a ${roleLabel(
-          profile.role,
-        )} account. Use the ${roleLabel(profile.role)} login, or use a different phone number for ${roleLabel(
-          requiredRole,
-        )}.`,
-        403,
-      );
-    }
-
-    return profile.email;
+    return result.authEmail;
   }
 
   const rows = await supabaseRequest<Pick<SupabaseProfileRow, 'email'>[]>(
@@ -1099,6 +1096,7 @@ async function updateExistingProfileFromSignup(
     last_name: nextProfile.last_name,
     full_name: nextProfile.full_name,
     email: nextProfile.email,
+    auth_email: nextProfile.auth_email ?? nextProfile.email,
     phone_number: nextProfile.phone_number,
     password_hash: 'supabase-auth-managed',
     role: nextProfile.role,
@@ -1138,24 +1136,24 @@ async function getOrCreateProfile(
   values?: SignUpFormValues,
 ) {
   const existingProfile = await fetchProfile(authUser.id, accessToken).catch(() => undefined);
-  const existingEmailProfile = authUser.email
-    ? await fetchProfileByEmail(authUser.email, accessToken).catch(() => undefined)
+  const existingAuthProfile = authUser.email
+    ? await fetchProfileByAuthEmail(authUser.email, accessToken).catch(() => undefined)
     : undefined;
-  const publicEmailProfile =
-    !existingEmailProfile && authUser.email && accessToken
-      ? await fetchProfileByEmail(authUser.email).catch(() => undefined)
+  const publicAuthProfile =
+    !existingAuthProfile && authUser.email && accessToken
+      ? await fetchProfileByAuthEmail(authUser.email).catch(() => undefined)
       : undefined;
-  const emailProfile = existingEmailProfile ?? publicEmailProfile;
+  const authProfile = existingAuthProfile ?? publicAuthProfile;
 
-  if (emailProfile && existingProfile && existingProfile.id !== emailProfile.id) {
+  if (authProfile && existingProfile && existingProfile.id !== authProfile.id) {
     if (values) {
       throw new SupabaseApiError(
-        'This email is already registered. Please sign in with the existing account instead.',
+        'This auth identity is already connected to another account. Please sign in with the existing account instead.',
         409,
       );
     }
 
-    return syncProfileNameFromAuth(emailProfile, authUser, accessToken);
+    return syncProfileNameFromAuth(authProfile, authUser, accessToken);
   }
 
   if (existingProfile) {
@@ -1164,17 +1162,17 @@ async function getOrCreateProfile(
       : syncProfileNameFromAuth(existingProfile, authUser, accessToken);
   }
 
-  if (emailProfile) {
-    if (values && emailProfile.id !== authUser.id) {
+  if (authProfile) {
+    if (values && authProfile.id !== authUser.id) {
       throw new SupabaseApiError(
-        'This email is already registered. Please sign in with the existing account instead.',
+        'This auth identity is already connected to another account. Please sign in with the existing account instead.',
         409,
       );
     }
 
     return values
-      ? updateExistingProfileFromSignup(emailProfile, authUser, values, accessToken)
-      : syncProfileNameFromAuth(emailProfile, authUser, accessToken);
+      ? updateExistingProfileFromSignup(authProfile, authUser, values, accessToken)
+      : syncProfileNameFromAuth(authProfile, authUser, accessToken);
   }
 
   return upsertProfile(authUser, values, accessToken);
@@ -1323,16 +1321,17 @@ export async function signUpWithSupabase(
     },
   });
   let passwordResponse: SupabaseAuthResponse;
+  const authEmail = await resolveSupabaseEmail(values.email.trim().toLowerCase(), values.role);
 
   try {
     passwordResponse = await requestPasswordSession(
-      values.email.trim().toLowerCase(),
+      authEmail,
       values.password,
     );
   } catch {
     await new Promise((resolve) => setTimeout(resolve, 350));
     passwordResponse = await requestPasswordSession(
-      values.email.trim().toLowerCase(),
+      authEmail,
       values.password,
     );
   }
@@ -1524,43 +1523,27 @@ export async function completeSupabaseOAuth(url: string) {
 
   if (requestedUserRole) {
     const existingProfile = await fetchProfile(authUser.id, accessToken).catch(() => undefined);
-    const existingEmailProfile = authUser.email
-      ? await fetchProfileByEmail(authUser.email, accessToken).catch(() => undefined)
+    const existingAuthProfile = authUser.email
+      ? await fetchProfileByAuthEmail(authUser.email, accessToken).catch(() => undefined)
       : undefined;
-    const publicEmailProfile =
-      !existingEmailProfile && authUser.email
-        ? await fetchProfileByEmail(authUser.email).catch(() => undefined)
+    const publicAuthProfile =
+      !existingAuthProfile && authUser.email
+        ? await fetchProfileByAuthEmail(authUser.email).catch(() => undefined)
         : undefined;
-    const matchingProfile = existingEmailProfile ?? publicEmailProfile ?? existingProfile;
+    const matchingProfile = existingAuthProfile ?? publicAuthProfile ?? existingProfile;
     const isSignupFlow = oauthMode === 'signup' || requestedUserRole === 'resident';
 
     if (matchingProfile && matchingProfile.role !== requestedUserRole) {
-      const profileCreatedAt = new Date(matchingProfile.createdAt).getTime();
-      const looksLikeFreshOAuthDefault =
-        isSignupFlow &&
-        requestedUserRole !== 'resident' &&
-        matchingProfile.role === 'resident' &&
-        matchingProfile.id === authUser.id &&
-        Number.isFinite(profileCreatedAt) &&
-        Date.now() - profileCreatedAt < 5 * 60 * 1000;
+      await signOutSupabase(accessToken).catch(() => undefined);
 
-      if (looksLikeFreshOAuthDefault) {
-        user = await updateExistingProfileFromSignup(
-          matchingProfile,
-          authUser,
-          buildOAuthSignupValues(authUser, requestedUserRole),
-          accessToken,
-        );
-      } else {
-        await signOutSupabase(accessToken).catch(() => undefined);
-
-        throw new SupabaseApiError(
-          `This email is already registered as a ${roleLabel(
-            matchingProfile.role,
-          )} account. Use that portal instead.`,
-          403,
-        );
-      }
+      throw new SupabaseApiError(
+        `This Google account is already connected to a ${roleLabel(
+          matchingProfile.role,
+        )} account. Create or log in to ${roleLabel(
+          requestedUserRole,
+        )} with password/OTP to keep that role isolated.`,
+        403,
+      );
     } else if (!matchingProfile && !isSignupFlow) {
       await signOutSupabase(accessToken).catch(() => undefined);
 

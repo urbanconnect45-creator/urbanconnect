@@ -581,7 +581,7 @@ export function buildSellerRegistrationHtml({
         const passwordLoginResponse = await fetch(supabaseUrl + '/auth/v1/token?grant_type=password', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email: payload.authEmail || email, password }),
         });
         const passwordSession = await passwordLoginResponse.json().catch(() => ({}));
         if (!passwordLoginResponse.ok || !passwordSession.access_token) {

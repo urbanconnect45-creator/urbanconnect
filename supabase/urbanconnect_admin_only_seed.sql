@@ -85,10 +85,11 @@ create table if not exists public.app_users (
   first_name text not null,
   last_name text not null,
   full_name text not null,
-  email text not null unique,
-  phone_number text not null unique,
+  email text not null,
+  auth_email text not null unique,
+  phone_number text not null,
   password_hash text not null default 'supabase-auth-managed',
-  role text not null check (role in ('resident', 'businessOwner')),
+  role text not null check (role in ('resident', 'businessOwner', 'dispatch')),
   estate_id text not null references public.estates(id) on delete restrict,
   business_name text,
   business_cluster text,
@@ -97,6 +98,12 @@ create table if not exists public.app_users (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create unique index if not exists app_users_email_role_unique
+  on public.app_users (lower(email), role);
+
+create unique index if not exists app_users_phone_role_unique
+  on public.app_users (lower(phone_number), role);
 
 alter table public.app_users alter column password_hash set default 'supabase-auth-managed';
 alter table public.app_users alter column password_hash drop not null;

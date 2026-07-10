@@ -15,6 +15,7 @@ type RequestPayload = {
 type ProfileRow = {
   id: string;
   email: string;
+  phone_number?: string;
   role?: 'resident' | 'businessOwner' | 'dispatch';
 };
 
@@ -51,11 +52,9 @@ function roleLabel(role?: ProfileRow['role']) {
 }
 
 function duplicateAccountMessage(existingRole: ProfileRow['role'], requestedRole: RequestPayload['role']) {
-  return `This email is registered as a ${roleLabel(
-    existingRole,
-  )} account. Use the ${roleLabel(existingRole)} login, or use a different email for ${roleLabel(
+  return `A ${roleLabel(requestedRole)} account with this email already exists. Use ${roleLabel(
     requestedRole,
-  )}.`;
+  )} login instead.`;
 }
 
 async function hashCode(email: string, code: string, secret: string) {
@@ -131,7 +130,9 @@ serve(async (request) => {
   };
 
   const profileResponse = await fetch(
-    `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&email=eq.${encodeURIComponent(
+      email,
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
     { headers: serviceHeaders },
   );
   const profileRows = profileResponse.ok
@@ -147,23 +148,19 @@ serve(async (request) => {
     );
   }
 
-  const usersResponse = await fetch(
-    `${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1000`,
+  const phoneResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&phone_number=eq.${encodeURIComponent(
+      phoneNumber,
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
     { headers: serviceHeaders },
   );
-  const usersPayload = usersResponse.ok
-    ? ((await usersResponse.json().catch(() => ({}))) as { users?: Array<{ email?: string }> })
-    : {};
-  const authUserExists = usersPayload.users?.some(
-    (user) => user.email?.trim().toLowerCase() === email,
-  );
+  const phoneRows = phoneResponse.ok
+    ? ((await phoneResponse.json().catch(() => [])) as ProfileRow[])
+    : [];
 
-  if (authUserExists) {
+  if (Array.isArray(phoneRows) && phoneRows.length > 0) {
     return jsonResponse(
-      {
-        error:
-          'This email already has a Supabase login but no View2Connect role profile. Use the original portal or contact admin to repair the account.',
-      },
+      { error: `A ${roleLabel(role)} account with this phone number already exists.` },
       409,
     );
   }

@@ -173,11 +173,17 @@ function roleConflictMessage(
   requestedRole: AppUser['role'],
   identifierLabel: 'email' | 'phone number' = 'email',
 ) {
-  return `This ${identifierLabel} is registered as a ${authRoleLabel(
+  if (existingRole === requestedRole) {
+    return `A ${authRoleLabel(requestedRole)} account with that ${identifierLabel} already exists.`;
+  }
+
+  return `This ${identifierLabel} is already used by a separate ${authRoleLabel(
     existingRole,
-  )} account. Use the ${authRoleLabel(existingRole)} login, or use a different ${identifierLabel} for ${authRoleLabel(
+  )} account. You can create an isolated ${authRoleLabel(
     requestedRole,
-  )}.`;
+  )} account with the same ${identifierLabel}, but use the ${authRoleLabel(
+    requestedRole,
+  )} login for that role.`;
 }
 
 function migrateStoredUser(user: StoredUser): StoredUser {
@@ -596,7 +602,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return normalizedEmail === normalizedIdentifier || normalizedPhone === normalizedIdentifier;
         });
 
-        if (existingIdentity && existingIdentity.role !== requestedRole) {
+        if (existingIdentity && existingIdentity.role === requestedRole) {
           throw new Error(
             roleConflictMessage(
               existingIdentity.role,
@@ -811,7 +817,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const normalizedEmail = values.email.trim().toLowerCase();
     const normalizedPhone = normalizePhoneNumber(values.phoneNumber);
     const existingEmailUser = storedUsers.find(
-      (item) => item.email.trim().toLowerCase() === normalizedEmail,
+      (item) => item.email.trim().toLowerCase() === normalizedEmail && item.role === values.role,
     );
 
     if (existingEmailUser) {
@@ -819,7 +825,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
 
     const existingPhoneUser = storedUsers.find(
-      (item) => normalizePhoneNumber(item.phoneNumber) === normalizedPhone,
+      (item) => normalizePhoneNumber(item.phoneNumber) === normalizedPhone && item.role === values.role,
     );
 
     if (existingPhoneUser) {
@@ -1050,7 +1056,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
 
     const existingEmailUser = storedUsers.find(
-      (user) => user.email.trim().toLowerCase() === email,
+      (user) => user.email.trim().toLowerCase() === email && user.role === 'dispatch',
     );
 
     if (existingEmailUser) {
@@ -1058,7 +1064,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
 
     const existingPhoneUser = storedUsers.find(
-      (user) => normalizePhoneNumber(user.phoneNumber) === normalizePhoneNumber(phoneNumber),
+      (user) =>
+        normalizePhoneNumber(user.phoneNumber) === normalizePhoneNumber(phoneNumber) &&
+        user.role === 'dispatch',
     );
 
     if (existingPhoneUser) {

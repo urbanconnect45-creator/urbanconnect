@@ -64,6 +64,14 @@ function splitName(value: string) {
   return { firstName, lastName };
 }
 
+function scopedAuthEmail(email: string, role: 'businessOwner') {
+  const [localPart, domainPart = 'view2connect.local'] = email.split('@');
+  const safeLocal = localPart.replace(/[^a-z0-9._-]+/gi, '-').slice(0, 48) || 'account';
+  const safeDomain = domainPart.replace(/[^a-z0-9.-]+/gi, '-').slice(0, 120) || 'view2connect.local';
+
+  return `${safeLocal}+v2c-${role}@${safeDomain}`.toLowerCase();
+}
+
 async function hashCode(email: string, code: string, secret: string) {
   const bytes = new TextEncoder().encode(`${email}:${code}:${secret}`);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -188,11 +196,17 @@ serve(async (request) => {
     { headers: serviceHeaders },
   );
   const usersPayload = (await readJson(usersResponse)) as { users?: AuthUser[] };
-  const authUserWithEmail = usersPayload.users?.find(
+  const visibleAuthUserExists = usersPayload.users?.some(
     (user) => user.email?.trim().toLowerCase() === email,
   );
+  const authEmail = visibleAuthUserExists ? scopedAuthEmail(email, 'businessOwner') : email;
+  const roleAuthUserExists = usersPayload.users?.some(
+    (user) => user.email?.trim().toLowerCase() === authEmail,
+  );
   const existingProfileResponse = await fetch(
-    `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&email=eq.${encodeURIComponent(
+      email,
+    )}&role=eq.businessOwner&limit=1`,
     { headers: serviceHeaders },
   );
   const existingProfiles = existingProfileResponse.ok
@@ -200,18 +214,36 @@ serve(async (request) => {
     : [];
   const existingProfile = existingProfiles[0];
 
-  if (existingProfile || authUserWithEmail) {
+  if (existingProfile || roleAuthUserExists) {
     return jsonResponse(
       {
         error:
-          'This email is already registered. Use a different email for the store owner account.',
+          'A store owner account with this email already exists. Use store owner login instead.',
       },
+      409,
+    );
+  }
+
+  const existingPhoneResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&phone_number=eq.${encodeURIComponent(
+      phone,
+    )}&role=eq.businessOwner&limit=1`,
+    { headers: serviceHeaders },
+  );
+  const existingPhoneProfiles = existingPhoneResponse.ok
+    ? ((await existingPhoneResponse.json()) as AppUserRow[])
+    : [];
+
+  if (existingPhoneProfiles.length > 0) {
+    return jsonResponse(
+      { error: 'A store owner account with this phone number already exists.' },
       409,
     );
   }
 
   const { firstName, lastName } = splitName(ownerName);
   const userMetadata = {
+    account_email: email,
     first_name: firstName,
     last_name: lastName,
     full_name: ownerName,
@@ -228,7 +260,7 @@ serve(async (request) => {
     method: 'POST',
     headers: serviceHeaders,
     body: JSON.stringify({
-      email,
+      email: authEmail,
       password,
       email_confirm: true,
       user_metadata: userMetadata,
@@ -251,6 +283,7 @@ serve(async (request) => {
     last_name: lastName,
     full_name: ownerName,
     email,
+    auth_email: authEmail,
     phone_number: phone,
     password_hash: 'supabase-auth-managed',
     role: 'businessOwner',
@@ -403,6 +436,7 @@ serve(async (request) => {
     status: 'created',
     applicationId,
     email,
+    authEmail,
     profileUserId,
     selectedPlan,
   });

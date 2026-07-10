@@ -21,6 +21,7 @@ type AuthUser = {
 type ProfileRow = {
   id: string;
   email: string;
+  phone_number?: string;
   role?: 'resident' | 'businessOwner' | 'dispatch';
 };
 
@@ -57,11 +58,17 @@ function roleLabel(role?: ProfileRow['role']) {
 }
 
 function duplicateAccountMessage(existingRole: ProfileRow['role'], requestedRole: CompletePayload['role']) {
-  return `This email is registered as a ${roleLabel(
-    existingRole,
-  )} account. Use the ${roleLabel(existingRole)} login, or use a different email for ${roleLabel(
+  return `A ${roleLabel(requestedRole)} account with this email already exists. Use ${roleLabel(
     requestedRole,
-  )}.`;
+  )} login instead.`;
+}
+
+function scopedAuthEmail(email: string, role: CompletePayload['role']) {
+  const [localPart, domainPart = 'view2connect.local'] = email.split('@');
+  const safeLocal = localPart.replace(/[^a-z0-9._-]+/gi, '-').slice(0, 48) || 'account';
+  const safeDomain = domainPart.replace(/[^a-z0-9.-]+/gi, '-').slice(0, 120) || 'view2connect.local';
+
+  return `${safeLocal}+v2c-${role}@${safeDomain}`.toLowerCase();
 }
 
 async function hashCode(email: string, code: string, secret: string) {
@@ -191,7 +198,9 @@ serve(async (request) => {
   }
 
   const profileResponse = await fetch(
-    `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&email=eq.${encodeURIComponent(
+      email,
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
     { headers: serviceHeaders },
   );
   const profileRows = profileResponse.ok
@@ -207,20 +216,41 @@ serve(async (request) => {
     );
   }
 
+  const phoneResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=id,email,phone_number,role&phone_number=eq.${encodeURIComponent(
+      phoneNumber,
+    )}&role=eq.${encodeURIComponent(role)}&limit=1`,
+    { headers: serviceHeaders },
+  );
+  const phoneRows = phoneResponse.ok
+    ? ((await phoneResponse.json().catch(() => [])) as ProfileRow[])
+    : [];
+
+  if (Array.isArray(phoneRows) && phoneRows.length > 0) {
+    return jsonResponse(
+      { error: `A ${roleLabel(role)} account with this phone number already exists.` },
+      409,
+    );
+  }
+
   const usersResponse = await fetch(
     `${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1000`,
     { headers: serviceHeaders },
   );
   const usersPayload = (await readJson(usersResponse)) as { users?: AuthUser[] };
-  const authUserExists = usersPayload.users?.some(
+  const visibleAuthUserExists = usersPayload.users?.some(
     (user) => user.email?.trim().toLowerCase() === email,
   );
+  const authEmail = visibleAuthUserExists ? scopedAuthEmail(email, role) : email;
+  const roleAuthUserExists = usersPayload.users?.some(
+    (user) => user.email?.trim().toLowerCase() === authEmail,
+  );
 
-  if (authUserExists) {
+  if (roleAuthUserExists) {
     return jsonResponse(
       {
         error:
-          'This email already has a Supabase login but no View2Connect role profile. Use the original portal or contact admin to repair the account.',
+          'This role already has an auth login for that email. Use login or contact admin to repair the account.',
       },
       409,
     );
@@ -230,10 +260,11 @@ serve(async (request) => {
     method: 'POST',
     headers: serviceHeaders,
     body: JSON.stringify({
-      email,
+      email: authEmail,
       password,
       email_confirm: true,
       user_metadata: {
+        account_email: email,
         first_name: firstName,
         last_name: lastName,
         full_name: `${firstName} ${lastName}`.trim(),
@@ -260,6 +291,7 @@ serve(async (request) => {
     last_name: lastName,
     full_name: `${firstName} ${lastName}`.trim(),
     email,
+    auth_email: authEmail,
     phone_number: phoneNumber,
     password_hash: 'supabase-auth-managed',
     role,
