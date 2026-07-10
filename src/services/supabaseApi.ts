@@ -1008,6 +1008,46 @@ async function syncProfileNameFromAuth(
         Prefer: 'return=representation',
       },
     },
+  ).catch((error) => {
+    throw error instanceof SupabaseApiError
+      ? error
+      : new SupabaseApiError('Unable to connect this Google account to the dispatch profile.', 502);
+  });
+
+  if (!rows[0]) {
+    throw new SupabaseApiError(
+      'Unable to connect this Google account to the dispatch profile.',
+      502,
+    );
+  }
+
+  return profileToAppUser(rows[0]);
+}
+
+async function attachAuthEmailToProfile(
+  profile: AppUser,
+  authUser: SupabaseAuthUser,
+  accessToken?: string,
+) {
+  const authEmail = authUser.email?.trim().toLowerCase();
+
+  if (!authEmail) {
+    return profile;
+  }
+
+  const rows = await supabaseRequest<SupabaseProfileRow[]>(
+    `/rest/v1/app_users?id=eq.${encodeURIComponent(profile.id)}`,
+    {
+      method: 'PATCH',
+      accessToken,
+      body: {
+        auth_email: authEmail,
+        updated_at: new Date().toISOString(),
+      },
+      headers: {
+        Prefer: 'return=representation',
+      },
+    },
   ).catch(() => []);
 
   return rows[0] ? profileToAppUser(rows[0]) : profile;
@@ -1531,6 +1571,12 @@ export async function completeSupabaseOAuth(url: string) {
         ? await fetchProfileByAuthEmail(authUser.email).catch(() => undefined)
         : undefined;
     const matchingProfile = existingAuthProfile ?? publicAuthProfile ?? existingProfile;
+    const requestedEmailProfile =
+      !matchingProfile && authUser.email
+        ? await fetchProfileByEmailAndRole(authUser.email, requestedUserRole, accessToken)
+            .then((result) => result?.profile)
+            .catch(() => undefined)
+        : undefined;
     const isSignupFlow = oauthMode === 'signup' || requestedUserRole === 'resident';
 
     if (matchingProfile && matchingProfile.role !== requestedUserRole) {
@@ -1544,12 +1590,19 @@ export async function completeSupabaseOAuth(url: string) {
         )} with password/OTP to keep that role isolated.`,
         403,
       );
+    } else if (!matchingProfile && requestedEmailProfile) {
+      const attachedProfile = await attachAuthEmailToProfile(
+        requestedEmailProfile,
+        authUser,
+        accessToken,
+      );
+      user = await syncProfileNameFromAuth(attachedProfile, authUser, accessToken);
     } else if (!matchingProfile && !isSignupFlow) {
       await signOutSupabase(accessToken).catch(() => undefined);
 
       if (requestedUserRole === 'dispatch') {
         throw new SupabaseApiError(
-          'This account is not registered as a dispatch account.',
+          'This Google account is not connected to a dispatch account yet. Use dispatch password login, or create the dispatch account with Google first.',
           403,
         );
       }
