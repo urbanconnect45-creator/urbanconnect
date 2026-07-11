@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
+import { AdvertisementCard } from '../components/AdvertisementCard';
 import { AppButton } from '../components/AppButton';
 import { ProductCard } from '../components/ProductCard';
 import { ProfessionCard } from '../components/ProfessionCard';
@@ -12,32 +13,90 @@ import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { formatNumber } from '../utils/format';
 import { isPublicBusiness } from '../utils/businessState';
+import { getContactActions, openContactAction } from '../utils/contact';
 
 export function SellerProfileScreen({ navigation, route }: SellerProfileScreenProps) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
+  const { width } = useWindowDimensions();
   const { findUserById, user } = useAuth();
-  const { addToCart, businesses, isBusinessOwnedByUser } = useBusinessDirectory();
+  const {
+    addToCart,
+    businesses,
+    cartEntries,
+    getAvailableStock,
+    isBusinessOwnedByUser,
+    isCustomerAdvertisement,
+    isStoreOwnerListing,
+    sendChatMessage,
+    updateCartQuantity,
+  } = useBusinessDirectory();
   const seller = findUserById(route.params.userId);
+  const profileListings = businesses.filter(
+    (business) =>
+      isPublicBusiness(business) &&
+      [business.ownerUserId, business.ownerEmail, business.ownerName]
+        .map((key) => key?.trim().toLowerCase())
+        .includes(route.params.userId.trim().toLowerCase()),
+  );
+  const profileSeed = profileListings[0];
 
-  if (!seller) {
+  if (!seller && !profileSeed) {
     return (
       <View style={styles.emptyShell}>
-        <Text style={styles.emptyTitle}>Business profile not found</Text>
+        <Text style={styles.emptyTitle}>Profile not found</Text>
         <Text style={styles.emptyText}>
-          This seller profile may no longer be available.
+          This store or advertiser profile may no longer be available.
         </Text>
       </View>
     );
   }
 
-  const sellerListings = businesses.filter(
-    (business) => business.ownerUserId === seller.id && isPublicBusiness(business),
-  );
+  const sellerListings = seller
+    ? businesses.filter(
+        (business) => business.ownerUserId === seller.id && isPublicBusiness(business),
+      )
+    : profileListings;
   const profileBusiness = sellerListings[0] ?? null;
-  const productListings = sellerListings.filter((business) => business.listingType === 'product');
-  const serviceListing = sellerListings.find((business) => business.listingType === 'profession');
+  const isStoreOwnerProfile = seller?.role === 'businessOwner' || sellerListings.some(isStoreOwnerListing);
+  const productListings = sellerListings.filter((business) =>
+    isStoreOwnerProfile
+      ? business.listingType === 'product' && isStoreOwnerListing(business)
+      : isCustomerAdvertisement(business),
+  );
+  const serviceListing = isStoreOwnerProfile
+    ? sellerListings.find((business) => business.listingType === 'profession')
+    : undefined;
+  const advertisementServices = isStoreOwnerProfile
+    ? []
+    : sellerListings.filter(
+        (business) => business.listingType === 'profession' && isCustomerAdvertisement(business),
+      );
   const avatarSource = profileBusiness?.imageUrl;
+  const displayName = seller?.businessName ?? seller?.fullName ?? profileSeed?.ownerName ?? 'Advertiser';
+  const contactBusiness = profileBusiness ?? profileSeed;
+  const gridCardWidth = width >= 900 ? '48%' : '100%';
+  const messageAdvertiser = (business: typeof sellerListings[number]) => {
+    if (!user) {
+      navigation.navigate('AuthPrompt');
+      return;
+    }
+
+    sendChatMessage(
+      business.id,
+      user,
+      `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
+    );
+    navigation.navigate('Chats');
+  };
+  const contactAdvertiser = (business: typeof sellerListings[number]) => {
+    const actions = getContactActions(business.contact);
+    const preferredAction = actions.find((action) => action.id === 'whatsapp') ?? actions[0];
+
+    if (preferredAction) {
+      void openContactAction(preferredAction);
+    }
+  };
 
   return (
     <>
@@ -51,15 +110,19 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
             ) : (
               <View style={styles.avatarFallback}>
                 <Text style={styles.avatarFallbackText}>
-                  {seller.firstName.slice(0, 1).toUpperCase()}
+                  {displayName.slice(0, 1).toUpperCase()}
                 </Text>
               </View>
             )}
             <View style={styles.heroCopy}>
-              <Text style={styles.eyebrow}>Business profile</Text>
-              <Text style={styles.title}>{seller.businessName ?? seller.fullName}</Text>
+              <Text style={styles.eyebrow}>
+                {isStoreOwnerProfile ? 'Store profile' : 'Advertiser profile'}
+              </Text>
+              <Text style={styles.title}>{displayName}</Text>
               <Text style={styles.subtitle}>
-                {seller.fullName} - {seller.businessCluster ?? 'Marketplace seller'}
+                {isStoreOwnerProfile
+                  ? `${seller?.fullName ?? displayName} - ${seller?.businessCluster ?? 'Marketplace store'}`
+                  : `${profileBusiness?.description ?? 'Direct contact classified advertiser.'}`}
               </Text>
             </View>
           </View>
@@ -67,22 +130,34 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
           <View style={styles.metaRow}>
             <View style={styles.metaChip}>
               <Ionicons color={colors.white} name="storefront-outline" size={16} />
-              <Text style={styles.metaText}>{formatNumber(productListings.length)} products</Text>
+              <Text style={styles.metaText}>
+                {formatNumber(productListings.length)} {isStoreOwnerProfile ? 'products' : 'ads'}
+              </Text>
             </View>
             <View style={styles.metaChip}>
               <Ionicons color={colors.white} name="briefcase-outline" size={16} />
-              <Text style={styles.metaText}>{serviceListing ? '1 service' : 'No service'}</Text>
+              <Text style={styles.metaText}>
+                {isStoreOwnerProfile
+                  ? serviceListing
+                    ? '1 service'
+                    : 'No service'
+                  : `${formatNumber(advertisementServices.length)} services`}
+              </Text>
             </View>
             <View style={styles.metaChip}>
               <Ionicons color={colors.white} name="location-outline" size={16} />
-              <Text style={styles.metaText}>Verified marketplace seller</Text>
+              <Text style={styles.metaText}>
+                {isStoreOwnerProfile ? 'Verified marketplace store' : profileBusiness?.address ?? 'Direct advertiser'}
+              </Text>
             </View>
           </View>
         </View>
 
         {profileBusiness ? (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Business overview</Text>
+            <Text style={styles.sectionTitle}>
+              {isStoreOwnerProfile ? 'Store overview' : 'Advertiser overview'}
+            </Text>
             <View style={styles.infoGrid}>
               <View style={styles.infoPill}>
                 <Text style={styles.infoLabel}>Category</Text>
@@ -100,9 +175,31 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
               </View>
             </View>
             <Text style={styles.bodyText}>
-              This profile is public for browsing only. Use customer care for order, delivery, or
-              service support.
+              {isStoreOwnerProfile
+                ? 'This store profile contains approved products that can be ordered through View2Connect.'
+                : 'This advertiser profile is for direct contact. Ads do not use cart, checkout, delivery, or withdrawal.'}
             </Text>
+            {!isStoreOwnerProfile && contactBusiness ? (
+              <View style={styles.contactGrid}>
+                <Text style={styles.infoValue}>Phone: {contactBusiness.contact.phone}</Text>
+                {contactBusiness.contact.whatsapp ? (
+                  <Text style={styles.infoValue}>WhatsApp: {contactBusiness.contact.whatsapp}</Text>
+                ) : null}
+                <Text style={styles.infoValue}>Email: {contactBusiness.contact.email}</Text>
+                {contactBusiness.contact.instagram ? (
+                  <Text style={styles.infoValue}>Instagram: {contactBusiness.contact.instagram}</Text>
+                ) : null}
+                {contactBusiness.contact.facebook ? (
+                  <Text style={styles.infoValue}>Facebook: {contactBusiness.contact.facebook}</Text>
+                ) : null}
+                {contactBusiness.contact.x ? (
+                  <Text style={styles.infoValue}>X: {contactBusiness.contact.x}</Text>
+                ) : null}
+                {contactBusiness.contact.tiktok ? (
+                  <Text style={styles.infoValue}>TikTok: {contactBusiness.contact.tiktok}</Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         ) : (
           <View style={styles.card}>
@@ -123,32 +220,69 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
                 navigation.navigate('BusinessDetails', { businessId: serviceListing.id })
               }
               onPress={() => navigation.navigate('BusinessDetails', { businessId: serviceListing.id })}
-              onProfilePress={() => navigation.navigate('SellerProfile', { userId: seller.id })}
+              onProfilePress={() =>
+                navigation.navigate('SellerProfile', {
+                  userId: seller?.id ?? serviceListing.ownerUserId ?? route.params.userId,
+                })
+              }
             />
           </View>
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Products</Text>
+          <Text style={styles.sectionTitle}>
+            {isStoreOwnerProfile ? 'Store products' : 'Advertisements'}
+          </Text>
           {productListings.length === 0 ? (
             <View style={styles.card}>
-              <Text style={styles.bodyText}>No approved products from this business yet.</Text>
+              <Text style={styles.bodyText}>
+                {isStoreOwnerProfile
+                  ? 'No approved products from this store yet.'
+                  : 'No approved advertisements from this advertiser yet.'}
+              </Text>
             </View>
           ) : (
-            <View style={styles.cardStack}>
+            <View style={styles.productGrid}>
               {productListings.map((business) => {
                 const isOwnListing =
                   user?.role === 'businessOwner' && isBusinessOwnedByUser(business, user);
+                const cartQuantity =
+                  cartEntries.find((entry) => entry.business.id === business.id)?.quantity ?? 0;
+                const availableStock = getAvailableStock(business.id);
 
-                return (
+                return isStoreOwnerProfile ? (
                   <ProductCard
                     addDisabled={isOwnListing}
                     addLabel={isOwnListing ? 'Own' : 'Add'}
                     key={business.id}
                     business={business}
+                    maxQuantity={availableStock}
                     onAddToCart={() => addToCart(business.id)}
+                    onDecreaseQuantity={() => updateCartQuantity(business.id, cartQuantity - 1)}
+                    onIncreaseQuantity={() => addToCart(business.id)}
                     onPress={() => navigation.navigate('BusinessDetails', { businessId: business.id })}
-                    onProfilePress={() => navigation.navigate('SellerProfile', { userId: seller.id })}
+                    onProfilePress={() =>
+                      navigation.navigate('SellerProfile', {
+                        userId: seller?.id ?? business.ownerUserId ?? route.params.userId,
+                      })
+                    }
+                    quantity={cartQuantity}
+                    showQuantityControls
+                    style={[styles.productGridCard, { width: gridCardWidth }]}
+                  />
+                ) : (
+                  <AdvertisementCard
+                    advertisement={business}
+                    key={business.id}
+                    onContactPress={() => contactAdvertiser(business)}
+                    onMessagePress={() => messageAdvertiser(business)}
+                    onPress={() => navigation.navigate('BusinessDetails', { businessId: business.id })}
+                    onProfilePress={() =>
+                      navigation.navigate('SellerProfile', {
+                        userId: business.ownerUserId ?? route.params.userId,
+                      })
+                    }
+                    style={[styles.productGridCard, { width: gridCardWidth }]}
                   />
                 );
               })}
@@ -317,6 +451,20 @@ function createStyles(colors: AppColors) {
     },
     cardStack: {
       gap: spacing.md,
+    },
+    productGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+    },
+    productGridCard: {
+      minWidth: 240,
+    },
+    contactGrid: {
+      gap: spacing.xs,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: spacing.md,
     },
     emptyShell: {
       flex: 1,

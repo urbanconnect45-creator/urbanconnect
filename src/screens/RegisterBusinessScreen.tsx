@@ -59,6 +59,9 @@ function createInitialForm(
     email: savedProfile?.email ?? profile?.contact.email ?? email,
     website: savedProfile?.website ?? profile?.contact.website ?? '',
     instagram: savedProfile?.instagram ?? profile?.contact.instagram ?? '',
+    facebook: profile?.contact.facebook ?? '',
+    x: profile?.contact.x ?? '',
+    tiktok: profile?.contact.tiktok ?? '',
     address: savedProfile?.address ?? profile?.address ?? '',
     coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
     galleryImages: savedProfile?.galleryImages ?? '',
@@ -129,7 +132,7 @@ function createPreviewBusiness(values: BusinessProfileFormValues): Business {
         : 'Use the detailed description to explain your service style, response time, and why residents should trust you.'),
     imageUrl: media[0]?.url ?? fallbackImage,
     media,
-    address: values.address || 'Seller service address',
+    address: values.address || 'Advertiser location',
     sku: values.businessName.trim()
       ? `UC-${values.businessName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-')}`
       : 'UC-PREVIEW',
@@ -164,6 +167,9 @@ function createPreviewBusiness(values: BusinessProfileFormValues): Business {
       ...(values.whatsapp ? { whatsapp: values.whatsapp } : {}),
       ...(values.website ? { website: values.website } : {}),
       ...(values.instagram ? { instagram: values.instagram } : {}),
+      ...(values.facebook ? { facebook: values.facebook } : {}),
+      ...(values.x ? { x: values.x } : {}),
+      ...(values.tiktok ? { tiktok: values.tiktok } : {}),
     },
     createdAt: new Date().toISOString(),
   };
@@ -263,6 +269,9 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       email: savedOwnerProfile?.email ?? ownerProfile?.contact.email ?? user.email,
       website: savedOwnerProfile?.website ?? ownerProfile?.contact.website ?? '',
       instagram: savedOwnerProfile?.instagram ?? ownerProfile?.contact.instagram ?? '',
+      facebook: ownerProfile?.contact.facebook ?? current.facebook ?? '',
+      x: ownerProfile?.contact.x ?? current.x ?? '',
+      tiktok: ownerProfile?.contact.tiktok ?? current.tiktok ?? '',
       address:
         savedOwnerProfile?.address ??
         ownerProfile?.address ??
@@ -290,9 +299,9 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
   if (!user) {
     return (
       <View style={styles.gateShell}>
-        <Text style={styles.sectionTitle}>Sign in to sell</Text>
+        <Text style={styles.sectionTitle}>Sign in to post</Text>
         <Text style={styles.subtitle}>
-          Use your customer account to submit an item or service for review.
+          Use your customer account to post an advertisement for review.
         </Text>
       </View>
     );
@@ -306,22 +315,30 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
   const copy =
     form.listingType === 'product'
       ? {
-          nameLabel: 'Item name',
-          namePlaceholder: isFoodListing ? 'Jollof rice and chicken' : 'Everyday product name',
+          nameLabel: isIndividualSeller ? 'Advertisement title' : 'Item name',
+          namePlaceholder: isIndividualSeller
+            ? 'Clean iPhone, Toyota Corolla, mini flat, generator'
+            : isFoodListing
+              ? 'Jollof rice and chicken'
+              : 'Everyday product name',
           shortPlaceholder: needsAllergyCopy
             ? 'Brief description, ingredients, and allergy information when relevant.'
-            : 'Describe the item in one short sentence.',
-          priceLabel: 'Price',
+            : isIndividualSeller
+              ? 'Describe the advertisement in one short sentence.'
+              : 'Describe the item in one short sentence.',
+          priceLabel: isIndividualSeller ? 'Advertised price' : 'Price',
           pricePlaceholder: '18000',
-          buttonLabel: 'Send product for approval',
+          buttonLabel: isIndividualSeller ? 'Post advertisement for approval' : 'Send product for approval',
         }
       : {
-          nameLabel: 'Profession or service name',
+          nameLabel: isIndividualSeller ? 'Advertisement title' : 'Profession or service name',
           namePlaceholder: 'Trusted Home Nurse',
-          shortPlaceholder: 'What service are residents booking in one sentence?',
+          shortPlaceholder: isIndividualSeller
+            ? 'What service or offer are you advertising?'
+            : 'What service are residents booking in one sentence?',
           priceLabel: '',
           pricePlaceholder: '',
-          buttonLabel: 'Send service for approval',
+          buttonLabel: isIndividualSeller ? 'Post advertisement for approval' : 'Send service for approval',
         };
 
   const updateField = <K extends keyof BusinessProfileFormValues>(
@@ -428,6 +445,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     }
     if (
       form.listingType === 'product' &&
+      !isIndividualSeller &&
       (!form.stockQuantity.trim() ||
         !Number.isFinite(parsedStockQuantity) ||
         parsedStockQuantity < 0)
@@ -436,6 +454,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     }
     if (
       form.listingType === 'product' &&
+      !isIndividualSeller &&
       (!form.reorderLevel.trim() ||
         !Number.isFinite(parsedReorderLevel) ||
         parsedReorderLevel <= 0)
@@ -500,7 +519,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       Alert.alert(
         'Sent for review',
         isIndividualSeller
-          ? 'Your listing was submitted for admin review. Listing is free and appears after approval.'
+          ? 'Your advertisement was submitted for admin review. It appears on Home after approval.'
           : 'Your listing was submitted for admin review. Listing is free and appears after approval.',
         [
           {
@@ -538,16 +557,16 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>
-          {isIndividualSeller ? 'Customer seller listing' : 'Business onboarding'}
+          {isIndividualSeller ? 'Customer advertisement' : 'Business onboarding'}
         </Text>
         <Text style={styles.title}>
           {isIndividualSeller
-            ? 'Sell from the customer account you already use.'
+            ? 'Post an advertisement from your customer account.'
             : 'Create a clean marketplace listing for approval.'}
         </Text>
         <Text style={styles.subtitle}>
           {isIndividualSeller
-            ? 'Listing is free. Every listing is reviewed before it appears in the customer shop.'
+            ? 'Advertisements are free. Buyers contact you directly; there is no cart, checkout, delivery, or withdrawal flow.'
             : 'Listing is free. This form is only for the item or service details customer care needs to inspect.'}
         </Text>
       </View>
@@ -577,10 +596,10 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
               >
                 <Text style={[styles.selectionText, isSelected && styles.selectionTextActive]}>
                   {listingType === 'product'
-                    ? 'Selling items'
+                    ? isIndividualSeller ? 'Post item advertisement' : 'Selling items'
                     : isDisabled
                       ? 'Rendering services already created'
-                      : 'Rendering services'}
+                      : isIndividualSeller ? 'Post service advertisement' : 'Rendering services'}
                 </Text>
               </Pressable>
             );
@@ -681,36 +700,39 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
               placeholder={copy.pricePlaceholder}
               value={form.price}
             />
-            <View style={styles.inlineFieldRow}>
-              <View style={styles.inlineField}>
-                <FormField
-                  error={errors.stockQuantity}
-                  helper="Available units for checkout."
-                  keyboardType="numeric"
-                  label="Stock quantity"
-                  onChangeText={(value) => updateField('stockQuantity', value)}
-                  placeholder="12"
-                  value={form.stockQuantity}
-                />
+            {!isIndividualSeller ? (
+              <View style={styles.inlineFieldRow}>
+                <View style={styles.inlineField}>
+                  <FormField
+                    error={errors.stockQuantity}
+                    helper="Available units for checkout."
+                    keyboardType="numeric"
+                    label="Stock quantity"
+                    onChangeText={(value) => updateField('stockQuantity', value)}
+                    placeholder="12"
+                    value={form.stockQuantity}
+                  />
+                </View>
+                <View style={styles.inlineField}>
+                  <FormField
+                    error={errors.reorderLevel}
+                    helper="Alert level for low stock."
+                    keyboardType="numeric"
+                    label="Reorder level"
+                    onChangeText={(value) => updateField('reorderLevel', value)}
+                    placeholder="5"
+                    value={form.reorderLevel}
+                  />
+                </View>
               </View>
-              <View style={styles.inlineField}>
-                <FormField
-                  error={errors.reorderLevel}
-                  helper="Alert level for low stock."
-                  keyboardType="numeric"
-                  label="Reorder level"
-                  onChangeText={(value) => updateField('reorderLevel', value)}
-                  placeholder="5"
-                  value={form.reorderLevel}
-                />
-              </View>
-            </View>
+            ) : null}
           </>
         ) : (
           <View style={styles.planNotice}>
             <Text style={styles.planNoticeText}>
-              Services do not show a public amount. Customer care will help coordinate next steps
-              when a resident needs support.
+              {isIndividualSeller
+                ? 'Service advertisements do not use app checkout. Buyers contact you directly.'
+                : 'Services do not show a public amount. Customer care will help coordinate next steps when a resident needs support.'}
             </Text>
           </View>
         )}
@@ -756,6 +778,73 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
             void pickListingMedia('galleryVideos', ['videos'], true);
           }}
         />
+        {isIndividualSeller ? (
+          <View style={styles.planNotice}>
+            <Text style={styles.planNoticeText}>
+              Buyers will use these details to contact the advertiser directly.
+            </Text>
+            <FormField
+              label="Phone number"
+              onChangeText={(value) => updateField('phone', value)}
+              placeholder="+234..."
+              value={form.phone}
+            />
+            <FormField
+              label="WhatsApp number"
+              onChangeText={(value) => updateField('whatsapp', value)}
+              placeholder="+234..."
+              value={form.whatsapp}
+            />
+            <FormField
+              label="Email address"
+              onChangeText={(value) => updateField('email', value)}
+              placeholder="advertiser@example.com"
+              value={form.email}
+            />
+            <FormField
+              label="Location"
+              onChangeText={(value) => updateField('address', value)}
+              placeholder="Lugbe, Abuja"
+              value={form.address}
+            />
+            <View style={styles.inlineFieldRow}>
+              <View style={styles.inlineField}>
+                <FormField
+                  label="Instagram"
+                  onChangeText={(value) => updateField('instagram', value)}
+                  placeholder="@yourhandle"
+                  value={form.instagram}
+                />
+              </View>
+              <View style={styles.inlineField}>
+                <FormField
+                  label="Facebook"
+                  onChangeText={(value) => updateField('facebook', value)}
+                  placeholder="Facebook name"
+                  value={form.facebook ?? ''}
+                />
+              </View>
+            </View>
+            <View style={styles.inlineFieldRow}>
+              <View style={styles.inlineField}>
+                <FormField
+                  label="X / Twitter"
+                  onChangeText={(value) => updateField('x', value)}
+                  placeholder="@yourhandle"
+                  value={form.x ?? ''}
+                />
+              </View>
+              <View style={styles.inlineField}>
+                <FormField
+                  label="TikTok"
+                  onChangeText={(value) => updateField('tiktok', value)}
+                  placeholder="@yourhandle"
+                  value={form.tiktok ?? ''}
+                />
+              </View>
+            </View>
+          </View>
+        ) : null}
         {!isIndividualSeller ? (
           <View style={styles.planNotice}>
             <Text style={styles.planNoticeText}>
@@ -785,12 +874,14 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
             </View>
           </View>
         ) : null}
-        <View style={styles.planNotice}>
-          <Text style={styles.planNoticeText}>
-            Contact details and address are managed from the Profile screen in Edit business
-            profile.
-          </Text>
-        </View>
+        {!isIndividualSeller ? (
+          <View style={styles.planNotice}>
+            <Text style={styles.planNoticeText}>
+              Contact details and address are managed from the Profile screen in Edit business
+              profile.
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <AppButton

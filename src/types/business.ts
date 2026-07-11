@@ -72,6 +72,9 @@ export type BusinessContact = {
   email: string;
   website?: string;
   instagram?: string;
+  facebook?: string;
+  x?: string;
+  tiktok?: string;
 };
 
 export type ContactAction = {
@@ -145,6 +148,9 @@ export type BusinessProfileFormValues = {
   email: string;
   website: string;
   instagram: string;
+  facebook?: string;
+  x?: string;
+  tiktok?: string;
   address: string;
   coverImage: string;
   galleryImages: string;
@@ -297,6 +303,8 @@ export type CartEntry = {
 export type ChatMessage = {
   id: string;
   businessId: string;
+  senderUserId?: string;
+  recipientUserId?: string;
   senderName: string;
   senderType: 'resident' | 'owner';
   text: string;

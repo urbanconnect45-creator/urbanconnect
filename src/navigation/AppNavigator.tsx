@@ -107,8 +107,8 @@ const routeMeta: Record<
   Dashboard: {
     icon: 'home-outline',
     label: 'Home',
-    title: 'Local shop',
-    subtitle: 'Buy approved products from nearby businesses.',
+    title: 'Advertisements',
+    subtitle: 'Browse customer-posted classified advertisements.',
   },
   DispatchMode: {
     icon: 'bicycle-outline',
@@ -159,10 +159,10 @@ const routeMeta: Record<
     subtitle: 'Manage customer subscription benefits and account balance payment.',
   },
   Chats: {
-    icon: 'headset-outline',
-    label: 'Support',
-    title: 'Customer care',
-    subtitle: 'Contact View2Connect customer care.',
+    icon: 'chatbubbles-outline',
+    label: 'Messages',
+    title: 'Messages',
+    subtitle: 'Message advertisers and customer care.',
   },
   Account: {
     icon: 'person-circle-outline',
@@ -1356,7 +1356,7 @@ export function AppNavigator() {
           </Pressable>
           {!sellerToolsBlockedOnMobileWeb ? (
             <Pressable
-              accessibilityLabel="Start selling"
+              accessibilityLabel="Post advertisement"
               accessibilityRole="button"
               onPress={() => openWebPath('/business-registration/')}
               style={({ pressed }) => [
@@ -1367,7 +1367,7 @@ export function AppNavigator() {
               ]}
             >
               <Ionicons color={colors.white} name="pricetag-outline" size={18} />
-              <Text style={styles.guestSellText}>Sell</Text>
+              <Text style={styles.guestSellText}>Post Ad</Text>
             </Pressable>
           ) : null}
           <Pressable
@@ -1417,7 +1417,7 @@ export function AppNavigator() {
             </View>
             <View style={styles.topBarActions}>
               <Pressable
-                accessibilityLabel="Sell an item"
+                accessibilityLabel="Post advertisement"
                 accessibilityRole="button"
                 hitSlop={8}
                 onPress={() => navigation.navigate('RegisterBusiness')}
@@ -1512,17 +1512,17 @@ export function AppNavigator() {
                   placement="bottom"
                 />
                 <NavButton
-                  active={mainRoute === 'Professions'}
-                  icon={routeMeta.Professions.icon}
-                  label={routeMeta.Professions.label}
-                  onPress={() => navigation.navigate('Professions')}
-                  placement="bottom"
-                />
-                <NavButton
                   active={mainRoute === 'Food'}
                   icon={routeMeta.Food.icon}
                   label={routeMeta.Food.label}
                   onPress={() => navigation.navigate('Food')}
+                  placement="bottom"
+                />
+                <NavButton
+                  active={mainRoute === 'Chats'}
+                  icon={routeMeta.Chats.icon}
+                  label={routeMeta.Chats.label}
+                  onPress={() => navigation.navigate('Chats')}
                   placement="bottom"
                 />
                 <NavButton
@@ -1583,19 +1583,19 @@ export function AppNavigator() {
                       placement="sidebar"
                     />
                     <NavButton
-                      active={mainRoute === 'Professions'}
-                      compact={compactSidebar}
-                      icon={routeMeta.Professions.icon}
-                      label={routeMeta.Professions.label}
-                      onPress={() => navigation.navigate('Professions')}
-                      placement="sidebar"
-                    />
-                    <NavButton
                       active={mainRoute === 'Food'}
                       compact={compactSidebar}
                       icon={routeMeta.Food.icon}
                       label={routeMeta.Food.label}
                       onPress={() => navigation.navigate('Food')}
+                      placement="sidebar"
+                    />
+                    <NavButton
+                      active={mainRoute === 'Chats'}
+                      compact={compactSidebar}
+                      icon={routeMeta.Chats.icon}
+                      label={routeMeta.Chats.label}
+                      onPress={() => navigation.navigate('Chats')}
                       placement="sidebar"
                     />
                     <NavButton
@@ -1645,7 +1645,7 @@ export function AppNavigator() {
                     ]}
                   >
                     <Ionicons color={colors.white} name="pricetag-outline" size={20} />
-                    <Text style={styles.sellActionText}>Sell</Text>
+                    <Text style={styles.sellActionText}>Post Ad</Text>
                   </Pressable>
                 ) : null}
                 <Pressable
@@ -2150,15 +2150,15 @@ export function AppNavigator() {
               </Pressable>
 
               <Pressable
-                onPress={() => runMenuAction(() => navigation.navigate('Professions'))}
+                onPress={() => runMenuAction(() => navigation.navigate('Chats'))}
                 style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
               >
                 <View style={styles.menuIconShell}>
-                  <Ionicons color={colors.primary} name="briefcase-outline" size={18} />
+                  <Ionicons color={colors.primary} name="chatbubbles-outline" size={18} />
                 </View>
                 <View style={styles.menuCopy}>
-                  <Text style={styles.menuTitle}>Categories</Text>
-                  <Text style={styles.menuMeta}>Browse approved products and services.</Text>
+                  <Text style={styles.menuTitle}>Messages</Text>
+                  <Text style={styles.menuMeta}>Message advertisers and customer care.</Text>
                 </View>
               </Pressable>
 
@@ -2187,8 +2187,8 @@ export function AppNavigator() {
                   <Ionicons color={colors.white} name="pricetag-outline" size={18} />
                 </View>
                 <View style={styles.menuCopy}>
-                  <Text style={styles.menuTitle}>Sell</Text>
-                  <Text style={styles.menuMeta}>Create a product or service listing.</Text>
+                  <Text style={styles.menuTitle}>Post Advertisement</Text>
+                  <Text style={styles.menuMeta}>Create a classified advertisement.</Text>
                 </View>
                 <Ionicons color={colors.primary} name="chevron-forward" size={18} />
               </Pressable>

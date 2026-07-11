@@ -61,6 +61,20 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
     return null;
   }
 
+  if (user.role !== 'businessOwner') {
+    return (
+      <View style={styles.customerBlockedShell}>
+        <Ionicons color={colors.primary} name="lock-closed-outline" size={34} />
+        <Text style={styles.sectionTitle}>Store owner withdrawals only</Text>
+        <Text style={styles.bodyText}>
+          Customer advertisements use direct contact. They do not use View2Connect withdrawals,
+          settlements, delivery processing, or in-app order payments.
+        </Text>
+        <AppButton label="Back to profile" onPress={() => navigation.navigate('Account')} />
+      </View>
+    );
+  }
+
   const pickIdDocument = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
@@ -402,6 +416,17 @@ function createStyles(colors: AppColors) {
     container: {
       gap: spacing.lg,
       paddingBottom: spacing.xxl,
+    },
+    customerBlockedShell: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.md,
+      borderRadius: radii.xl,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.xl,
+      ...shadows.soft,
     },
     hero: {
       gap: spacing.sm,

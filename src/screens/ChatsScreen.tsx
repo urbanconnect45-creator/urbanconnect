@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
@@ -8,6 +8,7 @@ import type { MainTabsScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import type { ChatMessage, SupportMessage } from '../types/business';
 
 function chatTime(value?: string) {
   if (!value) {
@@ -17,17 +18,34 @@ function chatTime(value?: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function isSupportMessage(message: ChatMessage | SupportMessage): message is SupportMessage {
+  return 'senderRole' in message;
+}
+
 export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
   const { user } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { getNotificationsForUser, getSupportConversation, sendSupportMessage } =
+  const {
+    getChatConversations,
+    getNotificationsForUser,
+    getSupportConversation,
+    sendChatMessage,
+    sendSupportMessage,
+  } =
     useBusinessDirectory();
   const [isThreadOpen, setIsThreadOpen] = useState(false);
+  const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const conversation = getSupportConversation(user);
-  const messages = conversation?.messages ?? [];
-  const lastMessage = conversation?.lastMessage;
+  const supportConversation = getSupportConversation(user);
+  const supportMessages = supportConversation?.messages ?? [];
+  const lastSupportMessage = supportConversation?.lastMessage;
+  const advertiserConversations = getChatConversations(user);
+  const activeAdvertiserConversation = activeBusinessId
+    ? advertiserConversations.find((conversation) => conversation.business.id === activeBusinessId)
+    : undefined;
+  const activeMessages: Array<ChatMessage | SupportMessage> =
+    activeAdvertiserConversation?.messages ?? supportMessages;
   const notifications = getNotificationsForUser(user).filter(
     (notification) => !notification.readAt,
   );
@@ -41,7 +59,12 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
       return;
     }
 
-    sendSupportMessage(user, draft);
+    if (activeAdvertiserConversation) {
+      sendChatMessage(activeAdvertiserConversation.business.id, user, draft);
+    } else {
+      sendSupportMessage(user, draft);
+    }
+
     setDraft('');
   };
 
@@ -50,7 +73,7 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
       <View style={styles.screen}>
         <View style={styles.header}>
           <Text style={styles.title}>Messages</Text>
-          <Text style={styles.subtitle}>Customer care support for orders, listings, and delivery.</Text>
+          <Text style={styles.subtitle}>Private chats with customer advertisers and support.</Text>
         </View>
 
         {user.role === 'businessOwner' && notifications.length > 0 ? (
@@ -69,8 +92,50 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
           </View>
         ) : null}
 
+        {advertiserConversations.length > 0 ? (
+          advertiserConversations.map((conversation) => (
+            <Pressable
+              key={conversation.business.id}
+              onPress={() => {
+                setActiveBusinessId(conversation.business.id);
+                setIsThreadOpen(true);
+              }}
+              style={({ pressed }) => [styles.conversationRow, pressed && styles.rowPressed]}
+            >
+              <Image
+                resizeMode="cover"
+                source={{ uri: conversation.business.imageUrl }}
+                style={styles.avatarImage}
+              />
+              <View style={styles.conversationCopy}>
+                <View style={styles.conversationLine}>
+                  <Text numberOfLines={1} style={styles.conversationTitle}>
+                    {conversation.business.ownerName}
+                  </Text>
+                  <Text style={styles.conversationTime}>
+                    {chatTime(conversation.lastMessage.createdAt)}
+                  </Text>
+                </View>
+                <Text numberOfLines={1} style={styles.conversationText}>
+                  {conversation.business.name} - {conversation.lastMessage.text}
+                </Text>
+              </View>
+            </Pressable>
+          ))
+        ) : (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No advertiser messages yet</Text>
+            <Text style={styles.emptyText}>
+              Tap Message Advertiser on an advertisement to start a private conversation.
+            </Text>
+          </View>
+        )}
+
         <Pressable
-          onPress={() => setIsThreadOpen(true)}
+          onPress={() => {
+            setActiveBusinessId(null);
+            setIsThreadOpen(true);
+          }}
           style={({ pressed }) => [styles.conversationRow, pressed && styles.rowPressed]}
         >
           <View style={styles.avatarShell}>
@@ -81,10 +146,10 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
               <Text numberOfLines={1} style={styles.conversationTitle}>
                 View2Connect support
               </Text>
-              <Text style={styles.conversationTime}>{chatTime(lastMessage?.createdAt)}</Text>
+              <Text style={styles.conversationTime}>{chatTime(lastSupportMessage?.createdAt)}</Text>
             </View>
             <Text numberOfLines={1} style={styles.conversationText}>
-              {lastMessage?.text ?? 'Tap to message customer care.'}
+              {lastSupportMessage?.text ?? 'Tap to message customer care.'}
             </Text>
           </View>
         </Pressable>
@@ -101,23 +166,40 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
         >
           <Ionicons color={colors.primary} name="chevron-back-outline" size={22} />
         </Pressable>
-        <View style={styles.avatarShell}>
-          <Ionicons color={colors.white} name="headset-outline" size={20} />
-        </View>
+        {activeAdvertiserConversation ? (
+          <Image
+            resizeMode="cover"
+            source={{ uri: activeAdvertiserConversation.business.imageUrl }}
+            style={styles.avatarImage}
+          />
+        ) : (
+          <View style={styles.avatarShell}>
+            <Ionicons color={colors.white} name="headset-outline" size={20} />
+          </View>
+        )}
         <View style={styles.conversationCopy}>
-          <Text style={styles.conversationTitle}>View2Connect support</Text>
-          <Text style={styles.conversationText}>Replies appear here.</Text>
+          <Text style={styles.conversationTitle}>
+            {activeAdvertiserConversation
+              ? activeAdvertiserConversation.business.ownerName
+              : 'View2Connect support'}
+          </Text>
+          <Text style={styles.conversationText}>
+            {activeAdvertiserConversation
+              ? activeAdvertiserConversation.business.name
+              : 'Replies appear here.'}
+          </Text>
         </View>
       </View>
 
       <ScrollView style={styles.messageList} showsVerticalScrollIndicator={false}>
         <View style={styles.messageStack}>
-          {messages.length > 0 ? (
-            messages.map((message) => {
-              const isCare =
-                message.senderRole === 'customerCare' ||
-                message.senderRole === 'owner' ||
-                message.senderRole === 'system';
+          {activeMessages.length > 0 ? (
+            activeMessages.map((message) => {
+              const isCare = isSupportMessage(message)
+                ? message.senderRole === 'customerCare' ||
+                  message.senderRole === 'owner' ||
+                  message.senderRole === 'system'
+                : message.senderUserId !== user.id && message.senderName !== user.fullName;
 
               return (
                 <View
@@ -147,10 +229,13 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
             })
           ) : (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Start with customer care</Text>
+              <Text style={styles.emptyTitle}>
+                {activeAdvertiserConversation ? 'Start this advertiser chat' : 'Start with customer care'}
+              </Text>
               <Text style={styles.emptyText}>
-                Ask about an order, subscription, delivery, pickup, listing approval, or account
-                support.
+                {activeAdvertiserConversation
+                  ? 'Ask about the advertisement, location, price, inspection, or direct contact.'
+                  : 'Ask about an order, subscription, delivery, pickup, listing approval, or account support.'}
               </Text>
             </View>
           )}
@@ -160,7 +245,7 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
       <View style={styles.composer}>
         <TextInput
           onChangeText={setDraft}
-          placeholder="Message customer care"
+          placeholder={activeAdvertiserConversation ? 'Message advertiser' : 'Message customer care'}
           placeholderTextColor={colors.textMuted}
           style={styles.composerInput}
           value={draft}
@@ -214,6 +299,12 @@ function createStyles(colors: AppColors) {
       width: 46,
       borderRadius: 23,
       backgroundColor: colors.primary,
+    },
+    avatarImage: {
+      height: 46,
+      width: 46,
+      borderRadius: 23,
+      backgroundColor: colors.card,
     },
     conversationCopy: {
       flex: 1,

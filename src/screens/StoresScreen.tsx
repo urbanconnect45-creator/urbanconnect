@@ -17,6 +17,10 @@ import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Business, OwnerBusinessProfile } from '../types/business';
 import { isPublicBusiness } from '../utils/businessState';
+import {
+  isStoreOwnerListing,
+  profileMatchesBusiness,
+} from '../utils/marketplaceListings';
 
 const fallbackStoreImage =
   'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?auto=format&fit=crop&w=700&q=82';
@@ -31,46 +35,40 @@ type StoreGroup = {
   ownerUserId?: string;
 };
 
-function profileMatchesBusiness(profile: OwnerBusinessProfile, business: Business) {
-  return (
-    profile.ownerUserId === business.ownerUserId ||
-    profile.accountEmail.trim().toLowerCase() === business.ownerEmail?.trim().toLowerCase() ||
-    profile.ownerName === business.ownerName
-  );
-}
-
 function buildStoreGroups(
   businesses: Business[],
   profiles: OwnerBusinessProfile[],
 ): StoreGroup[] {
   const groups = new Map<string, StoreGroup>();
 
-  businesses.filter(isPublicBusiness).forEach((business) => {
-    const profile = profiles.find((item) => profileMatchesBusiness(item, business));
-    const key =
-      business.ownerUserId ||
-      business.ownerEmail?.trim().toLowerCase() ||
-      business.ownerName.trim().toLowerCase();
-    const existing = groups.get(key);
+  businesses
+    .filter((business) => isPublicBusiness(business) && isStoreOwnerListing(business, profiles))
+    .forEach((business) => {
+      const profile = profiles.find((item) => profileMatchesBusiness(item, business));
+      const key =
+        business.ownerUserId ||
+        business.ownerEmail?.trim().toLowerCase() ||
+        business.ownerName.trim().toLowerCase();
+      const existing = groups.get(key);
 
-    if (existing) {
-      existing.listings.push(business);
-      if (!existing.categories.includes(business.category)) {
-        existing.categories.push(business.category);
+      if (existing) {
+        existing.listings.push(business);
+        if (!existing.categories.includes(business.category)) {
+          existing.categories.push(business.category);
+        }
+        return;
       }
-      return;
-    }
 
-    groups.set(key, {
-      id: key,
-      name: profile?.accountName || business.ownerName,
-      address: profile?.address || business.address,
-      imageUrl: profile?.coverImage || business.imageUrl || fallbackStoreImage,
-      listings: [business],
-      categories: [business.category],
-      ...(business.ownerUserId ? { ownerUserId: business.ownerUserId } : {}),
+      groups.set(key, {
+        id: key,
+        name: profile?.accountName || business.ownerName,
+        address: profile?.address || business.address,
+        imageUrl: profile?.coverImage || fallbackStoreImage,
+        listings: [business],
+        categories: [business.category],
+        ...(business.ownerUserId ? { ownerUserId: business.ownerUserId } : {}),
+      });
     });
-  });
 
   profiles
     .filter((profile) => Boolean(profile.riverParkVerified))

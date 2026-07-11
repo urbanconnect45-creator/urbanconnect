@@ -613,16 +613,18 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                 Wallet and balance
               </Text>
             </View>
-            <Pressable
-              accessibilityLabel="Open withdrawal"
-              onPress={() => navigation.navigate('Withdrawal')}
-              style={({ pressed }) => [
-                styles.portfolioIconShell,
-                pressed && styles.itemRowPressed,
-              ]}
-            >
-              <Ionicons color={portfolioInkColor} name="cash-outline" size={22} />
-            </Pressable>
+            {isBusinessOwner ? (
+              <Pressable
+                accessibilityLabel="Open withdrawal"
+                onPress={() => navigation.navigate('Withdrawal')}
+                style={({ pressed }) => [
+                  styles.portfolioIconShell,
+                  pressed && styles.itemRowPressed,
+                ]}
+              >
+                <Ionicons color={portfolioInkColor} name="cash-outline" size={22} />
+              </Pressable>
+            ) : null}
           </View>
 
           <View style={styles.portfolioGrid}>
@@ -675,12 +677,14 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
               style={styles.portfolioActionButton}
               variant="secondary"
             />
-            <AppButton
-              label="Withdraw"
-              onPress={() => navigation.navigate('Withdrawal')}
-              style={styles.portfolioActionButton}
-              variant="ghost"
-            />
+            {isBusinessOwner ? (
+              <AppButton
+                label="Withdraw"
+                onPress={() => navigation.navigate('Withdrawal')}
+                style={styles.portfolioActionButton}
+                variant="ghost"
+              />
+            ) : null}
           </View>
           <Pressable
             onPress={() => navigation.navigate('Transactions')}
@@ -1008,14 +1012,14 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         <View style={styles.actionStack}>
           <AppButton label="Shop products" onPress={() => navigation.navigate('Dashboard')} />
           <AppButton
-            label="Browse categories"
-            onPress={() => navigation.navigate('Professions')}
+            label="Messages"
+            onPress={() => navigation.navigate('Chats')}
             variant="secondary"
           />
           <AppButton label="Browse food" onPress={() => navigation.navigate('Food')} variant="ghost" />
           <AppButton label="Open cart" onPress={() => navigation.navigate('Cart')} variant="ghost" />
           <AppButton
-            label={isBusinessOwner ? 'Switch to seller workspace' : 'Sell an item'}
+            label={isBusinessOwner ? 'Switch to seller workspace' : 'Post Advertisement'}
             onPress={() =>
               navigation.navigate(isBusinessOwner ? 'SellerMode' : 'RegisterBusiness')
             }

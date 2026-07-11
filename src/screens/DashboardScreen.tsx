@@ -10,55 +10,44 @@ import {
   View,
 } from 'react-native';
 
-import { AppButton } from '../components/AppButton';
-import { ProductCard } from '../components/ProductCard';
+import { AdvertisementCard } from '../components/AdvertisementCard';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import type { MainTabsScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { productCategories } from '../types/business';
-import { normalizeProductCategory } from '../utils/category';
+import type { Business } from '../types/business';
+import { getContactActions, openContactAction } from '../utils/contact';
 import { formatNumber } from '../utils/format';
-import { getBusinessPriorityScore, isPublicBusiness } from '../utils/businessState';
 
 export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>) {
   const { user } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { businesses, addToCart, isBusinessOwnedByUser } = useBusinessDirectory();
+  const {
+    businesses,
+    isCustomerAdvertisement,
+    sendChatMessage,
+  } = useBusinessDirectory();
   const { width } = useWindowDimensions();
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const isMobile = width < 780;
 
-  const productListings = useMemo(
+  const advertisements = useMemo(
     () =>
       businesses
-        .filter(
-          (business) =>
-            business.listingType === 'product' &&
-            isPublicBusiness(business),
-        )
-        .map((business) => ({
-          ...business,
-          category: normalizeProductCategory(
-            business.category,
-            business.name,
-            business.description,
-            business.longDescription,
-          ),
-        }))
+        .filter(isCustomerAdvertisement)
         .sort(
           (leftBusiness, rightBusiness) =>
-            getBusinessPriorityScore(rightBusiness) - getBusinessPriorityScore(leftBusiness),
+            new Date(rightBusiness.createdAt).getTime() - new Date(leftBusiness.createdAt).getTime(),
         ),
-    [businesses],
+    [businesses, isCustomerAdvertisement],
   );
   const availableCategories = useMemo(
-    () => ['All', ...productCategories],
-    [],
+    () => ['All', ...new Set(advertisements.map((business) => business.category))],
+    [advertisements],
   );
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -68,7 +57,7 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
     }
   }, [availableCategories, selectedCategory]);
 
-  const filteredProducts = productListings.filter((business) => {
+  const filteredAdvertisements = advertisements.filter((business) => {
     const matchesCategory =
       selectedCategory === 'All' ? true : business.category === selectedCategory;
     const matchesSearch =
@@ -86,38 +75,59 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
 
     return matchesCategory && matchesSearch;
   });
-  const columnCount = width >= 1280 ? 3 : 2;
+  const columnCount = 2;
+  const messageAdvertiser = (advertisement: Business) => {
+    if (!user) {
+      navigation.navigate('AuthPrompt');
+      return;
+    }
+
+    sendChatMessage(
+      advertisement.id,
+      user,
+      `Hi ${advertisement.ownerName}, I am interested in your advertisement: ${advertisement.name}.`,
+    );
+    navigation.navigate('Chats');
+  };
+  const contactAdvertiser = (advertisement: Business) => {
+    const actions = getContactActions(advertisement.contact);
+    const preferredAction = actions.find((action) => action.id === 'whatsapp') ?? actions[0];
+
+    if (preferredAction) {
+      void openContactAction(preferredAction);
+    }
+  };
 
   return (
     <View style={styles.screen}>
       <FlatList
-        key={`marketplace-${columnCount}`}
+        key={`advertisements-${columnCount}`}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No products match that search yet.</Text>
+            <Text style={styles.emptyTitle}>No advertisements match that search yet.</Text>
             <Text style={styles.emptyText}>
-              Try another category or search by item name.
+              Try another category or search by title, location, or advertiser.
             </Text>
           </View>
         }
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <View style={[styles.hero, isMobile && styles.heroMobile]}>
-              <Text style={styles.eyebrow}>View2Connect marketplace</Text>
+              <Text style={styles.eyebrow}>View2Connect classifieds</Text>
               <Text style={[styles.title, isMobile && styles.titleMobile]}>
                 {user?.fullName
-                  ? `Shop local stores, ${user.fullName.split(' ')[0]}.`
-                  : 'Shop products from trusted local stores.'}
+                  ? `Find local advertisements, ${user.fullName.split(' ')[0]}.`
+                  : 'Find local advertisements from customer accounts.'}
               </Text>
               <Text style={[styles.subtitle, isMobile && styles.subtitleMobile]}>
-                Find approved items, add them to cart, and follow each order through pickup and
-                delivery.
+                Browse customer-posted ads like a classified marketplace. Contact advertisers
+                directly before meeting or paying.
               </Text>
               <View style={[styles.heroStats, isMobile && styles.heroStatsMobile]}>
                 <View style={styles.heroStat}>
                   <Ionicons color={colors.warning} name="ribbon-outline" size={18} />
-                  <Text style={styles.heroStatValue}>{formatNumber(productListings.length)}</Text>
-                  <Text style={styles.heroStatLabel}>Gold products</Text>
+                  <Text style={styles.heroStatValue}>{formatNumber(advertisements.length)}</Text>
+                  <Text style={styles.heroStatLabel}>Advertisements</Text>
                 </View>
                 <View style={styles.heroStat}>
                   <Ionicons color={colors.secondary} name="albums-outline" size={18} />
@@ -134,27 +144,26 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
               </View>
 
               <View style={[styles.heroActions, isMobile && styles.heroActionsMobile]}>
-                <AppButton
-                  label="Browse food"
-                  onPress={() => navigation.navigate('Food')}
-                  variant="secondary"
-                />
-                <AppButton
-                  label="Browse categories"
-                  onPress={() => navigation.navigate('Professions')}
-                  variant="ghost"
-                />
+                <Text
+                  onPress={() => navigation.navigate('RegisterBusiness')}
+                  style={styles.heroLink}
+                >
+                  Post Advertisement
+                </Text>
+                <Text onPress={() => navigation.navigate('Stores')} style={styles.heroLinkMuted}>
+                  Open Shop
+                </Text>
               </View>
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Search items</Text>
+              <Text style={styles.sectionTitle}>Search advertisements</Text>
               <View style={[styles.sectionPanel, isMobile && styles.sectionPanelMobile]}>
                 <View style={styles.searchShell}>
                   <Ionicons color={colors.textMuted} name="search-outline" size={18} />
                   <TextInput
                     onChangeText={setSearchQuery}
-                    placeholder="Search items or categories"
+                    placeholder="Search title, category, advertiser, or location"
                     placeholderTextColor={colors.textMuted}
                     style={styles.searchInput}
                     value={searchQuery}
@@ -164,7 +173,7 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Filter by category</Text>
+              <Text style={styles.sectionTitle}>Filter advertisements</Text>
               <View style={[styles.sectionPanel, isMobile && styles.sectionPanelMobile]}>
                 <ScrollView
                   horizontal
@@ -190,50 +199,32 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
             </View>
 
             <View style={styles.listIntro}>
-              <Text style={styles.sectionTitle}>Products from local stores</Text>
+              <Text style={styles.sectionTitle}>Customer advertisements</Text>
               <Text style={styles.listSubtitle}>
-                Open an item for details or add it straight to cart.
+                Message or contact advertisers directly. Ads do not use checkout or delivery.
               </Text>
             </View>
           </View>
         }
         columnWrapperStyle={columnCount > 1 ? styles.columnWrapper : undefined}
         contentContainerStyle={[styles.container, isMobile && styles.mobileContainer]}
-        data={filteredProducts}
+        data={filteredAdvertisements}
         keyExtractor={(item) => item.id}
         numColumns={columnCount}
-        renderItem={({ item }) => {
-          const isOwnListing =
-            user?.role === 'businessOwner' && isBusinessOwnedByUser(item, user);
-
-          return (
-            <ProductCard
-              addDisabled={isOwnListing}
-              addLabel={isOwnListing ? 'Own' : 'Add'}
-              business={item}
-              onAddToCart={() => {
-                if (!user) {
-                  navigation.navigate('AuthPrompt');
-                  return;
-                }
-
-                addToCart(item.id);
-              }}
-              onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
-              onProfilePress={() => {
-                if (!user) {
-                  navigation.navigate('AuthPrompt');
-                  return;
-                }
-
-                if (item.ownerUserId) {
-                  navigation.navigate('SellerProfile', { userId: item.ownerUserId });
-                }
-              }}
-              style={columnCount > 1 ? styles.columnCard : undefined}
-            />
-          );
-        }}
+        renderItem={({ item }) => (
+          <AdvertisementCard
+            advertisement={item}
+            onContactPress={() => contactAdvertiser(item)}
+            onMessagePress={() => messageAdvertiser(item)}
+            onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
+            onProfilePress={() => {
+              if (item.ownerUserId) {
+                navigation.navigate('SellerProfile', { userId: item.ownerUserId });
+              }
+            }}
+            style={styles.columnCard}
+          />
+        )}
         showsVerticalScrollIndicator={false}
       />
     </View>
@@ -318,6 +309,25 @@ function createStyles(colors: AppColors) {
     },
     heroActionsMobile: {
       gap: spacing.xs,
+    },
+    heroLink: {
+      overflow: 'hidden',
+      borderRadius: 8,
+      backgroundColor: colors.white,
+      color: colors.primary,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      ...typography.bodyStrong,
+    },
+    heroLinkMuted: {
+      overflow: 'hidden',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.24)',
+      color: colors.white,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      ...typography.bodyStrong,
     },
     heroStats: {
       flexDirection: 'row',

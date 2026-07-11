@@ -92,9 +92,10 @@ import {
 } from '../services/supabaseApi';
 import { normalizeOrderStatus } from '../utils/order';
 import {
-  getIndividualSellerMinimumIssues,
-  INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL,
-} from '../utils/cart';
+  isCustomerAdvertisement as isCustomerAdvertisementListing,
+  isStoreOwnerListing as isBusinessStoreOwnerListing,
+  isStoreOwnerProduct,
+} from '../utils/marketplaceListings';
 import { usePersistentState } from './usePersistentState';
 
 type BusinessDirectoryContextValue = {
@@ -147,12 +148,14 @@ type BusinessDirectoryContextValue = {
     actorRole?: AuditActorRole,
   ) => void;
   getChatMessages: (businessId: string) => ChatMessage[];
-  getChatConversations: () => ChatConversation[];
-  sendChatMessage: (businessId: string, senderName: string, text: string) => void;
+  getChatConversations: (user?: AppUser | null) => ChatConversation[];
+  sendChatMessage: (businessId: string, sender: AppUser | string, text: string) => void;
   getSupportConversation: (user?: AppUser | null) => SupportConversation | undefined;
   getSupportConversations: () => SupportConversation[];
   getNotificationsForUser: (user?: AppUser | null) => AppNotification[];
   isRiverParkVerifiedForUser: (user?: AppUser | null) => boolean;
+  isCustomerAdvertisement: (business: Business) => boolean;
+  isStoreOwnerListing: (business: Business) => boolean;
   hasCatalogManagementAccess: (ownerUserId: string) => boolean;
   setCatalogManagementAccess: (owner: AppUser, allowed: boolean) => void;
   markNotificationsRead: (userId: string) => void;
@@ -1139,6 +1142,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     return Boolean(user);
   };
+
+  const isStoreOwnerListingForDirectory = (business: Business) =>
+    isBusinessStoreOwnerListing(business, ownerBusinessProfiles);
+
+  const isCustomerAdvertisementForDirectory = (business: Business) =>
+    isCustomerAdvertisementListing(business, ownerBusinessProfiles);
 
   const markNotificationsRead = (userId: string) => {
     const readAt = new Date().toISOString();
@@ -2865,6 +2874,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const reorderLevel = Number.parseInt(values.reorderLevel, 10);
     const ownerProfile = owner ? getOwnerBusinessProfile(owner) : undefined;
     const individualSeller = owner?.role === 'resident';
+    const isCustomerAdvert = Boolean(individualSeller);
     const subscriptionCycle = ownerProfile?.subscriptionCycle ?? 'monthly';
     const sellerAccessEnabled =
       Boolean(individualSeller) || Boolean(owner && isRiverParkVerifiedForUser(owner));
@@ -2898,16 +2908,24 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       address: values.address.trim(),
       sku: `UC-${slugify(values.businessName)}`,
       stockQuantity:
-        values.listingType === 'product' && Number.isFinite(stockQuantity)
+        values.listingType === 'product' && !isCustomerAdvert && Number.isFinite(stockQuantity)
           ? Math.max(0, stockQuantity)
           : 0,
       reorderLevel:
-        values.listingType === 'product' && Number.isFinite(reorderLevel)
+        values.listingType === 'product' && !isCustomerAdvert && Number.isFinite(reorderLevel)
           ? Math.max(1, reorderLevel)
           : 0,
       price: Number.isFinite(price) ? price : 0,
-      priceLabel: values.listingType === 'product' ? 'Price' : 'Discuss in chat',
-      responseTime: values.listingType === 'product' ? 'Delivered today' : 'Chat to discuss',
+      priceLabel: isCustomerAdvert
+        ? 'Advertised price'
+        : values.listingType === 'product'
+          ? 'Price'
+          : 'Discuss in chat',
+      responseTime: isCustomerAdvert
+        ? 'Contact advertiser directly'
+        : values.listingType === 'product'
+          ? 'Delivered today'
+          : 'Chat to discuss',
       verified: sellerAccessEnabled && !securitySettings.requireManualListingApproval,
       riverParkVerified: sellerAccessEnabled,
       services:
@@ -2919,7 +2937,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       tags: [
         'New listing',
         values.category,
-        ...(individualSeller ? ['Customer seller', 'Free listing'] : ['Store owner', 'Free listing']),
+        ...(isCustomerAdvert
+          ? ['Customer advertisement', 'Advertiser']
+          : ['Store owner', 'Free listing']),
       ],
       contact: {
         phone: values.phone.trim(),
@@ -2927,6 +2947,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         ...(values.whatsapp.trim() ? { whatsapp: values.whatsapp.trim() } : {}),
         ...(values.website.trim() ? { website: values.website.trim() } : {}),
         ...(values.instagram.trim() ? { instagram: values.instagram.trim() } : {}),
+        ...(values.facebook?.trim() ? { facebook: values.facebook.trim() } : {}),
+        ...(values.x?.trim() ? { x: values.x.trim() } : {}),
+        ...(values.tiktok?.trim() ? { tiktok: values.tiktok.trim() } : {}),
       },
       createdAt: submittedAt,
     };
@@ -2968,7 +2991,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientEmail: businessForSave.ownerEmail ?? values.email.trim().toLowerCase(),
       subject: `View2Connect listing review started for ${businessForSave.name}`,
       body: individualSeller
-        ? `We received your listing. Customer care must approve it before it appears in the customer shop. Listing is free.`
+        ? `We received your advertisement. Customer care must approve it before it appears on Home. Buyers will contact you directly.`
         : `We received your store listing. Customer care will review the image, category, price, and short description before it appears publicly. Listing is free.`,
     });
 
@@ -3873,7 +3896,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const getAvailableStock = (businessId: string) => {
     const business = getBusinessById(businessId);
 
-    if (!business || business.listingType !== 'product' || !isPublicBusiness(business)) {
+    if (!business || !isStoreOwnerProduct(business, ownerBusinessProfiles)) {
       return 0;
     }
 
@@ -3883,7 +3906,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const addToCart = (businessId: string) => {
     const business = getBusinessById(businessId);
 
-    if (!business || business.listingType !== 'product' || !isPublicBusiness(business)) {
+    if (!business || !isStoreOwnerProduct(business, ownerBusinessProfiles)) {
       return;
     }
 
@@ -3946,19 +3969,28 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
   const getChatMessages = (businessId: string) => chatThreads[businessId] ?? [];
 
-  const getChatConversations = () =>
+  const getChatConversations = (currentUser?: AppUser | null) =>
     businesses
       .map((business) => {
         const messages = getChatMessages(business.id);
-        const lastMessage = messages[messages.length - 1];
+        const visibleMessages = currentUser
+          ? messages.filter(
+              (message) =>
+                message.senderUserId === currentUser.id ||
+                message.recipientUserId === currentUser.id ||
+                (!message.senderUserId && message.senderName === currentUser.fullName) ||
+                business.ownerUserId === currentUser.id,
+            )
+          : messages;
+        const lastMessage = visibleMessages[visibleMessages.length - 1];
 
-        if (messages.length === 0 || !lastMessage) {
+        if (visibleMessages.length === 0 || !lastMessage) {
           return null;
         }
 
         return {
           business,
-          messages,
+          messages: visibleMessages,
           lastMessage,
         } satisfies ChatConversation;
       })
@@ -3969,7 +4001,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           new Date(leftConversation.lastMessage.createdAt).getTime(),
       );
 
-  const sendChatMessage = (businessId: string, senderName: string, text: string) => {
+  const sendChatMessage = (businessId: string, sender: AppUser | string, text: string) => {
     const trimmedText = text.trim();
     const business = getBusinessById(businessId);
 
@@ -3978,26 +4010,32 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
 
     const createdAt = new Date().toISOString();
+    const senderName = typeof sender === 'string' ? sender : sender.fullName;
+    const senderUserId = typeof sender === 'string' ? undefined : sender.id;
+    const senderType: ChatMessage['senderType'] =
+      senderUserId && senderUserId === business.ownerUserId ? 'owner' : 'resident';
+    const existingMessages = chatThreads[businessId] ?? [];
+    const recipientUserId =
+      senderType === 'owner'
+        ? [...existingMessages]
+            .reverse()
+            .find((message) => message.senderUserId && message.senderUserId !== senderUserId)
+            ?.senderUserId
+        : business.ownerUserId;
     const customerMessage: ChatMessage = {
       id: `chat-${Date.now()}`,
       businessId,
+      ...(senderUserId ? { senderUserId } : {}),
+      ...(recipientUserId && recipientUserId !== senderUserId ? { recipientUserId } : {}),
       senderName,
-      senderType: 'resident',
+      senderType,
       text: trimmedText,
       createdAt,
-    };
-    const ownerReply: ChatMessage = {
-      id: `chat-owner-${Date.now() + 1}`,
-      businessId,
-      senderName: business.ownerName,
-      senderType: 'owner',
-      text: `Thanks for reaching out. ${business.ownerName} will reply shortly.`,
-      createdAt: new Date(Date.now() + 1000).toISOString(),
     };
 
     setChatThreads((currentThreads) => ({
       ...currentThreads,
-      [businessId]: [...(currentThreads[businessId] ?? []), customerMessage, ownerReply],
+      [businessId]: [...(currentThreads[businessId] ?? []), customerMessage],
     }));
   };
 
@@ -4069,7 +4107,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       throw new Error('Your cart is empty.');
     }
 
-    const unavailableEntries = cartEntries.filter((entry) => !isPublicBusiness(entry.business));
+    const unavailableEntries = cartEntries.filter(
+      (entry) => !isStoreOwnerProduct(entry.business, ownerBusinessProfiles),
+    );
     const invalidEntries = cartEntries.filter(
       (entry) => entry.quantity > getAvailableStock(entry.business.id),
     );
@@ -4093,20 +4133,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     if (selfOwnedEntries.length > 0) {
       throw new Error(
         `${selfOwnedEntries.map((entry) => entry.business.name).join(', ')} is your own listing. Sellers cannot buy items they posted.`,
-      );
-    }
-
-    const individualSellerMinimumIssues =
-      getIndividualSellerMinimumIssues(cartEntries);
-
-    if (individualSellerMinimumIssues.length > 0) {
-      throw new Error(
-        individualSellerMinimumIssues
-          .map(
-            (issue) =>
-              `Add ${formatCurrency(issue.amountRemaining)} more from ${issue.sellerName}. Individual-seller orders must reach ${formatCurrency(INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL)} per seller.`,
-          )
-          .join(' '),
       );
     }
 
@@ -4191,7 +4217,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       throw new Error('Your cart is empty.');
     }
 
-    const unavailableEntries = cartEntries.filter((entry) => !isPublicBusiness(entry.business));
+    const unavailableEntries = cartEntries.filter(
+      (entry) => !isStoreOwnerProduct(entry.business, ownerBusinessProfiles),
+    );
     const invalidEntries = cartEntries.filter(
       (entry) => entry.quantity > getAvailableStock(entry.business.id),
     );
@@ -4215,20 +4243,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     if (selfOwnedEntries.length > 0) {
       throw new Error(
         `${selfOwnedEntries.map((entry) => entry.business.name).join(', ')} is your own listing. Sellers cannot buy items they posted.`,
-      );
-    }
-
-    const individualSellerMinimumIssues =
-      getIndividualSellerMinimumIssues(cartEntries);
-
-    if (individualSellerMinimumIssues.length > 0) {
-      throw new Error(
-        individualSellerMinimumIssues
-          .map(
-            (issue) =>
-              `Add ${formatCurrency(issue.amountRemaining)} more from ${issue.sellerName}. Individual-seller orders must reach ${formatCurrency(INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL)} per seller.`,
-          )
-          .join(' '),
       );
     }
 
@@ -4907,7 +4921,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         .map((item) => {
           const business = businesses.find(
             (currentBusiness) =>
-              currentBusiness.id === item.businessId && currentBusiness.listingType === 'product',
+              currentBusiness.id === item.businessId &&
+              isStoreOwnerProduct(currentBusiness, ownerBusinessProfiles),
           );
 
           if (!business) {
@@ -4921,7 +4936,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           };
         })
         .filter((entry): entry is CartEntry => entry !== null),
-    [businesses, cartItems],
+    [businesses, cartItems, ownerBusinessProfiles],
   );
 
   const cartCount = useMemo(
@@ -5065,6 +5080,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       getSupportConversations,
       getNotificationsForUser,
       isRiverParkVerifiedForUser,
+      isCustomerAdvertisement: isCustomerAdvertisementForDirectory,
+      isStoreOwnerListing: isStoreOwnerListingForDirectory,
       hasCatalogManagementAccess,
       setCatalogManagementAccess,
       markNotificationsRead,

@@ -19,9 +19,14 @@ type ProductCardProps = {
   business: Business;
   addDisabled?: boolean;
   addLabel?: string;
+  maxQuantity?: number;
   onAddToCart?: () => void;
+  onDecreaseQuantity?: () => void;
+  onIncreaseQuantity?: () => void;
   onPress?: () => void;
   onProfilePress?: () => void;
+  quantity?: number;
+  showQuantityControls?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -29,8 +34,13 @@ export function ProductCard({
   addDisabled = false,
   addLabel = 'Add',
   business,
+  maxQuantity,
   onAddToCart,
+  onDecreaseQuantity,
+  onIncreaseQuantity,
   onPress,
+  quantity = 0,
+  showQuantityControls = false,
   style,
 }: ProductCardProps) {
   const { colors } = useAppTheme();
@@ -46,6 +56,8 @@ export function ProductCard({
     (!business.subscriptionNextBillingAt ||
       new Date(business.subscriptionNextBillingAt).getTime() > Date.now()) &&
     Boolean(business.riverParkVerified);
+  const plusDisabled = addDisabled || (maxQuantity !== undefined && quantity >= maxQuantity);
+  const minusDisabled = addDisabled || quantity <= 0;
 
   return (
     <Pressable
@@ -81,20 +93,54 @@ export function ProductCard({
       </View>
 
       <View style={styles.footer}>
-        <Pressable
-          disabled={addDisabled}
-          onPress={(event) => {
-            event.stopPropagation();
-            onAddToCart?.();
-          }}
-          style={({ pressed }) => [
-            styles.actionButton,
-            pressed && !addDisabled && styles.actionButtonPressed,
-            addDisabled && styles.actionButtonDisabled,
-          ]}
-        >
-          <Text style={styles.actionText}>{addLabel}</Text>
-        </Pressable>
+        {showQuantityControls ? (
+          <View style={[styles.quantityControl, addDisabled && styles.actionButtonDisabled]}>
+            <Pressable
+              disabled={minusDisabled}
+              onPress={(event) => {
+                event.stopPropagation();
+                onDecreaseQuantity?.();
+              }}
+              style={({ pressed }) => [
+                styles.quantityButton,
+                pressed && !minusDisabled && styles.quantityButtonPressed,
+                minusDisabled && styles.quantityButtonDisabled,
+              ]}
+            >
+              <Text style={styles.quantitySymbol}>-</Text>
+            </Pressable>
+            <Text style={styles.quantityValue}>{quantity}</Text>
+            <Pressable
+              disabled={plusDisabled}
+              onPress={(event) => {
+                event.stopPropagation();
+                onIncreaseQuantity?.();
+              }}
+              style={({ pressed }) => [
+                styles.quantityButton,
+                pressed && !plusDisabled && styles.quantityButtonPressed,
+                plusDisabled && styles.quantityButtonDisabled,
+              ]}
+            >
+              <Text style={styles.quantitySymbol}>+</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            disabled={addDisabled}
+            onPress={(event) => {
+              event.stopPropagation();
+              onAddToCart?.();
+            }}
+            style={({ pressed }) => [
+              styles.actionButton,
+              pressed && !addDisabled && styles.actionButtonPressed,
+              addDisabled && styles.actionButtonDisabled,
+            ]}
+          >
+            <Text style={styles.actionText}>{addLabel}</Text>
+          </Pressable>
+        )}
       </View>
     </Pressable>
   );
@@ -195,6 +241,38 @@ function createStyles(colors: AppColors) {
     actionText: {
       ...typography.caption,
       color: colors.white,
+    },
+    quantityControl: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      overflow: 'hidden',
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    quantityButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 36,
+      width: 38,
+      backgroundColor: colors.primarySoft,
+    },
+    quantityButtonPressed: {
+      opacity: 0.88,
+    },
+    quantityButtonDisabled: {
+      opacity: 0.42,
+    },
+    quantitySymbol: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    quantityValue: {
+      minWidth: 38,
+      textAlign: 'center',
+      ...typography.bodyStrong,
+      color: colors.text,
     },
   });
 }

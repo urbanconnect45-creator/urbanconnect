@@ -20,7 +20,7 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { BusinessMedia } from '../types/business';
-import { openExternalUrl } from '../utils/contact';
+import { getContactActions, openContactAction, openExternalUrl } from '../utils/contact';
 import { formatCurrency } from '../utils/format';
 import { isPublicBusiness } from '../utils/businessState';
 import { normalizeProductCategory } from '../utils/category';
@@ -30,7 +30,19 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
   const { user } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { addToCart, businesses, estates, getAvailableStock, getBusinessById, isBusinessOwnedByUser } =
+  const {
+    addToCart,
+    businesses,
+    cartEntries,
+    estates,
+    getAvailableStock,
+    getBusinessById,
+    isBusinessOwnedByUser,
+    isCustomerAdvertisement,
+    isStoreOwnerListing,
+    sendChatMessage,
+    updateCartQuantity,
+  } =
     useBusinessDirectory();
   const business = getBusinessById(route.params.businessId);
   const [activeVideo, setActiveVideo] = useState<BusinessMedia | null>(null);
@@ -52,11 +64,14 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
       (item) =>
         item.listingType === business.listingType &&
         isPublicBusiness(item) &&
+        isCustomerAdvertisement(item) === isCustomerAdvertisement(business) &&
         item.id !== business.id,
     )
     .slice(0, 3);
   const mediaCardWidth = Math.min(width - spacing.lg * 2, 360);
   const isProduct = business.listingType === 'product';
+  const isAdvertisement = isCustomerAdvertisement(business);
+  const isStoreProduct = isProduct && isStoreOwnerListing(business);
   const displayCategory = isProduct
     ? normalizeProductCategory(
         business.category,
@@ -67,11 +82,34 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
     : business.category;
   const isAvailableToPublic = isPublicBusiness(business);
   const isOwnProduct =
-    isProduct && user?.role === 'businessOwner' && isBusinessOwnedByUser(business, user);
-  const availableStock = isProduct ? getAvailableStock(business.id) : 0;
-  const isOutOfStock = isProduct && availableStock <= 0;
+    isStoreProduct && user?.role === 'businessOwner' && isBusinessOwnedByUser(business, user);
+  const availableStock = isStoreProduct ? getAvailableStock(business.id) : 0;
+  const cartQuantity =
+    cartEntries.find((entry) => entry.business.id === business.id)?.quantity ?? 0;
+  const isOutOfStock = isStoreProduct && availableStock <= 0;
   const isLowStock =
-    isProduct && !isOutOfStock && availableStock <= Math.max(1, business.reorderLevel ?? 0);
+    isStoreProduct && !isOutOfStock && availableStock <= Math.max(1, business.reorderLevel ?? 0);
+  const messageAdvertiser = () => {
+    if (!user) {
+      navigation.navigate('AuthPrompt');
+      return;
+    }
+
+    sendChatMessage(
+      business.id,
+      user,
+      `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
+    );
+    navigation.navigate('Chats');
+  };
+  const contactAdvertiser = () => {
+    const actions = getContactActions(business.contact);
+    const preferredAction = actions.find((action) => action.id === 'whatsapp') ?? actions[0];
+
+    if (preferredAction) {
+      void openContactAction(preferredAction);
+    }
+  };
 
   return (
     <>
@@ -83,7 +121,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
           <View style={styles.copyBlock}>
             <Text style={styles.title}>{business.name}</Text>
             <Text style={styles.subtitle}>
-              {displayCategory} {isProduct ? 'item' : 'service'} in{' '}
+              {displayCategory} {isAdvertisement ? 'advertisement' : isProduct ? 'item' : 'service'} in{' '}
               {estate?.name ?? 'View2Connect Marketplace'}
             </Text>
           </View>
@@ -119,7 +157,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
             <Ionicons color={colors.primary} name="location-outline" size={16} />
             <Text style={styles.clusterPillText}>{estate?.city ?? 'Nigeria'}</Text>
           </View>
-          {isProduct ? (
+          {isStoreProduct ? (
             <View
               style={[
                 styles.clusterPill,
@@ -150,9 +188,13 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
 
         {isProduct ? (
           <View style={styles.priceBanner}>
-            <Text style={styles.priceLabel}>{business.priceLabel ?? 'Price'}</Text>
+            <Text style={styles.priceLabel}>
+              {isAdvertisement ? 'Advertised price' : business.priceLabel ?? 'Price'}
+            </Text>
             <Text style={styles.priceValue}>{formatCurrency(business.price)}</Text>
-            <Text style={styles.priceMeta}>{business.responseTime}</Text>
+            <Text style={styles.priceMeta}>
+              {isAdvertisement ? 'Contact advertiser directly' : business.responseTime}
+            </Text>
           </View>
         ) : (
           <View style={styles.priceBanner}>
@@ -169,7 +211,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
             <Text style={styles.statLabel}>Category</Text>
             <Text style={styles.statValue}>{displayCategory}</Text>
           </View>
-          {isProduct ? (
+          {isStoreProduct ? (
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>Stock</Text>
               <Text style={styles.statValue}>
@@ -238,30 +280,64 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            {isProduct ? 'Buy this item' : 'Need help?'}
+            {isAdvertisement ? 'Contact advertiser' : isProduct ? 'Buy this item' : 'Need help?'}
           </Text>
           <View style={styles.buttonGroup}>
-            {isProduct ? (
-              <AppButton
-                disabled={!isAvailableToPublic || isOutOfStock || isOwnProduct}
-                label={
-                  !isAvailableToPublic
-                    ? 'Unavailable'
-                    : isOutOfStock
-                      ? 'Out of stock'
-                      : isOwnProduct
-                        ? 'Your listing'
-                        : 'Add to cart'
-                }
-                onPress={() => {
-                  if (!user) {
-                    navigation.navigate('AuthPrompt');
-                    return;
-                  }
+            {isAdvertisement ? (
+              <>
+                <AppButton label="Message Advertiser" onPress={messageAdvertiser} />
+                <AppButton label="Contact Advertiser" onPress={contactAdvertiser} variant="secondary" />
+                {business.ownerUserId ? (
+                  <AppButton
+                    label="View Advertiser Profile"
+                    onPress={() =>
+                      navigation.navigate('SellerProfile', { userId: business.ownerUserId! })
+                    }
+                    variant="ghost"
+                  />
+                ) : null}
+              </>
+            ) : isStoreProduct ? (
+              <View style={styles.quantityPanel}>
+                <Text style={styles.noticeText}>
+                  Select quantity. The cart cannot exceed available stock.
+                </Text>
+                <View style={[styles.quantityControl, isOwnProduct && styles.quantityControlDisabled]}>
+                  <Pressable
+                    disabled={cartQuantity <= 0 || isOwnProduct}
+                    onPress={() => updateCartQuantity(business.id, cartQuantity - 1)}
+                    style={({ pressed }) => [
+                      styles.quantityButton,
+                      pressed && styles.quantityButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.quantitySymbol}>-</Text>
+                  </Pressable>
+                  <Text style={styles.quantityValue}>{cartQuantity}</Text>
+                  <Pressable
+                    disabled={
+                      !isAvailableToPublic ||
+                      isOutOfStock ||
+                      isOwnProduct ||
+                      cartQuantity >= availableStock
+                    }
+                    onPress={() => {
+                      if (!user) {
+                        navigation.navigate('AuthPrompt');
+                        return;
+                      }
 
-                  addToCart(business.id);
-                }}
-              />
+                      addToCart(business.id);
+                    }}
+                    style={({ pressed }) => [
+                      styles.quantityButton,
+                      pressed && styles.quantityButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.quantitySymbol}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
             ) : (
               <Text style={styles.noticeText}>
                 Use the floating customer care button for service questions or support.
@@ -280,7 +356,11 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
       {relatedBusinesses.length > 0 ? (
         <View style={styles.relatedCard}>
           <Text style={styles.sectionTitle}>
-            {isProduct ? 'More marketplace items' : 'More marketplace services'}
+            {isAdvertisement
+              ? 'More advertisements'
+              : isProduct
+                ? 'More marketplace items'
+                : 'More marketplace services'}
           </Text>
           {relatedBusinesses.map((item) => (
             <View key={item.id} style={styles.relatedRow}>
@@ -600,6 +680,47 @@ function createStyles(colors: AppColors) {
     },
     buttonGroup: {
       gap: spacing.sm,
+    },
+    quantityPanel: {
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: spacing.md,
+    },
+    quantityControl: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      overflow: 'hidden',
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    quantityControlDisabled: {
+      opacity: 0.55,
+    },
+    quantityButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 40,
+      width: 44,
+      backgroundColor: colors.primarySoft,
+    },
+    quantityButtonPressed: {
+      opacity: 0.88,
+    },
+    quantitySymbol: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    quantityValue: {
+      minWidth: 44,
+      textAlign: 'center',
+      ...typography.bodyStrong,
+      color: colors.text,
     },
     contactButton: {
       width: '100%',

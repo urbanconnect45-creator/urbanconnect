@@ -32,7 +32,15 @@ type FoodFilterId = (typeof foodFilters)[number]['id'];
 
 export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
   const { user } = useAuth();
-  const { businesses, addToCart, isBusinessOwnedByUser } = useBusinessDirectory();
+  const {
+    businesses,
+    addToCart,
+    cartEntries,
+    getAvailableStock,
+    isBusinessOwnedByUser,
+    isStoreOwnerListing,
+    updateCartQuantity,
+  } = useBusinessDirectory();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const { width } = useWindowDimensions();
@@ -44,9 +52,12 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
   const foodListings = useMemo(
     () =>
       businesses
-        .filter((business) => {
-          return business.listingType === 'product' && isPublicBusiness(business);
-        })
+        .filter(
+          (business) =>
+            business.listingType === 'product' &&
+            isPublicBusiness(business) &&
+            isStoreOwnerListing(business),
+        )
         .map((business) => ({
           ...business,
           category: normalizeProductCategory(
@@ -61,7 +72,7 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
           (leftBusiness, rightBusiness) =>
             getBusinessPriorityScore(rightBusiness) - getBusinessPriorityScore(leftBusiness),
         ),
-    [businesses],
+    [businesses, isStoreOwnerListing],
   );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -175,13 +186,26 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
         renderItem={({ item }) => {
           const isOwnListing =
             user?.role === 'businessOwner' && isBusinessOwnedByUser(item, user);
+          const cartQuantity =
+            cartEntries.find((entry) => entry.business.id === item.id)?.quantity ?? 0;
+          const availableStock = getAvailableStock(item.id);
 
           return (
             <ProductCard
               addDisabled={isOwnListing}
               addLabel={isOwnListing ? 'Own' : 'Add'}
               business={item}
+              maxQuantity={availableStock}
               onAddToCart={() => {
+                if (!user) {
+                  navigation.navigate('AuthPrompt');
+                  return;
+                }
+
+                addToCart(item.id);
+              }}
+              onDecreaseQuantity={() => updateCartQuantity(item.id, cartQuantity - 1)}
+              onIncreaseQuantity={() => {
                 if (!user) {
                   navigation.navigate('AuthPrompt');
                   return;
@@ -200,6 +224,8 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
                   navigation.navigate('SellerProfile', { userId: item.ownerUserId });
                 }
               }}
+              quantity={cartQuantity}
+              showQuantityControls
               style={columnCount > 1 ? styles.columnCard : undefined}
             />
           );
