@@ -337,7 +337,7 @@ type BusinessDirectoryContextValue = {
     businessId: string,
     actorName?: string,
     actorRole?: AuditActorRole,
-  ) => void;
+  ) => Promise<void>;
   deleteBusiness: (businessId: string, actorName?: string, actorRole?: AuditActorRole) => void;
   restoreBusiness: (businessId: string, actorName?: string, actorRole?: AuditActorRole) => void;
 };
@@ -4377,7 +4377,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return { ...session, order };
   };
 
-  const toggleBusinessVerification = (
+  const toggleBusinessVerification = async (
     businessId: string,
     actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
@@ -4387,68 +4387,65 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
 
     const business = getBusinessById(businessId);
+    if (!business) {
+      throw new Error('This listing could not be found.');
+    }
+
     const nextVerified = !business?.verified;
     const updatedAt = new Date().toISOString();
+    const nextBusiness: Business = {
+      ...business,
+      status: 'active',
+      verified: nextVerified,
+      riverParkVerified: nextVerified ? true : business.riverParkVerified ?? false,
+      updatedAt,
+    };
+
+    if (isSupabaseConfigured) {
+      await saveBusinessToSupabase(nextBusiness);
+    }
 
     setBusinesses((currentBusinesses) =>
-      currentBusinesses.map((business) => {
-        if (business.id !== businessId) {
-          return business;
-        }
-
-        const nextBusiness = {
-          ...business,
-          status: 'active' as const,
-          verified: !business.verified,
-          riverParkVerified: !business.verified ? true : business.riverParkVerified ?? false,
-          updatedAt,
-        };
-
-        if (isSupabaseConfigured) {
-          void saveBusinessToSupabase(nextBusiness).catch(() => undefined);
-        }
-
-        return nextBusiness;
-      }),
+      currentBusinesses.map((currentBusiness) =>
+        currentBusiness.id === businessId ? nextBusiness : currentBusiness,
+      ),
     );
 
-    if (business) {
-      appendAuditLog(
-        actorName,
-        actorRole,
-        nextVerified ? 'Listing verified' : 'Listing verification revoked',
-        `${business.name} was marked ${nextVerified ? 'verified' : 'pending'}.`,
-      );
+    appendAuditLog(
+      actorName,
+      actorRole,
+      nextVerified ? 'Listing verified' : 'Listing verification revoked',
+      `${business.name} was marked ${nextVerified ? 'verified' : 'pending'}.`,
+    );
 
-      if (business.ownerUserId) {
-        appendNotification({
-          userId: business.ownerUserId,
-          userName: business.ownerName,
-          recipientEmail: business.ownerEmail ?? business.contact.email,
-          audience: 'businessOwner',
-          title: nextVerified ? 'Listing approved' : 'Listing returned to pending',
-          body: nextVerified
-            ? `${business.name} has been approved and can now appear in View2Connect.`
-            : `${business.name} was moved back to pending. Please contact customer care for more information.`,
-          contextType: 'listing',
-          contextId: business.id,
-        });
-      }
+    if (business.ownerUserId) {
+      appendNotification({
+        userId: business.ownerUserId,
+        userName: business.ownerName,
+        recipientEmail: business.ownerEmail ?? business.contact.email,
+        audience: 'businessOwner',
+        title: nextVerified ? 'Listing approved' : 'Listing returned to pending',
+        body: nextVerified
+          ? `${business.name} has been approved and can now appear in View2Connect.`
+          : `${business.name} was moved back to pending. Please contact customer care for more information.`,
+        contextType: 'listing',
+        contextId: business.id,
+      });
+    }
 
-      if (business.ownerEmail) {
-        appendEmailLog({
-          businessId: business.id,
-          recipientType: 'owner',
-          recipientName: business.ownerName,
-          recipientEmail: business.ownerEmail,
-          subject: nextVerified
-            ? `${business.name} listing approved`
-            : `${business.name} listing moved to pending`,
-          body: nextVerified
-            ? `${business.name} was approved. It can now appear in View2Connect.`
-            : `Customer care moved ${business.name} back to pending. Please contact support for next steps.`,
-        });
-      }
+    if (business.ownerEmail) {
+      appendEmailLog({
+        businessId: business.id,
+        recipientType: 'owner',
+        recipientName: business.ownerName,
+        recipientEmail: business.ownerEmail,
+        subject: nextVerified
+          ? `${business.name} listing approved`
+          : `${business.name} listing moved to pending`,
+        body: nextVerified
+          ? `${business.name} was approved. It can now appear in View2Connect.`
+          : `Customer care moved ${business.name} back to pending. Please contact support for next steps.`,
+      });
     }
   };
 

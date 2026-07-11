@@ -83,7 +83,7 @@ type AdminSectionKey =
 type AdminPinPrompt = {
   title: string;
   message: string;
-  action: () => void;
+  action: () => void | Promise<void>;
 };
 
 const userRoleOptions = ['All', 'resident', 'businessOwner', 'dispatch'] as const;
@@ -595,6 +595,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const [progressCodeDraft, setProgressCodeDraft] = useState(orderProgressSettings.code);
   const [adminPinPrompt, setAdminPinPrompt] = useState<AdminPinPrompt | null>(null);
   const [adminPinDraft, setAdminPinDraft] = useState('');
+  const [isRunningAdminPinAction, setIsRunningAdminPinAction] = useState(false);
   const [loginAnnouncementDraft, setLoginAnnouncementDraft] = useState({
     title: securitySettings.loginAnnouncementTitle,
     body: securitySettings.loginAnnouncementBody,
@@ -1517,7 +1518,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
-  const runAdminChange = (title: string, message: string, action: () => void) => {
+  const runAdminChange = (
+    title: string,
+    message: string,
+    action: () => void | Promise<void>,
+  ) => {
     if (!orderProgressSettings.code) {
       Alert.alert(
         'Admin PIN missing',
@@ -1531,14 +1536,18 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   };
 
   const closeAdminPinPrompt = () => {
+    if (isRunningAdminPinAction) {
+      return;
+    }
+
     setAdminPinPrompt(null);
     setAdminPinDraft('');
   };
 
-  const confirmAdminPinPrompt = () => {
+  const confirmAdminPinPrompt = async () => {
     const prompt = adminPinPrompt;
 
-    if (!prompt) {
+    if (!prompt || isRunningAdminPinAction) {
       return;
     }
 
@@ -1547,8 +1556,18 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return;
     }
 
-    closeAdminPinPrompt();
-    prompt.action();
+    try {
+      setIsRunningAdminPinAction(true);
+      await prompt.action();
+      closeAdminPinPrompt();
+    } catch (error) {
+      Alert.alert(
+        'Admin change failed',
+        error instanceof Error ? error.message : 'Unable to save this admin change right now.',
+      );
+    } finally {
+      setIsRunningAdminPinAction(false);
+    }
   };
 
   const toggleUserStatus = (userId: string, currentStatus?: string) => {
@@ -2166,7 +2185,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   };
 
   const handleToggleBusinessVerification = (business: Business) => {
-    runAdminChange('Admin PIN', `Enter the PIN before changing ${business.name}.`, () =>
+    runAdminChange('Admin PIN', `Enter the PIN before changing ${business.name}.`, async () =>
       toggleBusinessVerification(business.id, adminUser.fullName, adminUser.role),
     );
   };

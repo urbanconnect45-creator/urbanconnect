@@ -335,6 +335,7 @@ export function AppNavigator() {
     findUserById,
     signOut,
     signOutAdmin,
+    updateUserSecurityPreference,
     user,
     userSecurityPreference,
   } = useAuth();
@@ -1279,6 +1280,12 @@ export function AppNavigator() {
     unlockPasscodeGate();
   };
 
+  const disableBiometricGate = () => {
+    updateUserSecurityPreference({ biometricEnabled: false });
+    biometricPromptedUserId.current = null;
+    unlockPasscodeGate();
+  };
+
   const appContent = browsingPublicStore ? (
     <View style={styles.guestStoreShell}>
       <View style={[styles.guestStoreHeader, isMobileLayout && styles.guestStoreHeaderMobile]}>
@@ -1921,7 +1928,10 @@ export function AppNavigator() {
         visible={showPasscodeGate && Boolean(user) && !adminUser}
         onRequestClose={() => undefined}
       >
-        <View style={styles.modalBackdrop}>
+        <ScrollView
+          contentContainerStyle={styles.passcodeGateBackdrop}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.passcodeGateCard}>
             <View style={styles.supportHeader}>
               <View style={styles.supportHeaderIcon}>
@@ -1965,6 +1975,13 @@ export function AppNavigator() {
                   variant="secondary"
                 />
               ) : null}
+              {userSecurityPreference.biometricEnabled ? (
+                <AppButton
+                  label="Turn off biometric lock"
+                  onPress={disableBiometricGate}
+                  variant="ghost"
+                />
+              ) : null}
               {userSecurityPreference.passcodeEnabled && userSecurityPreference.passcode ? (
                 <AppButton label="Unlock" onPress={handlePasscodeGateUnlock} />
               ) : null}
@@ -1982,7 +1999,7 @@ export function AppNavigator() {
               />
             </View>
           </View>
-        </View>
+        </ScrollView>
       </Modal>
 
       <Modal
@@ -2810,6 +2827,14 @@ function createStyles(colors: AppColors) {
       justifyContent: 'center',
       backgroundColor: colors.backdrop,
       padding: spacing.lg,
+    },
+    passcodeGateBackdrop: {
+      flexGrow: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.backdrop,
+      padding: spacing.lg,
+      paddingVertical: spacing.xxl,
     },
     modalCard: {
       width: '100%',
