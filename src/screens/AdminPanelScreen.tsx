@@ -596,6 +596,10 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const [adminPinPrompt, setAdminPinPrompt] = useState<AdminPinPrompt | null>(null);
   const [adminPinDraft, setAdminPinDraft] = useState('');
   const [isRunningAdminPinAction, setIsRunningAdminPinAction] = useState(false);
+  const [pendingListingVerificationId, setPendingListingVerificationId] = useState<string | null>(null);
+  const [listingVerificationPinDraft, setListingVerificationPinDraft] = useState('');
+  const [listingVerificationError, setListingVerificationError] = useState<string | null>(null);
+  const [verifyingListingId, setVerifyingListingId] = useState<string | null>(null);
   const [loginAnnouncementDraft, setLoginAnnouncementDraft] = useState({
     title: securitySettings.loginAnnouncementTitle,
     body: securitySettings.loginAnnouncementBody,
@@ -2184,10 +2188,56 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
-  const handleToggleBusinessVerification = (business: Business) => {
-    runAdminChange('Admin PIN', `Enter the PIN before changing ${business.name}.`, async () =>
-      toggleBusinessVerification(business.id, adminUser.fullName, adminUser.role),
+  const openListingVerification = (business: Business) => {
+    setPendingListingVerificationId(business.id);
+    setListingVerificationPinDraft('');
+    setListingVerificationError(
+      orderProgressSettings.code
+        ? null
+        : 'Create a 4 digit Admin PIN in Codes before verifying listings.',
     );
+  };
+
+  const cancelListingVerification = () => {
+    if (verifyingListingId) {
+      return;
+    }
+
+    setPendingListingVerificationId(null);
+    setListingVerificationPinDraft('');
+    setListingVerificationError(null);
+  };
+
+  const confirmListingVerification = async (business: Business) => {
+    if (verifyingListingId) {
+      return;
+    }
+
+    if (!orderProgressSettings.code) {
+      setListingVerificationError('Create a 4 digit Admin PIN in Codes before verifying listings.');
+      return;
+    }
+
+    if (listingVerificationPinDraft.trim() !== orderProgressSettings.code) {
+      setListingVerificationError('Wrong PIN. Enter the active owner admin PIN.');
+      return;
+    }
+
+    try {
+      setVerifyingListingId(business.id);
+      setListingVerificationError(null);
+      await toggleBusinessVerification(business.id, adminUser.fullName, adminUser.role);
+      setPendingListingVerificationId(null);
+      setListingVerificationPinDraft('');
+    } catch (error) {
+      setListingVerificationError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to save this listing verification right now.',
+      );
+    } finally {
+      setVerifyingListingId(null);
+    }
   };
 
   const handleDeleteBusiness = (business: Business) => {
@@ -4380,7 +4430,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                           <MonoButton
                             dark={!business.verified}
                             label={business.verified ? 'Unverify' : 'Verify'}
-                            onPress={() => handleToggleBusinessVerification(business)}
+                            onPress={() => openListingVerification(business)}
                           />
                           {canReviewListings ? (
                             <MonoButton
@@ -4390,6 +4440,54 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             />
                           ) : null}
                         </View>
+                        {pendingListingVerificationId === business.id ? (
+                          <View style={styles.inlinePinBox}>
+                            <Text style={styles.recordTitle}>
+                              {business.verified ? 'Confirm unverify listing' : 'Confirm verify listing'}
+                            </Text>
+                            <Text style={styles.recordMeta}>
+                              Enter the owner Admin PIN to save this listing change.
+                            </Text>
+                            <TextInput
+                              keyboardType="numeric"
+                              maxLength={4}
+                              onChangeText={(value) => {
+                                setListingVerificationPinDraft(value.replace(/\D/g, '').slice(0, 4));
+                                setListingVerificationError(null);
+                              }}
+                              placeholder="4 digit PIN"
+                              placeholderTextColor="#8A8A8A"
+                              secureTextEntry
+                              style={styles.compactInput}
+                              value={listingVerificationPinDraft}
+                            />
+                            {listingVerificationError ? (
+                              <Text style={styles.inlinePinError}>{listingVerificationError}</Text>
+                            ) : null}
+                            <View style={styles.inlineActionRow}>
+                              <MonoButton
+                                dark
+                                disabled={verifyingListingId === business.id}
+                                label={
+                                  verifyingListingId === business.id
+                                    ? 'Saving...'
+                                    : business.verified
+                                      ? 'Confirm unverify'
+                                      : 'Confirm verify'
+                                }
+                                onPress={() => {
+                                  void confirmListingVerification(business);
+                                }}
+                              />
+                              <MonoButton
+                                dark={false}
+                                disabled={Boolean(verifyingListingId)}
+                                label="Cancel"
+                                onPress={cancelListingVerification}
+                              />
+                            </View>
+                          </View>
+                        ) : null}
                       </View>
                     );
                   })}
@@ -5665,6 +5763,19 @@ function createStyles(colors: AppColors) {
     recordMeta: {
       ...typography.caption,
       color: colors.textMuted,
+    },
+    inlinePinBox: {
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: '#D6D6D6',
+      backgroundColor: '#F7F7F7',
+      padding: spacing.md,
+      marginTop: spacing.sm,
+    },
+    inlinePinError: {
+      ...typography.caption,
+      color: colors.danger,
     },
     badgeRow: {
       flexDirection: 'row',
