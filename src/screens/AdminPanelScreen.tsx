@@ -4310,6 +4310,21 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                                 {getBusinessStatusLabel(business.status)}
                               </Text>
                             </View>
+                            <View
+                              style={[
+                                styles.recordBadge,
+                                isPublicBusiness(business) && styles.recordBadgeSuccess,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.recordBadgeText,
+                                  isPublicBusiness(business) && styles.recordBadgeTextSuccess,
+                                ]}
+                              >
+                                {isPublicBusiness(business) ? 'Public' : 'Hidden'}
+                              </Text>
+                            </View>
                           </View>
                         </View>
                         <Text style={styles.recordMeta}>

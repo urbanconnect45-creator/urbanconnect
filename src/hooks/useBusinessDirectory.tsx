@@ -4393,11 +4393,19 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const nextVerified = !business?.verified;
     const updatedAt = new Date().toISOString();
+    const nextSubscriptionStatus = nextVerified
+      ? isSubscriptionActive(business.subscriptionStatus, business.subscriptionNextBillingAt)
+        ? business.subscriptionStatus
+        : 'active'
+      : business.subscriptionStatus;
     const nextBusiness: Business = {
       ...business,
       status: 'active',
       verified: nextVerified,
       riverParkVerified: nextVerified ? true : business.riverParkVerified ?? false,
+      ...(nextSubscriptionStatus ? { subscriptionStatus: nextSubscriptionStatus } : {}),
+      subscriptionCycle: business.subscriptionCycle ?? 'monthly',
+      subscriptionItemCount: Math.max(1, business.subscriptionItemCount ?? 1),
       updatedAt,
     };
 
