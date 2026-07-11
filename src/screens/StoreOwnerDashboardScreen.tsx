@@ -525,15 +525,11 @@ function escapeReceiptHtml(value: unknown) {
 }
 
 function businessPublicStatus(business: Business) {
-  if (business.verified && business.riverParkVerified) {
+  if (business.verified) {
     return 'Live';
   }
 
-  if (business.subscriptionStatus === 'paid' || business.subscriptionStatus === 'active') {
-    return 'In review';
-  }
-
-  return 'Setup needed';
+  return 'In review';
 }
 
 function buildProfileValues(userName: string, userEmail: string): OwnerBusinessProfileValues {

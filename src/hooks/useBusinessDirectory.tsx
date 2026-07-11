@@ -1137,35 +1137,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return false;
     }
 
-    if (user.role === 'businessOwner' && (user.status ?? 'active') === 'active') {
-      return true;
-    }
-
-    const ownerProfile = getOwnerBusinessProfile(user);
-    const ownerKeys = [
-      user.id,
-      user.email,
-      user.fullName,
-      user.businessName,
-      ownerProfile?.accountEmail,
-      ownerProfile?.email,
-      ownerProfile?.accountName,
-      ownerProfile?.ownerName,
-    ]
-      .map((ownerKey) => ownerKey?.trim().toLowerCase())
-      .filter((ownerKey): ownerKey is string => Boolean(ownerKey));
-    const matchingListing = businesses.find((business) =>
-      [business.ownerUserId, business.ownerEmail, business.ownerName]
-        .map((ownerKey) => ownerKey?.trim().toLowerCase())
-        .some((ownerKey) => Boolean(ownerKey && ownerKeys.includes(ownerKey))),
-    );
-
-    return Boolean(
-      user.riverParkVerified ||
-        ownerProfile?.riverParkVerified ||
-        matchingListing?.riverParkVerified ||
-        verifiedUserIdsFromNotifications.has(user.id),
-    );
+    return Boolean(user);
   };
 
   const markNotificationsRead = (userId: string) => {
@@ -2715,7 +2687,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         audience: 'businessOwner',
         title: verified ? 'Seller verification approved' : 'Seller verification pending',
         body: verified
-          ? 'Customer care has verified your seller account. Listing approval and subscription payment are still tracked separately.'
+          ? 'Customer care has verified your seller account. Listing approval is tracked separately.'
           : 'Your seller verification has been moved back to pending. Customer care may contact you for more information.',
         contextType: 'general',
         contextId: profile.ownerUserId,
@@ -2734,11 +2706,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const updatedAt = new Date().toISOString();
     const existingProfile = getOwnerBusinessProfile(owner);
-    const profileSubscriptionActive = isSubscriptionActive(
-      existingProfile?.subscriptionStatus,
-      existingProfile?.subscriptionNextBillingAt,
-    );
-
 
     const nextProfile: OwnerBusinessProfile = {
       ...(existingProfile ?? {
@@ -2759,10 +2726,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         galleryImages: '',
         galleryVideos: '',
       }),
-      subscriptionStatus:
-        profileSubscriptionActive && existingProfile?.subscriptionStatus
-          ? existingProfile.subscriptionStatus
-          : 'active',
       riverParkVerified: true,
       updatedAt,
     };
@@ -2819,12 +2782,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           ...business,
           status: 'active',
           verified: true,
-          riverParkVerified: true,
-          subscriptionStatus:
-            isSubscriptionActive(business.subscriptionStatus, business.subscriptionNextBillingAt) &&
-            business.subscriptionStatus
-              ? business.subscriptionStatus
-              : 'active',
           updatedAt,
         };
 
@@ -2908,24 +2865,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const reorderLevel = Number.parseInt(values.reorderLevel, 10);
     const ownerProfile = owner ? getOwnerBusinessProfile(owner) : undefined;
     const individualSeller = owner?.role === 'resident';
-    const existingIndividualListing = individualSeller
-      ? businesses.find((business) => business.ownerUserId === owner.id)
-      : undefined;
-    const individualFreeStartedAt = existingIndividualListing?.createdAt ?? new Date().toISOString();
-    const individualFreeExpiry =
-      existingIndividualListing?.subscriptionNextBillingAt ??
-      new Date(new Date(individualFreeStartedAt).getTime() + 90 * 86400000).toISOString();
-    const individualFreeActive =
-      Boolean(individualSeller) && new Date(individualFreeExpiry).getTime() > Date.now();
     const subscriptionCycle = ownerProfile?.subscriptionCycle ?? 'monthly';
-    const selectedPlan = getPaymentPlanByCycle(subscriptionCycle);
-    const subscriptionExempt = owner ? isSubscriptionExemptForUser(owner) : false;
-    const subscriptionIsActive =
-      individualFreeActive ||
-      subscriptionExempt ||
-      (ownerProfile?.subscriptionStatus === 'paid' || ownerProfile?.subscriptionStatus === 'active') &&
-        (!ownerProfile.subscriptionNextBillingAt ||
-          new Date(ownerProfile.subscriptionNextBillingAt).getTime() > Date.now());
     const sellerAccessEnabled =
       Boolean(individualSeller) || Boolean(owner && isRiverParkVerifiedForUser(owner));
     const submittedAt = new Date().toISOString();
@@ -2936,26 +2876,15 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       listingType: values.listingType,
       status: 'active',
       subscriptionCycle,
-      subscriptionStatus:
-        individualFreeActive || subscriptionExempt
-          ? 'active'
-          : subscriptionIsActive
-            ? 'paid'
-            : 'pending',
-      verifiedAmount: individualSeller || subscriptionExempt
-        ? 0
-        : subscriptionIsActive
-          ? ownerProfile?.verifiedAmount ?? selectedPlan.amount
-          : 0,
+      subscriptionStatus: 'active',
+      verifiedAmount: 0,
       subscriptionItemCount: ownerProfile?.subscriptionItemCount ?? 1,
       ...(ownerProfile?.subscriptionPaidAt
         ? { subscriptionPaidAt: ownerProfile.subscriptionPaidAt }
         : {}),
       ...(ownerProfile?.subscriptionNextBillingAt
         ? { subscriptionNextBillingAt: ownerProfile.subscriptionNextBillingAt }
-        : individualSeller
-          ? { subscriptionNextBillingAt: individualFreeExpiry }
-          : {}),
+        : {}),
       name: values.businessName.trim(),
       ownerName: values.ownerName.trim(),
       ...(owner ? { ownerUserId: owner.id } : {}),
@@ -2979,8 +2908,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       price: Number.isFinite(price) ? price : 0,
       priceLabel: values.listingType === 'product' ? 'Price' : 'Discuss in chat',
       responseTime: values.listingType === 'product' ? 'Delivered today' : 'Chat to discuss',
-      verified:
-        sellerAccessEnabled && subscriptionIsActive && !securitySettings.requireManualListingApproval,
+      verified: sellerAccessEnabled && !securitySettings.requireManualListingApproval,
       riverParkVerified: sellerAccessEnabled,
       services:
         serviceList.length > 0
@@ -2991,7 +2919,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       tags: [
         'New listing',
         values.category,
-        ...(individualSeller ? ['Individual seller', 'Standard placement'] : ['Priority store']),
+        ...(individualSeller ? ['Customer seller', 'Free listing'] : ['Store owner', 'Free listing']),
       ],
       contact: {
         phone: values.phone.trim(),
@@ -3040,10 +2968,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientEmail: businessForSave.ownerEmail ?? values.email.trim().toLowerCase(),
       subject: `View2Connect listing review started for ${businessForSave.name}`,
       body: individualSeller
-        ? `We received your listing on the 3-month Individual Seller Free Plan. Customer care must approve it before it appears. Free individual listings use standard placement, while paid store listings are prioritized first.`
-        : subscriptionIsActive
-          ? `We received your listing. Customer care will review the image, category, price, and short description before it appears publicly.`
-        : `We received your listing. Pay your ${selectedPlan.title.toLowerCase()} from the Subscription page so customer care can activate the business.`,
+        ? `We received your listing. Customer care must approve it before it appears in the customer shop. Listing is free.`
+        : `We received your store listing. Customer care will review the image, category, price, and short description before it appears publicly. Listing is free.`,
     });
 
     return businessForSave;
@@ -4393,17 +4319,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const nextVerified = !business?.verified;
     const updatedAt = new Date().toISOString();
-    const nextSubscriptionStatus = nextVerified
-      ? isSubscriptionActive(business.subscriptionStatus, business.subscriptionNextBillingAt)
-        ? business.subscriptionStatus
-        : 'active'
-      : business.subscriptionStatus;
     const nextBusiness: Business = {
       ...business,
       status: 'active',
       verified: nextVerified,
-      riverParkVerified: nextVerified ? true : business.riverParkVerified ?? false,
-      ...(nextSubscriptionStatus ? { subscriptionStatus: nextSubscriptionStatus } : {}),
       subscriptionCycle: business.subscriptionCycle ?? 'monthly',
       subscriptionItemCount: Math.max(1, business.subscriptionItemCount ?? 1),
       updatedAt,

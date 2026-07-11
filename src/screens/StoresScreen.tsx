@@ -16,7 +16,7 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Business, OwnerBusinessProfile } from '../types/business';
-import { isPublicBusiness, isSubscriptionActive } from '../utils/businessState';
+import { isPublicBusiness } from '../utils/businessState';
 
 const fallbackStoreImage =
   'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?auto=format&fit=crop&w=700&q=82';
@@ -73,11 +73,7 @@ function buildStoreGroups(
   });
 
   profiles
-    .filter(
-      (profile) =>
-        Boolean(profile.riverParkVerified) &&
-        isSubscriptionActive(profile.subscriptionStatus, profile.subscriptionNextBillingAt),
-    )
+    .filter((profile) => Boolean(profile.riverParkVerified))
     .forEach((profile) => {
       const key =
         profile.ownerUserId ||

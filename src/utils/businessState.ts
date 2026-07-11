@@ -37,17 +37,9 @@ export function isSubscriptionActive(
 }
 
 export function isPublicBusiness(
-  business: Pick<
-    Business,
-    'status' | 'verified' | 'subscriptionStatus' | 'subscriptionNextBillingAt' | 'riverParkVerified'
-  >,
+  business: Pick<Business, 'status' | 'verified'>,
 ) {
-  return (
-    !isBusinessArchived(business.status) &&
-    isSubscriptionActive(business.subscriptionStatus, business.subscriptionNextBillingAt) &&
-    Boolean(business.verified) &&
-    Boolean(business.riverParkVerified)
-  );
+  return !isBusinessArchived(business.status) && Boolean(business.verified);
 }
 
 export function getBusinessPriorityScore(

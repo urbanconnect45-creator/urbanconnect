@@ -500,8 +500,8 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       Alert.alert(
         'Sent for review',
         isIndividualSeller
-          ? 'Your listing is on the 3-month Individual Seller Free Plan. It must be approved and uses standard placement; paid stores are shown first.'
-          : 'Your listing was submitted. Customer care will inspect it, and your paid subscription controls when it can go live.',
+          ? 'Your listing was submitted for admin review. Listing is free and appears after approval.'
+          : 'Your listing was submitted for admin review. Listing is free and appears after approval.',
         [
           {
             text: 'View listing',
@@ -538,7 +538,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>
-          {isIndividualSeller ? 'Individual Seller Free Plan' : 'Business onboarding'}
+          {isIndividualSeller ? 'Customer seller listing' : 'Business onboarding'}
         </Text>
         <Text style={styles.title}>
           {isIndividualSeller
@@ -547,8 +547,8 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
         </Text>
         <Text style={styles.subtitle}>
           {isIndividualSeller
-            ? 'Free for 3 months. Every listing is reviewed and receives standard placement; paid store listings are prioritized above it.'
-            : 'Subscription payment is managed from the Subscription page. This form is only for the item or service details customer care needs to inspect.'}
+            ? 'Listing is free. Every listing is reviewed before it appears in the customer shop.'
+            : 'Listing is free. This form is only for the item or service details customer care needs to inspect.'}
         </Text>
       </View>
 

@@ -4337,17 +4337,10 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                           - {business.ownerEmail ?? business.contact.email}
                         </Text>
                         <Text style={styles.recordMeta}>
-                          Plan {paymentCycleLabel(business.subscriptionCycle ?? 'monthly')} -{' '}
-                          {isSubscriptionActive(
-                            business.subscriptionStatus,
-                            business.subscriptionNextBillingAt,
-                          )
-                            ? 'Active'
-                            : subscriptionStatusLabel(business.subscriptionStatus)} - Verified{' '}
-                          {formatCurrency(business.verifiedAmount ?? 0)}
-                        </Text>
-                        <Text style={styles.recordMeta}>
-                          {subscriptionWindowLabel(business.subscriptionNextBillingAt)}
+                          Listing is free -{' '}
+                          {isPublicBusiness(business)
+                            ? 'Public in customer shop'
+                            : 'Hidden until admin verification'}
                         </Text>
                         <Text style={styles.recordMeta}>
                           {business.listingType === 'product'
