@@ -30,6 +30,7 @@ import type {
   ChatConversation,
   ChatMessage,
   CheckoutPayload,
+  DeliveryLocation,
   DynamicDepositAccount,
   Estate,
   FlutterwaveCheckoutSession,
@@ -65,17 +66,25 @@ import {
 } from '../utils/deposits';
 import { formatCurrency } from '../utils/format';
 import { getAccountWalletBalance, getPaidWithdrawalTotal } from '../utils/wallet';
+import { calculateProgressiveVat, calculateSellerPackingSupport } from '../utils/cart';
 import {
   createFlutterwaveVirtualAccount,
   createFlutterwaveCheckoutSession,
   createFlutterwaveDynamicDepositAccount,
+  clearCustomerCartInSupabase,
   deleteBusinessFromSupabase,
+  deleteCartItemFromSupabase,
   deleteOrderFromSupabase,
   deleteOrderTestingStateFromSupabase,
   deleteSupportConversationFromSupabase,
+  fetchCustomerCartFromSupabase,
+  fetchCustomerDeliveryLocationFromSupabase,
   fetchMarketplaceSnapshot,
   isSupabaseConfigured,
   saveBusinessToSupabase,
+  saveCartItemToSupabase,
+  saveChatMessageToSupabase,
+  saveCustomerDeliveryLocationToSupabase,
   saveEmailLogToSupabase,
   sendEmailLogThroughSupabaseFunction,
   saveNotificationToSupabase,
@@ -89,11 +98,14 @@ import {
   saveWithdrawalToSupabase,
   saveSupportMessageToSupabase,
   uploadBusinessMediaToSupabase,
+  uploadChatAttachmentToSupabaseStorage,
 } from '../services/supabaseApi';
 import { normalizeOrderStatus } from '../utils/order';
 import {
   isCustomerAdvertisement as isCustomerAdvertisementListing,
+  isCustomerAdvertisementSource as isCustomerAdvertisementSourceListing,
   isStoreOwnerListing as isBusinessStoreOwnerListing,
+  isStoreOwnerListingSource as isBusinessStoreOwnerListingSource,
   isStoreOwnerProduct,
 } from '../utils/marketplaceListings';
 import { usePersistentState } from './usePersistentState';
@@ -149,13 +161,20 @@ type BusinessDirectoryContextValue = {
   ) => void;
   getChatMessages: (businessId: string) => ChatMessage[];
   getChatConversations: (user?: AppUser | null) => ChatConversation[];
-  sendChatMessage: (businessId: string, sender: AppUser | string, text: string) => void;
+  sendChatMessage: (
+    businessId: string,
+    sender: AppUser | string,
+    text: string,
+    attachments?: ChatMessage['attachments'],
+  ) => Promise<void>;
   getSupportConversation: (user?: AppUser | null) => SupportConversation | undefined;
   getSupportConversations: () => SupportConversation[];
   getNotificationsForUser: (user?: AppUser | null) => AppNotification[];
   isRiverParkVerifiedForUser: (user?: AppUser | null) => boolean;
   isCustomerAdvertisement: (business: Business) => boolean;
+  isCustomerAdvertisementSource: (business: Business) => boolean;
   isStoreOwnerListing: (business: Business) => boolean;
+  isStoreOwnerListingSource: (business: Business) => boolean;
   hasCatalogManagementAccess: (ownerUserId: string) => boolean;
   setCatalogManagementAccess: (owner: AppUser, allowed: boolean) => void;
   markNotificationsRead: (userId: string) => void;
@@ -163,7 +182,8 @@ type BusinessDirectoryContextValue = {
     user: AppUser,
     text: string,
     context?: Pick<SupportMessage, 'contextType' | 'contextId' | 'contextLabel'>,
-  ) => void;
+    attachments?: SupportMessage['attachments'],
+  ) => Promise<void>;
   sendSupportReply: (
     conversationId: string,
     actorName: string,
@@ -199,6 +219,7 @@ type BusinessDirectoryContextValue = {
     customer: AppUser,
     cycle: PaymentPlanCycle,
     durationMonths?: number,
+    durationMinutes?: number,
     amountOverride?: number,
     discountAmount?: number,
   ) => SubscriptionPayment;
@@ -266,6 +287,12 @@ type BusinessDirectoryContextValue = {
   getOrderById: (orderId: string) => Order | undefined;
   getOrdersForUser: (userId: string) => Order[];
   getOrdersForOwner: (ownerUserId: string, owner?: AppUser | null) => Order[];
+  syncCustomerAccountData: (user?: AppUser | null) => Promise<void>;
+  getCustomerDeliveryLocation: (user?: AppUser | null) => DeliveryLocation | undefined;
+  saveCustomerDeliveryLocation: (
+    user: AppUser,
+    location: DeliveryLocation,
+  ) => Promise<DeliveryLocation>;
   getAvailableAccountBalanceForUser: (user: AppUser) => number;
   isBusinessOwnedByUser: (business: Business, user?: AppUser | null) => boolean;
   updateBusinessListing: (
@@ -287,10 +314,10 @@ type BusinessDirectoryContextValue = {
   ) => Business;
   deleteOwnedBusinessListing: (businessId: string, owner?: AppUser | null) => void;
   getAvailableStock: (businessId: string) => number;
-  addToCart: (businessId: string) => void;
-  removeFromCart: (businessId: string) => void;
-  updateCartQuantity: (businessId: string, quantity: number) => void;
-  clearCart: () => void;
+  addToCart: (businessId: string, user?: AppUser | null) => void;
+  removeFromCart: (businessId: string, user?: AppUser | null) => void;
+  updateCartQuantity: (businessId: string, quantity: number, user?: AppUser | null) => void;
+  clearCart: (user?: AppUser | null) => void;
   checkoutCart: (payload: CheckoutPayload, customer?: AppUser | null) => Order;
   startCartFlutterwaveCheckout: (
     payload: Omit<CheckoutPayload, 'paymentMethod'>,
@@ -786,6 +813,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     'urbanconnect.cart.v2',
     [],
   );
+  const [customerDeliveryLocations, setCustomerDeliveryLocations] = usePersistentState<
+    DeliveryLocation[]
+  >('urbanconnect.customerDeliveryLocations.v1', []);
   const [chatThreads, setChatThreads] = usePersistentState<Record<string, ChatMessage[]>>(
     'urbanconnect.chats.v2',
     {},
@@ -991,6 +1021,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         setNotifications((currentNotifications) =>
           mergeNewestById(currentNotifications, snapshot.notifications),
         );
+        setChatThreads(snapshot.chatThreads);
         setSupportThreads(() => {
           const deletedIds = new Set(deletedSupportConversationIds);
 
@@ -1037,6 +1068,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     setAuditLogs,
     setBusinesses,
     deletedBusinessIds,
+    setChatThreads,
     setEmailLogs,
     deletedSupportConversationIds,
     setNotifications,
@@ -1146,8 +1178,14 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const isStoreOwnerListingForDirectory = (business: Business) =>
     isBusinessStoreOwnerListing(business, ownerBusinessProfiles);
 
+  const isStoreOwnerListingSourceForDirectory = (business: Business) =>
+    isBusinessStoreOwnerListingSource(business, ownerBusinessProfiles);
+
   const isCustomerAdvertisementForDirectory = (business: Business) =>
     isCustomerAdvertisementListing(business, ownerBusinessProfiles);
+
+  const isCustomerAdvertisementSourceForDirectory = (business: Business) =>
+    isCustomerAdvertisementSourceListing(business, ownerBusinessProfiles);
 
   const markNotificationsRead = (userId: string) => {
     const readAt = new Date().toISOString();
@@ -1501,34 +1539,47 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
-  const sendSupportMessage = (
+  const sendSupportMessage = async (
     user: AppUser,
     text: string,
     context?: Pick<SupportMessage, 'contextType' | 'contextId' | 'contextLabel'>,
+    attachments: SupportMessage['attachments'] = [],
   ) => {
     const trimmedText = text.trim();
+    const hasAttachments = attachments.length > 0;
 
-    if (!trimmedText) {
+    if (!trimmedText && !hasAttachments) {
       return;
     }
 
     const createdAt = new Date().toISOString();
     const conversationId = supportConversationId(user.id);
+    const messageId = `support-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const uploadedAttachments = await Promise.all(
+      attachments.map((attachment) =>
+        uploadChatAttachmentToSupabaseStorage(
+          attachment,
+          messageId,
+          user.id,
+        ),
+      ),
+    );
     setDeletedSupportConversationIds((currentIds) =>
       currentIds.filter((currentId) => currentId !== conversationId),
     );
     const message: SupportMessage = {
-      id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: messageId,
       conversationId,
       userId: user.id,
       userName: user.fullName,
       userRole: user.role,
       senderName: user.fullName,
       senderRole: user.role,
-      text: trimmedText,
+      text: trimmedText || (uploadedAttachments.length > 1 ? 'Sent attachments' : 'Sent an attachment'),
       ...(context?.contextType ? { contextType: context.contextType } : {}),
       ...(context?.contextId ? { contextId: context.contextId } : {}),
       ...(context?.contextLabel ? { contextLabel: context.contextLabel } : {}),
+      ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
       createdAt,
     };
     const existingMessages = supportThreads[conversationId] ?? [];
@@ -1569,9 +1620,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
 
     if (isSupabaseConfigured) {
-      void saveSupportMessageToSupabase(message).catch(() => undefined);
+      await saveSupportMessageToSupabase(message);
       if (shouldSendAutoReply) {
-        void saveSupportMessageToSupabase(autoReply).catch(() => undefined);
+        await saveSupportMessageToSupabase(autoReply);
       }
     }
   };
@@ -2311,14 +2362,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       accountName: owner.fullName,
       accountEmail: owner.email,
       ownerName: existingProfile?.ownerName ?? owner.fullName,
+      bio: existingProfile?.bio ?? '',
+      profileImage: existingProfile?.profileImage ?? '',
       phone: existingProfile?.phone ?? owner.phoneNumber,
       whatsapp: existingProfile?.whatsapp ?? '',
       email: existingProfile?.email ?? owner.email,
       website: existingProfile?.website ?? '',
       instagram: existingProfile?.instagram ?? '',
+      facebook: existingProfile?.facebook ?? '',
+      x: existingProfile?.x ?? '',
+      tiktok: existingProfile?.tiktok ?? '',
       address: existingProfile?.address ?? owner.businessCluster ?? '',
       openingTime: existingProfile?.openingTime ?? '',
       closingTime: existingProfile?.closingTime ?? '',
+      openDays: existingProfile?.openDays ?? [],
       coverImage: existingProfile?.coverImage ?? '',
       galleryImages: existingProfile?.galleryImages ?? '',
       galleryVideos: existingProfile?.galleryVideos ?? '',
@@ -2422,6 +2479,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     customer: AppUser,
     cycle: PaymentPlanCycle,
     durationMonths = 1,
+    durationMinutes?: number,
     amountOverride?: number,
     discountAmount = 0,
   ) => {
@@ -2430,15 +2488,28 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
 
     const plan = getPaymentPlanByCycle(cycle);
+    const minuteDuration =
+      typeof durationMinutes === 'number' && Number.isFinite(durationMinutes) && durationMinutes > 0
+        ? Math.floor(durationMinutes)
+        : undefined;
     const durationMultiplier = Math.max(1, Math.floor(durationMonths));
-    const amountBeforeDiscount = plan.amount * durationMultiplier;
+    const amountBeforeDiscount =
+      minuteDuration && amountOverride !== undefined
+        ? amountOverride + discountAmount
+        : plan.amount * durationMultiplier;
     const amount = amountOverride ?? amountBeforeDiscount;
     const balance = getAvailableAccountBalanceForUser(customer);
     const createdAt = new Date().toISOString();
     const nextBillingDate = new Date(createdAt);
-    nextBillingDate.setDate(nextBillingDate.getDate() + 30 * durationMultiplier);
+    if (minuteDuration) {
+      nextBillingDate.setMinutes(nextBillingDate.getMinutes() + minuteDuration);
+    } else {
+      nextBillingDate.setDate(nextBillingDate.getDate() + 30 * durationMultiplier);
+    }
     const nextBillingAt = nextBillingDate.toISOString();
-    const durationLabel = `${durationMultiplier} month${durationMultiplier === 1 ? '' : 's'}`;
+    const durationLabel = minuteDuration
+      ? `${minuteDuration} minute${minuteDuration === 1 ? '' : 's'}`
+      : `${durationMultiplier} month${durationMultiplier === 1 ? '' : 's'}`;
 
     if (amount > balance) {
       throw new Error(
@@ -2464,6 +2535,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         planTitle: plan.title,
         durationLabel,
         durationMonths: durationMultiplier,
+        ...(minuteDuration ? { durationMinutes: minuteDuration } : {}),
         amountBeforeDiscount,
         discountAmount,
         nextBillingAt,
@@ -2723,14 +2795,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         accountName: owner.businessName ?? owner.fullName,
         accountEmail: owner.email,
         ownerName: owner.businessName ?? owner.fullName,
+        bio: '',
+        profileImage: '',
         phone: owner.phoneNumber,
         whatsapp: owner.phoneNumber,
         email: owner.email,
         website: '',
         instagram: '',
+        facebook: '',
+        x: '',
+        tiktok: '',
         address: owner.businessCluster ?? '',
         openingTime: '',
         closingTime: '',
+        openDays: [],
         coverImage: '',
         galleryImages: '',
         galleryVideos: '',
@@ -2875,6 +2953,21 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const ownerProfile = owner ? getOwnerBusinessProfile(owner) : undefined;
     const individualSeller = owner?.role === 'resident';
     const isCustomerAdvert = Boolean(individualSeller);
+    const profileContact = {
+      phone: ownerProfile?.phone?.trim() || owner?.phoneNumber.trim() || values.phone.trim(),
+      whatsapp:
+        ownerProfile?.whatsapp?.trim() || owner?.phoneNumber.trim() || values.whatsapp.trim(),
+      email: (
+        ownerProfile?.email?.trim() ||
+        owner?.email.trim() ||
+        values.email.trim()
+      ).toLowerCase(),
+      website: ownerProfile?.website?.trim() || '',
+      instagram: ownerProfile?.instagram?.trim() || '',
+      facebook: ownerProfile?.facebook?.trim() || '',
+      x: ownerProfile?.x?.trim() || '',
+      tiktok: ownerProfile?.tiktok?.trim() || '',
+    };
     const subscriptionCycle = ownerProfile?.subscriptionCycle ?? 'monthly';
     const sellerAccessEnabled =
       Boolean(individualSeller) || Boolean(owner && isRiverParkVerifiedForUser(owner));
@@ -2884,6 +2977,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       id: listingId,
       estateId: values.estateId,
       listingType: values.listingType,
+      listingSource: isCustomerAdvert ? 'customerAccount' : 'sellerPortal',
+      listingAudience: isCustomerAdvert ? 'customerAdvert' : 'storeProduct',
       status: 'active',
       subscriptionCycle,
       subscriptionStatus: 'active',
@@ -2898,7 +2993,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       name: values.businessName.trim(),
       ownerName: values.ownerName.trim(),
       ...(owner ? { ownerUserId: owner.id } : {}),
-      ownerEmail: values.email.trim().toLowerCase(),
+      ownerEmail: profileContact.email,
       cluster: values.cluster,
       category: values.category,
       description: values.shortDescription.trim(),
@@ -2937,19 +3032,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       tags: [
         'New listing',
         values.category,
+        ...(values.condition ? [`Condition: ${values.condition}`] : []),
         ...(isCustomerAdvert
-          ? ['Customer advertisement', 'Advertiser']
-          : ['Store owner', 'Free listing']),
+          ? ['Customer advertisement', 'Customer account advert', 'Advertiser']
+          : ['Store owner', 'Seller portal listing', 'Free listing']),
       ],
       contact: {
-        phone: values.phone.trim(),
-        email: values.email.trim().toLowerCase(),
-        ...(values.whatsapp.trim() ? { whatsapp: values.whatsapp.trim() } : {}),
-        ...(values.website.trim() ? { website: values.website.trim() } : {}),
-        ...(values.instagram.trim() ? { instagram: values.instagram.trim() } : {}),
-        ...(values.facebook?.trim() ? { facebook: values.facebook.trim() } : {}),
-        ...(values.x?.trim() ? { x: values.x.trim() } : {}),
-        ...(values.tiktok?.trim() ? { tiktok: values.tiktok.trim() } : {}),
+        phone: profileContact.phone,
+        email: profileContact.email,
+        ...(profileContact.whatsapp ? { whatsapp: profileContact.whatsapp } : {}),
+        ...(profileContact.website ? { website: profileContact.website } : {}),
+        ...(profileContact.instagram ? { instagram: profileContact.instagram } : {}),
+        ...(profileContact.facebook ? { facebook: profileContact.facebook } : {}),
+        ...(profileContact.x ? { x: profileContact.x } : {}),
+        ...(profileContact.tiktok ? { tiktok: profileContact.tiktok } : {}),
       },
       createdAt: submittedAt,
     };
@@ -2988,7 +3084,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       businessId: businessForSave.id,
       recipientType: 'owner',
       recipientName: businessForSave.ownerName,
-      recipientEmail: businessForSave.ownerEmail ?? values.email.trim().toLowerCase(),
+      recipientEmail: businessForSave.ownerEmail ?? profileContact.email,
       subject: `View2Connect listing review started for ${businessForSave.name}`,
       body: individualSeller
         ? `We received your advertisement. Customer care must approve it before it appears on Home. Buyers will contact you directly.`
@@ -3025,6 +3121,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       id: catalogId,
       estateId: estates[0]?.id ?? currentEstateId,
       listingType: 'product',
+      listingSource: managedOwner ? 'sellerPortal' : 'adminCatalog',
+      listingAudience: 'storeProduct',
       status: managedOwner ? 'active' : 'archived',
       subscriptionCycle: 'monthly',
       subscriptionStatus: managedProfile?.subscriptionStatus ?? 'active',
@@ -3118,14 +3216,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       accountName: owner.fullName,
       accountEmail: owner.email,
       ownerName: values.ownerName.trim() || owner.fullName,
+      bio: values.bio.trim(),
+      profileImage: values.profileImage.trim(),
       phone: values.phone.trim() || owner.phoneNumber,
       whatsapp: values.whatsapp.trim(),
       email: profileEmail || owner.email,
       website: values.website.trim(),
       instagram: values.instagram.trim(),
+      facebook: values.facebook.trim(),
+      x: values.x.trim(),
+      tiktok: values.tiktok.trim(),
       address: values.address.trim() || owner.businessCluster || '',
       openingTime: values.openingTime?.trim() ?? '',
       closingTime: values.closingTime?.trim() ?? '',
+      openDays: values.openDays ?? [],
       coverImage: values.coverImage.trim(),
       galleryImages: values.galleryImages.trim(),
       galleryVideos: values.galleryVideos.trim(),
@@ -3170,19 +3274,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           return business;
         }
 
-        const hasMediaChanges =
-          nextProfile.coverImage || nextProfile.galleryImages || nextProfile.galleryVideos;
-        const media = hasMediaChanges
-          ? buildBusinessMedia({
-              baseId: business.id,
-              coverImage: nextProfile.coverImage,
-              galleryImages: nextProfile.galleryImages,
-              galleryVideos: nextProfile.galleryVideos,
-              fallbackImage:
-                business.imageUrl || fallbackImageForListing(business.listingType, business.category),
-            })
-          : business.media;
-
         const nextOwnerEmail = nextProfile.email || business.ownerEmail;
 
         const nextBusiness = {
@@ -3190,8 +3281,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           ownerName: nextProfile.ownerName || business.ownerName,
           riverParkVerified: nextProfile.riverParkVerified ?? false,
           ...(nextOwnerEmail ? { ownerEmail: nextOwnerEmail } : {}),
-          imageUrl: media[0]?.url ?? business.imageUrl,
-          media,
           address: nextProfile.address || business.address,
           contact: {
             phone: nextProfile.phone || business.contact.phone,
@@ -3199,6 +3288,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
             ...(nextProfile.whatsapp ? { whatsapp: nextProfile.whatsapp } : {}),
             ...(nextProfile.website ? { website: nextProfile.website } : {}),
             ...(nextProfile.instagram ? { instagram: nextProfile.instagram } : {}),
+            ...(nextProfile.facebook ? { facebook: nextProfile.facebook } : {}),
+            ...(nextProfile.x ? { x: nextProfile.x } : {}),
+            ...(nextProfile.tiktok ? { tiktok: nextProfile.tiktok } : {}),
           },
           updatedAt,
         };
@@ -3233,14 +3325,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         accountName: owner.businessName ?? owner.fullName,
         accountEmail: owner.email,
         ownerName: owner.fullName,
+        bio: '',
+        profileImage: '',
         phone: owner.phoneNumber,
         whatsapp: owner.phoneNumber,
         email: owner.email,
         website: '',
         instagram: '',
+        facebook: '',
+        x: '',
+        tiktok: '',
         address: owner.businessCluster ?? '',
         openingTime: '',
         closingTime: '',
+        openDays: [],
         coverImage: '',
         galleryImages: '',
         galleryVideos: '',
@@ -3324,6 +3422,63 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       );
   };
 
+  const syncCustomerAccountData = async (accountUser?: AppUser | null) => {
+    if (!accountUser) {
+      setCartItems([]);
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    const [remoteCartItems, remoteDeliveryLocation] = await Promise.all([
+      fetchCustomerCartFromSupabase(accountUser.id).catch(() => undefined),
+      fetchCustomerDeliveryLocationFromSupabase(accountUser.id).catch(() => undefined),
+    ]);
+
+    if (remoteCartItems) {
+      setCartItems(remoteCartItems);
+    }
+
+    if (remoteDeliveryLocation) {
+      setCustomerDeliveryLocations((currentLocations) => [
+        remoteDeliveryLocation,
+        ...currentLocations.filter((location) => location.userId !== accountUser.id),
+      ]);
+    }
+  };
+
+  const getCustomerDeliveryLocation = (accountUser?: AppUser | null) => {
+    if (!accountUser) {
+      return undefined;
+    }
+
+    return customerDeliveryLocations.find((location) => location.userId === accountUser.id);
+  };
+
+  const saveCustomerDeliveryLocation = async (
+    accountUser: AppUser,
+    location: DeliveryLocation,
+  ) => {
+    const nextLocation = {
+      ...location,
+      userId: accountUser.id,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setCustomerDeliveryLocations((currentLocations) => [
+      nextLocation,
+      ...currentLocations.filter((currentLocation) => currentLocation.userId !== accountUser.id),
+    ]);
+
+    if (isSupabaseConfigured) {
+      await saveCustomerDeliveryLocationToSupabase(nextLocation);
+    }
+
+    return nextLocation;
+  };
+
   const getAvailableAccountBalanceForUser = (accountUser: AppUser) => {
     const customerWalletBeforeWithdrawals = getAccountWalletBalance(
       accountUser,
@@ -3341,17 +3496,25 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       });
 
     const releasedSellerEarnings = getOrdersForOwner(accountUser.id, accountUser).reduce(
-      (total, order) =>
-        total +
-        (order.paymentStatus === 'paid' && order.status === 'delivered'
-          ? order.items
-              .filter((item) =>
-                [item.ownerUserId, item.ownerName]
-                  .map(normalizeOwnerKey)
-                  .some((key) => Boolean(key && ownerKeys.has(key))),
-              )
-              .reduce((itemTotal, item) => itemTotal + item.lineTotal, 0)
-          : 0),
+      (total, order) => {
+        if (order.paymentStatus !== 'paid' || order.status !== 'delivered') {
+          return total;
+        }
+
+        const sellerSubtotal = order.items
+          .filter((item) =>
+            [item.ownerUserId, item.ownerName]
+              .map(normalizeOwnerKey)
+              .some((key) => Boolean(key && ownerKeys.has(key))),
+          )
+          .reduce((itemTotal, item) => itemTotal + item.lineTotal, 0);
+        const sellerPackingShare =
+          order.subtotal > 0
+            ? (order.sellerPackingSupport * sellerSubtotal) / order.subtotal
+            : 0;
+
+        return total + sellerSubtotal + sellerPackingShare;
+      },
       0,
     );
     const paidWithdrawals = getPaidWithdrawalTotal(withdrawalRequests, accountUser);
@@ -3903,7 +4066,19 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return Math.max(0, business.stockQuantity ?? 0);
   };
 
-  const addToCart = (businessId: string) => {
+  const saveCartChange = (accountUser: AppUser | null | undefined, item: CartItem) => {
+    if (accountUser && isSupabaseConfigured) {
+      void saveCartItemToSupabase(accountUser.id, item).catch(() => undefined);
+    }
+  };
+
+  const deleteCartChange = (accountUser: AppUser | null | undefined, businessId: string) => {
+    if (accountUser && isSupabaseConfigured) {
+      void deleteCartItemFromSupabase(accountUser.id, businessId).catch(() => undefined);
+    }
+  };
+
+  const addToCart = (businessId: string, accountUser?: AppUser | null) => {
     const business = getBusinessById(businessId);
 
     if (!business || !isStoreOwnerProduct(business, ownerBusinessProfiles)) {
@@ -3918,53 +4093,88 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     setCartItems((currentCartItems) => {
       const existingItem = currentCartItems.find((item) => item.businessId === businessId);
+      const updatedAt = new Date().toISOString();
 
       if (existingItem) {
         if (existingItem.quantity >= maxStock) {
           return currentCartItems;
         }
 
+        const nextItem = {
+          ...existingItem,
+          quantity: existingItem.quantity + 1,
+          ...(accountUser ? { userId: accountUser.id } : {}),
+          updatedAt,
+        };
+        saveCartChange(accountUser, nextItem);
+
         return currentCartItems.map((item) =>
-          item.businessId === businessId
-            ? { ...item, quantity: item.quantity + 1 }
-            : item,
+          item.businessId === businessId ? nextItem : item,
         );
       }
 
-      return [{ businessId, quantity: 1 }, ...currentCartItems];
+      const nextItem = {
+        businessId,
+        quantity: 1,
+        ...(accountUser ? { userId: accountUser.id } : {}),
+        updatedAt,
+      };
+      saveCartChange(accountUser, nextItem);
+
+      return [nextItem, ...currentCartItems];
     });
   };
 
-  const removeFromCart = (businessId: string) => {
+  const removeFromCart = (businessId: string, accountUser?: AppUser | null) => {
     setCartItems((currentCartItems) =>
       currentCartItems.filter((item) => item.businessId !== businessId),
     );
+    deleteCartChange(accountUser, businessId);
   };
 
-  const updateCartQuantity = (businessId: string, quantity: number) => {
+  const updateCartQuantity = (
+    businessId: string,
+    quantity: number,
+    accountUser?: AppUser | null,
+  ) => {
     if (quantity <= 0) {
-      removeFromCart(businessId);
+      removeFromCart(businessId, accountUser);
       return;
     }
 
     const maxStock = getAvailableStock(businessId);
 
     if (maxStock <= 0) {
-      removeFromCart(businessId);
+      removeFromCart(businessId, accountUser);
       return;
     }
 
-    setCartItems((currentCartItems) =>
-      currentCartItems.map((item) =>
-        item.businessId === businessId
-          ? { ...item, quantity: Math.min(quantity, maxStock) }
-          : item,
-      ),
-    );
+    setCartItems((currentCartItems) => {
+      const existingItem = currentCartItems.find((item) => item.businessId === businessId);
+
+      if (!existingItem) {
+        return currentCartItems;
+      }
+
+      const nextItem = {
+        ...existingItem,
+        quantity: Math.min(quantity, maxStock),
+        ...(accountUser ? { userId: accountUser.id } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      saveCartChange(accountUser, nextItem);
+
+      return currentCartItems.map((item) =>
+        item.businessId === businessId ? nextItem : item,
+      );
+    });
   };
 
-  const clearCart = () => {
+  const clearCart = (accountUser?: AppUser | null) => {
     setCartItems([]);
+    if (accountUser && isSupabaseConfigured) {
+      void clearCustomerCartInSupabase(accountUser.id).catch(() => undefined);
+    }
   };
 
   const getChatMessages = (businessId: string) => chatThreads[businessId] ?? [];
@@ -4001,17 +4211,24 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           new Date(leftConversation.lastMessage.createdAt).getTime(),
       );
 
-  const sendChatMessage = (businessId: string, sender: AppUser | string, text: string) => {
+  const sendChatMessage = async (
+    businessId: string,
+    sender: AppUser | string,
+    text: string,
+    attachments: ChatMessage['attachments'] = [],
+  ) => {
     const trimmedText = text.trim();
     const business = getBusinessById(businessId);
+    const hasAttachments = attachments.length > 0;
 
-    if (!trimmedText || !business) {
+    if ((!trimmedText && !hasAttachments) || !business) {
       return;
     }
 
     const createdAt = new Date().toISOString();
     const senderName = typeof sender === 'string' ? sender : sender.fullName;
     const senderUserId = typeof sender === 'string' ? undefined : sender.id;
+    const messageId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const senderType: ChatMessage['senderType'] =
       senderUserId && senderUserId === business.ownerUserId ? 'owner' : 'resident';
     const existingMessages = chatThreads[businessId] ?? [];
@@ -4022,14 +4239,24 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
             .find((message) => message.senderUserId && message.senderUserId !== senderUserId)
             ?.senderUserId
         : business.ownerUserId;
+    const uploadedAttachments = await Promise.all(
+      attachments.map((attachment) =>
+        uploadChatAttachmentToSupabaseStorage(
+          attachment,
+          messageId,
+          senderUserId ?? senderName,
+        ),
+      ),
+    );
     const customerMessage: ChatMessage = {
-      id: `chat-${Date.now()}`,
+      id: messageId,
       businessId,
       ...(senderUserId ? { senderUserId } : {}),
       ...(recipientUserId && recipientUserId !== senderUserId ? { recipientUserId } : {}),
       senderName,
       senderType,
-      text: trimmedText,
+      text: trimmedText || (uploadedAttachments.length > 1 ? 'Sent attachments' : 'Sent an attachment'),
+      ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
       createdAt,
     };
 
@@ -4037,6 +4264,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       ...currentThreads,
       [businessId]: [...(currentThreads[businessId] ?? []), customerMessage],
     }));
+
+    if (isSupabaseConfigured) {
+      await saveChatMessageToSupabase(customerMessage);
+    }
   };
 
   const persistPaidOrder = (
@@ -4081,6 +4312,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
 
     setCartItems([]);
+    if (isSupabaseConfigured) {
+      void clearCustomerCartInSupabase(order.userId).catch(() => undefined);
+    }
     notifyBuyerOrderPlaced(order);
     queuePurchaseEmails(order);
     notifySellersForCollection(order);
@@ -4138,9 +4372,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const createdAt = new Date().toISOString();
     const subtotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0);
-    const serviceFee = 0;
-    const deliveryFee = subtotal >= 20000 ? 0 : 2000;
-    const totalAmount = subtotal + serviceFee + deliveryFee;
+    const sellerPackingSupport = calculateSellerPackingSupport(subtotal);
+    const serviceFee = calculateProgressiveVat(subtotal);
+    const deliveryFee = 0;
+    const totalAmount = subtotal + sellerPackingSupport + serviceFee + deliveryFee;
     const walletBalance = getAvailableAccountBalanceForUser(customer);
 
     if (totalAmount > walletBalance) {
@@ -4158,6 +4393,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       estateId: customer.estateId,
       deliveryAddress: payload.deliveryAddress.trim(),
       deliveryCluster: payload.deliveryCluster.trim(),
+      deliveryContactPhone: payload.deliveryContactPhone.trim(),
+      ...(payload.deliveryLocation ? { deliveryLocation: payload.deliveryLocation } : {}),
       ...(payload.note?.trim() ? { note: payload.note.trim() } : {}),
       items: cartEntries.map((entry) => ({
         businessId: entry.business.id,
@@ -4170,6 +4407,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         ...(entry.business.sku ? { sku: entry.business.sku } : {}),
       })),
       subtotal,
+      sellerPackingSupport,
       serviceFee,
       deliveryFee,
       totalAmount,
@@ -4248,9 +4486,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const createdAt = new Date().toISOString();
     const subtotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0);
-    const serviceFee = 0;
-    const deliveryFee = subtotal >= 20000 ? 0 : 2000;
-    const totalAmount = subtotal + serviceFee + deliveryFee;
+    const sellerPackingSupport = calculateSellerPackingSupport(subtotal);
+    const serviceFee = calculateProgressiveVat(subtotal);
+    const deliveryFee = 0;
+    const totalAmount = subtotal + sellerPackingSupport + serviceFee + deliveryFee;
     const orderId = `order-${Date.now()}`;
     const order: Order = {
       id: orderId,
@@ -4260,6 +4499,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       estateId: customer.estateId,
       deliveryAddress: payload.deliveryAddress.trim(),
       deliveryCluster: payload.deliveryCluster.trim(),
+      deliveryContactPhone: payload.deliveryContactPhone.trim(),
+      ...(payload.deliveryLocation ? { deliveryLocation: payload.deliveryLocation } : {}),
       ...(payload.note?.trim() ? { note: payload.note.trim() } : {}),
       items: cartEntries.map((entry) => ({
         businessId: entry.business.id,
@@ -4272,6 +4513,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         ...(entry.business.sku ? { sku: entry.business.sku } : {}),
       })),
       subtotal,
+      sellerPackingSupport,
       serviceFee,
       deliveryFee,
       totalAmount,
@@ -4295,7 +4537,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       amount: totalAmount,
       customerName: customer.fullName,
       customerEmail: customer.email,
-      customerPhone: customer.phoneNumber,
+      customerPhone: payload.deliveryContactPhone.trim() || customer.phoneNumber,
       title: 'View2Connect order payment',
       description: `Order ${order.id} for ${cartEntries.length} item${cartEntries.length > 1 ? 's' : ''}.`,
       purpose: 'cart',
@@ -5081,7 +5323,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       getNotificationsForUser,
       isRiverParkVerifiedForUser,
       isCustomerAdvertisement: isCustomerAdvertisementForDirectory,
+      isCustomerAdvertisementSource: isCustomerAdvertisementSourceForDirectory,
       isStoreOwnerListing: isStoreOwnerListingForDirectory,
+      isStoreOwnerListingSource: isStoreOwnerListingSourceForDirectory,
       hasCatalogManagementAccess,
       setCatalogManagementAccess,
       markNotificationsRead,
@@ -5115,6 +5359,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       getOrderById,
       getOrdersForUser,
       getOrdersForOwner,
+      syncCustomerAccountData,
+      getCustomerDeliveryLocation,
+      saveCustomerDeliveryLocation,
       getAvailableAccountBalanceForUser,
       isBusinessOwnedByUser,
       updateBusinessListing,
@@ -5149,6 +5396,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       cartTotal,
       chatThreads,
       currentEstateId,
+      customerDeliveryLocations,
       emailLogs,
       ownerBusinessProfiles,
       paymentPlans,

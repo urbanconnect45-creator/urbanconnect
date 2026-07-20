@@ -46,7 +46,10 @@ function buildStoreGroups(
     .forEach((business) => {
       const profile = profiles.find((item) => profileMatchesBusiness(item, business));
       const key =
+        profile?.ownerUserId ||
         business.ownerUserId ||
+        profile?.accountEmail.trim().toLowerCase() ||
+        profile?.email.trim().toLowerCase() ||
         business.ownerEmail?.trim().toLowerCase() ||
         business.ownerName.trim().toLowerCase();
       const existing = groups.get(key);
@@ -67,29 +70,6 @@ function buildStoreGroups(
         listings: [business],
         categories: [business.category],
         ...(business.ownerUserId ? { ownerUserId: business.ownerUserId } : {}),
-      });
-    });
-
-  profiles
-    .filter((profile) => Boolean(profile.riverParkVerified))
-    .forEach((profile) => {
-      const key =
-        profile.ownerUserId ||
-        profile.accountEmail.trim().toLowerCase() ||
-        profile.ownerName.trim().toLowerCase();
-
-      if (groups.has(key)) {
-        return;
-      }
-
-      groups.set(key, {
-        id: key,
-        name: profile.ownerName || profile.accountName,
-        address: profile.address || 'Digital store',
-        imageUrl: profile.coverImage || fallbackStoreImage,
-        listings: [],
-        categories: ['Digital store'],
-        ownerUserId: profile.ownerUserId,
       });
     });
 

@@ -2,6 +2,48 @@ import type { CartEntry } from '../types/business';
 
 export const INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL = 3000;
 
+export function calculateProgressiveVat(subtotal: number) {
+  if (!Number.isFinite(subtotal) || subtotal < 3000) {
+    return 0;
+  }
+
+  if (subtotal < 10000) {
+    return 500;
+  }
+
+  const higherBandIndex = Math.floor((subtotal - 10000) / 10000);
+
+  return 1500 + higherBandIndex * 1000;
+}
+
+export function calculateSellerPackingSupport(subtotal: number) {
+  if (!Number.isFinite(subtotal) || subtotal < 100) {
+    return 0;
+  }
+
+  if (subtotal < 1000) {
+    return 50;
+  }
+
+  if (subtotal < 5000) {
+    return 100;
+  }
+
+  if (subtotal < 10000) {
+    return 200;
+  }
+
+  if (subtotal < 20000) {
+    return 300;
+  }
+
+  if (subtotal < 50000) {
+    return 500;
+  }
+
+  return 800;
+}
+
 export type IndividualSellerMinimumIssue = {
   sellerId: string;
   sellerName: string;

@@ -74,7 +74,8 @@ type AdminSectionKey =
   | 'dispatchAccounts'
   | 'applications'
   | 'managedCatalogs'
-  | 'listings'
+  | 'sellerListings'
+  | 'customerAdverts'
   | 'chats'
   | 'customerCare'
   | 'policies'
@@ -160,7 +161,8 @@ const adminSections: Array<{
   { key: 'dispatchAccounts', label: 'Dispatch', icon: 'bicycle-outline' },
   { key: 'applications', label: 'Store applications', icon: 'clipboard-outline' },
   { key: 'managedCatalogs', label: 'Managed catalogs', icon: 'albums-outline' },
-  { key: 'listings', label: 'Listings', icon: 'storefront-outline' },
+  { key: 'sellerListings', label: 'Seller listings', icon: 'storefront-outline' },
+  { key: 'customerAdverts', label: 'Customer adverts', icon: 'pricetags-outline' },
   { key: 'chats', label: 'Support', icon: 'headset-outline' },
   { key: 'customerCare', label: 'Customer care', icon: 'shield-outline' },
   { key: 'policies', label: 'Policies', icon: 'document-text-outline' },
@@ -527,6 +529,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     getAvailableAccountBalanceForUser,
     getAvailableStock,
     getSupportConversations,
+    isCustomerAdvertisementSource,
+    isStoreOwnerListingSource,
     orders,
     orderProgressSettings,
     ownerBusinessProfiles,
@@ -644,7 +648,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
           'customers',
           'storeOwners',
           'dispatchAccounts',
-          'listings',
+          'sellerListings',
+          'customerAdverts',
           'chats',
         ].includes(section.key),
       );
@@ -841,6 +846,12 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
           const matchesType =
             listingTypeFilter === 'All' ? true : business.listingType === listingTypeFilter;
+          const matchesSource =
+            activeSection === 'sellerListings'
+              ? isStoreOwnerListingSource(business)
+              : activeSection === 'customerAdverts'
+                ? isCustomerAdvertisementSource(business)
+                : true;
           const matchesStatus =
             listingStatusFilter === 'All'
               ? true
@@ -861,20 +872,30 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                   business.cluster,
                   business.ownerEmail ?? business.contact.email,
                   business.sku,
+                  isCustomerAdvertisementSource(business) ? 'customer account advert' : 'seller portal listing',
                   business.status ?? 'active',
                 ]
                   .join(' ')
                   .toLowerCase()
                   .includes(normalizedSearch);
 
-          return matchesType && matchesStatus && matchesVerification && matchesSearch;
+          return matchesType && matchesSource && matchesStatus && matchesVerification && matchesSearch;
         })
         .sort(
           (leftBusiness, rightBusiness) =>
             new Date(rightBusiness.createdAt).getTime() -
             new Date(leftBusiness.createdAt).getTime(),
         ),
-    [businesses, listingStatusFilter, listingTypeFilter, normalizedSearch, verificationFilter],
+    [
+      businesses,
+      isCustomerAdvertisementSource,
+      isStoreOwnerListingSource,
+      activeSection,
+      listingStatusFilter,
+      listingTypeFilter,
+      normalizedSearch,
+      verificationFilter,
+    ],
   );
 
   const filteredOrders = useMemo(
@@ -1284,7 +1305,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
           meta: `${listingTypeLabel(business.listingType)} - ${business.ownerName} - ${
             business.verified ? 'verified' : 'pending approval'
           }`,
-          section: 'listings',
+          section: isCustomerAdvertisementSource(business) ? 'customerAdverts' : 'sellerListings',
         });
       }
     });
@@ -1442,6 +1463,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     conversations,
     dynamicDepositAccounts,
     emailLogs,
+    isCustomerAdvertisementSource,
     normalizedSearch,
     orders,
     ownerBusinessProfiles,
@@ -2229,6 +2251,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       await toggleBusinessVerification(business.id, adminUser.fullName, adminUser.role);
       setPendingListingVerificationId(null);
       setListingVerificationPinDraft('');
+      setVerificationFilter('All');
     } catch (error) {
       setListingVerificationError(
         error instanceof Error
@@ -4179,10 +4202,15 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
               </SectionPanel>
             ) : null}
 
-            {activeSection === 'listings' && canReviewListings ? (
+            {(activeSection === 'sellerListings' || activeSection === 'customerAdverts') &&
+            canReviewListings ? (
               <SectionPanel
-                title="Listings"
-                subtitle="Approve, monitor, or remove anything published in the marketplace."
+                title={activeSection === 'sellerListings' ? 'Seller portal listings' : 'Customer account adverts'}
+                subtitle={
+                  activeSection === 'sellerListings'
+                    ? 'Approve products and services created from the seller portal.'
+                    : 'Approve adverts created from customer accounts. These do not enter seller catalog checkout.'
+                }
                 action={<Text style={styles.panelCount}>{formatNumber(filteredListings.length)} listings</Text>}
               >
                 <View style={styles.filterWrap}>
@@ -4269,6 +4297,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                       business.listingType === 'product'
                         ? getAvailableStock(business.id)
                         : null;
+                    const isCustomerAdvert = isCustomerAdvertisementSource(business);
 
                     return (
                       <View key={business.id} style={styles.recordCard}>
@@ -4323,6 +4352,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                                 ]}
                               >
                                 {isPublicBusiness(business) ? 'Public' : 'Hidden'}
+                              </Text>
+                            </View>
+                            <View style={styles.recordBadge}>
+                              <Text style={styles.recordBadgeText}>
+                                {isCustomerAdvert ? 'Customer advert' : 'Seller listing'}
                               </Text>
                             </View>
                           </View>
@@ -5112,15 +5146,15 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
               <View style={styles.totalStack}>
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Subtotal</Text>
+                  <Text style={styles.totalLabel}>Order Subtotal</Text>
                   <Text style={styles.totalValue}>{formatCurrency(activeOrderDetails.subtotal)}</Text>
                 </View>
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Delivery fee</Text>
-                  <Text style={styles.totalValue}>{formatCurrency(activeOrderDetails.deliveryFee)}</Text>
+                  <Text style={styles.totalLabel}>VAT</Text>
+                  <Text style={styles.totalValue}>{formatCurrency(activeOrderDetails.serviceFee)}</Text>
                 </View>
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total</Text>
+                  <Text style={styles.totalLabel}>Total Amount</Text>
                   <Text style={styles.totalValue}>{formatCurrency(activeOrderDetails.totalAmount)}</Text>
                 </View>
               </View>

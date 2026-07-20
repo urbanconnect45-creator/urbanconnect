@@ -32,18 +32,12 @@ export function ProfessionCard({
 }: ProfessionCardProps) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const isGoldListing =
-    (business.subscriptionStatus === 'paid' || business.subscriptionStatus === 'active') &&
-    (!business.subscriptionNextBillingAt ||
-      new Date(business.subscriptionNextBillingAt).getTime() > Date.now()) &&
-    Boolean(business.riverParkVerified);
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.card,
-        isGoldListing && styles.goldCard,
         pressed && styles.cardPressed,
         style,
       ]}
@@ -57,11 +51,6 @@ export function ProfessionCard({
         <View style={[styles.badge, styles.categoryBadge]}>
           <Text style={styles.badgeText}>{business.category}</Text>
         </View>
-        {isGoldListing ? (
-          <View style={[styles.badge, styles.goldBadge]}>
-            <Text style={styles.goldBadgeText}>Gold</Text>
-          </View>
-        ) : null}
       </View>
 
       <View style={styles.content}>
@@ -115,10 +104,6 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       ...shadows.card,
     },
-    goldCard: {
-      borderColor: colors.accent,
-      borderWidth: 2,
-    },
     cardPressed: {
       opacity: 0.96,
       transform: [{ translateY: 1 }],
@@ -146,17 +131,9 @@ function createStyles(colors: AppColors) {
     categoryBadge: {
       backgroundColor: 'rgba(58, 144, 158, 0.9)',
     },
-    goldBadge: {
-      backgroundColor: colors.accent,
-    },
     badgeText: {
       ...typography.caption,
       color: colors.white,
-    },
-    goldBadgeText: {
-      ...typography.caption,
-      color: colors.white,
-      fontWeight: '800',
     },
     content: {
       gap: spacing.xs,

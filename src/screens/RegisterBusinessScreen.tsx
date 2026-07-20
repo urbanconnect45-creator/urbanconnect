@@ -15,6 +15,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import {
   productCategories,
   professionCategories,
+  listingConditions,
   riverParkClusters,
   type Business,
   type BusinessProfileFormValues,
@@ -26,6 +27,7 @@ import { buildBusinessMedia } from '../utils/businessMedia';
 import { splitInputList } from '../utils/businessMedia';
 import { inferListingCategory } from '../utils/category';
 import { formatCurrency } from '../utils/format';
+import { createRandomListingForm } from '../utils/randomListing';
 
 const foodListingReference = require('../../assets/food-listing-reference.jpeg');
 
@@ -52,6 +54,7 @@ function createInitialForm(
     shortDescription: '',
     longDescription: '',
     price: '',
+    condition: 'Brand new',
     stockQuantity: '12',
     reorderLevel: '5',
     phone: savedProfile?.phone ?? profile?.contact.phone ?? phone,
@@ -59,9 +62,9 @@ function createInitialForm(
     email: savedProfile?.email ?? profile?.contact.email ?? email,
     website: savedProfile?.website ?? profile?.contact.website ?? '',
     instagram: savedProfile?.instagram ?? profile?.contact.instagram ?? '',
-    facebook: profile?.contact.facebook ?? '',
-    x: profile?.contact.x ?? '',
-    tiktok: profile?.contact.tiktok ?? '',
+    facebook: savedProfile?.facebook ?? profile?.contact.facebook ?? '',
+    x: savedProfile?.x ?? profile?.contact.x ?? '',
+    tiktok: savedProfile?.tiktok ?? profile?.contact.tiktok ?? '',
     address: savedProfile?.address ?? profile?.address ?? '',
     coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
     galleryImages: savedProfile?.galleryImages ?? '',
@@ -160,7 +163,7 @@ function createPreviewBusiness(values: BusinessProfileFormValues): Business {
           .filter(Boolean),
       ),
     ).slice(0, 3),
-    tags: ['Preview', values.category, values.cluster],
+    tags: ['Preview', values.category, values.cluster, `Condition: ${values.condition}`],
     contact: {
       phone: values.phone || '+2348000000000',
       email: values.email || 'owner@example.com',
@@ -220,6 +223,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryManuallySelected, setCategoryManuallySelected] = useState(false);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
 
   const categoryOptions = useMemo(
     () => categoriesForListingType(form.listingType),
@@ -269,9 +273,9 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
       email: savedOwnerProfile?.email ?? ownerProfile?.contact.email ?? user.email,
       website: savedOwnerProfile?.website ?? ownerProfile?.contact.website ?? '',
       instagram: savedOwnerProfile?.instagram ?? ownerProfile?.contact.instagram ?? '',
-      facebook: ownerProfile?.contact.facebook ?? current.facebook ?? '',
-      x: ownerProfile?.contact.x ?? current.x ?? '',
-      tiktok: ownerProfile?.contact.tiktok ?? current.tiktok ?? '',
+      facebook: savedOwnerProfile?.facebook ?? ownerProfile?.contact.facebook ?? current.facebook ?? '',
+      x: savedOwnerProfile?.x ?? ownerProfile?.contact.x ?? current.x ?? '',
+      tiktok: savedOwnerProfile?.tiktok ?? ownerProfile?.contact.tiktok ?? current.tiktok ?? '',
       address:
         savedOwnerProfile?.address ??
         ownerProfile?.address ??
@@ -490,24 +494,41 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     setIsSubmitting(true);
 
     try {
-      if (user.role === 'businessOwner') {
-        const profileValues: OwnerBusinessProfileValues = {
-          ownerName: savedOwnerProfile?.ownerName ?? user.businessName ?? user.fullName,
-          phone: savedOwnerProfile?.phone ?? user.phoneNumber,
-          whatsapp: savedOwnerProfile?.whatsapp ?? user.phoneNumber,
-          email: savedOwnerProfile?.email ?? user.email,
-          website: savedOwnerProfile?.website ?? '',
-          instagram: savedOwnerProfile?.instagram ?? '',
-          address: savedOwnerProfile?.address ?? user.businessCluster ?? '',
-          openingTime: storeHours.openingTime,
-          closingTime: storeHours.closingTime,
-          coverImage: savedOwnerProfile?.coverImage ?? '',
-          galleryImages: savedOwnerProfile?.galleryImages ?? '',
-          galleryVideos: savedOwnerProfile?.galleryVideos ?? '',
-        };
+      const profileValues: OwnerBusinessProfileValues = {
+        ownerName: savedOwnerProfile?.ownerName ?? user.businessName ?? user.fullName,
+        bio: savedOwnerProfile?.bio ?? '',
+        profileImage: savedOwnerProfile?.profileImage ?? '',
+        phone: savedOwnerProfile?.phone ?? user.phoneNumber,
+        whatsapp: savedOwnerProfile?.whatsapp ?? user.phoneNumber,
+        email: savedOwnerProfile?.email ?? user.email,
+        website: savedOwnerProfile?.website ?? '',
+        instagram: savedOwnerProfile?.instagram ?? '',
+        facebook: savedOwnerProfile?.facebook ?? '',
+        x: savedOwnerProfile?.x ?? '',
+        tiktok: savedOwnerProfile?.tiktok ?? '',
+        address:
+          savedOwnerProfile?.address ??
+          (user.role === 'businessOwner' ? user.businessCluster ?? '' : form.address),
+        openingTime:
+          user.role === 'businessOwner'
+            ? storeHours.openingTime
+            : savedOwnerProfile?.openingTime ?? '',
+        closingTime:
+          user.role === 'businessOwner'
+            ? storeHours.closingTime
+            : savedOwnerProfile?.closingTime ?? '',
+        openDays: savedOwnerProfile?.openDays ?? [],
+        coverImage: savedOwnerProfile?.coverImage ?? '',
+        galleryImages: savedOwnerProfile?.galleryImages ?? '',
+        galleryVideos: savedOwnerProfile?.galleryVideos ?? '',
+      };
 
-        await updateOwnerBusinessProfile(user, profileValues);
-      }
+      await updateOwnerBusinessProfile(
+        user,
+        profileValues,
+        user.fullName,
+        user.role === 'businessOwner' ? 'businessOwner' : 'system',
+      );
 
       const submissionForm = {
         ...form,
@@ -553,6 +574,12 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
     }
   };
 
+  const fillWithRandomTestData = () => {
+    setForm((current) => createRandomListingForm(current, current.listingType));
+    setCategoryManuallySelected(true);
+    setErrors({});
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
@@ -570,6 +597,12 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
             : 'Listing is free. This form is only for the item or service details customer care needs to inspect.'}
         </Text>
       </View>
+
+      <AppButton
+        label="Fill with Random Test Data"
+        onPress={fillWithRandomTestData}
+        variant="secondary"
+      />
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Listing type</Text>
@@ -629,6 +662,11 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
                 </Text>
               </View>
             ) : null}
+            {form.listingType === 'product' ? (
+              <View style={styles.previewBadge}>
+                <Text style={styles.previewBadgeText}>{form.condition}</Text>
+              </View>
+            ) : null}
           </View>
           <Text style={styles.previewTitle}>{previewBusiness.name}</Text>
             <Text style={styles.previewText}>{previewBusiness.description}</Text>
@@ -645,32 +683,74 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Category</Text>
-        <View style={styles.chipWrap}>
-          {categoryOptions.map((category) => {
-            const isSelected = category === form.category;
-
-            return (
-              <Pressable
-                key={category}
-                onPress={() => {
-                  setCategoryManuallySelected(true);
-                  updateField('category', category);
-                }}
-                style={[styles.selectionChip, isSelected && styles.selectionChipActive]}
-              >
-                <Text style={[styles.selectionText, isSelected && styles.selectionTextActive]}>
-                  {category}
-                </Text>
-              </Pressable>
-          );
-          })}
+        <View style={styles.categorySummaryRow}>
+          <View style={[styles.selectionChip, styles.selectionChipActive]}>
+            <Text style={[styles.selectionText, styles.selectionTextActive]}>
+              {form.category}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setCategoryPickerOpen((current) => !current)}
+            style={({ pressed }) => [styles.categoryToggle, pressed && styles.categoryTogglePressed]}
+          >
+            <Text style={styles.categoryToggleText}>
+              {categoryPickerOpen ? 'Hide categories' : 'Change category'}
+            </Text>
+          </Pressable>
         </View>
+        {categoryPickerOpen ? (
+          <View style={styles.chipWrap}>
+            {categoryOptions.map((category) => {
+              const isSelected = category === form.category;
+
+              return (
+                <Pressable
+                  key={category}
+                  onPress={() => {
+                    setCategoryManuallySelected(true);
+                    updateField('category', category);
+                    setCategoryPickerOpen(false);
+                  }}
+                  style={[styles.selectionChip, isSelected && styles.selectionChipActive]}
+                >
+                  <Text style={[styles.selectionText, isSelected && styles.selectionTextActive]}>
+                    {category}
+                  </Text>
+                </Pressable>
+            );
+            })}
+          </View>
+        ) : null}
         <Text style={styles.sectionHelper}>
           {categoryManuallySelected
             ? 'You selected this category manually.'
             : 'View2Connect suggests a category from the item name and description. You can change it.'}
         </Text>
       </View>
+
+      {form.listingType === 'product' ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Condition</Text>
+          <View style={styles.chipWrap}>
+            {listingConditions.map((condition) => {
+              const isSelected = condition === form.condition;
+
+              return (
+                <Pressable
+                  key={condition}
+                  onPress={() => updateField('condition', condition)}
+                  style={[styles.selectionChip, isSelected && styles.selectionChipActive]}
+                >
+                  <Text style={[styles.selectionText, isSelected && styles.selectionTextActive]}>
+                    {condition}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.formSection}>
         {isFoodListing ? (
@@ -745,6 +825,13 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
           placeholder={copy.shortPlaceholder}
           value={form.shortDescription}
         />
+        <FormField
+          helper="This appears as the listing location. Contact numbers are managed from Profile."
+          label="Listing location"
+          onChangeText={(value) => updateField('address', value)}
+          placeholder="Lugbe, Abuja"
+          value={form.address}
+        />
         <MediaPickerField
           assets={coverAssets}
           buttonLabel="Add cover image"
@@ -781,68 +868,9 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
         {isIndividualSeller ? (
           <View style={styles.planNotice}>
             <Text style={styles.planNoticeText}>
-              Buyers will use these details to contact the advertiser directly.
+              Buyers will see the Phone Number and WhatsApp Number saved on your Profile.
+              Update Profile before posting if those details are wrong.
             </Text>
-            <FormField
-              label="Phone number"
-              onChangeText={(value) => updateField('phone', value)}
-              placeholder="+234..."
-              value={form.phone}
-            />
-            <FormField
-              label="WhatsApp number"
-              onChangeText={(value) => updateField('whatsapp', value)}
-              placeholder="+234..."
-              value={form.whatsapp}
-            />
-            <FormField
-              label="Email address"
-              onChangeText={(value) => updateField('email', value)}
-              placeholder="advertiser@example.com"
-              value={form.email}
-            />
-            <FormField
-              label="Location"
-              onChangeText={(value) => updateField('address', value)}
-              placeholder="Lugbe, Abuja"
-              value={form.address}
-            />
-            <View style={styles.inlineFieldRow}>
-              <View style={styles.inlineField}>
-                <FormField
-                  label="Instagram"
-                  onChangeText={(value) => updateField('instagram', value)}
-                  placeholder="@yourhandle"
-                  value={form.instagram}
-                />
-              </View>
-              <View style={styles.inlineField}>
-                <FormField
-                  label="Facebook"
-                  onChangeText={(value) => updateField('facebook', value)}
-                  placeholder="Facebook name"
-                  value={form.facebook ?? ''}
-                />
-              </View>
-            </View>
-            <View style={styles.inlineFieldRow}>
-              <View style={styles.inlineField}>
-                <FormField
-                  label="X / Twitter"
-                  onChangeText={(value) => updateField('x', value)}
-                  placeholder="@yourhandle"
-                  value={form.x ?? ''}
-                />
-              </View>
-              <View style={styles.inlineField}>
-                <FormField
-                  label="TikTok"
-                  onChangeText={(value) => updateField('tiktok', value)}
-                  placeholder="@yourhandle"
-                  value={form.tiktok ?? ''}
-                />
-              </View>
-            </View>
           </View>
         ) : null}
         {!isIndividualSeller ? (
@@ -1121,6 +1149,27 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
+    },
+    categorySummaryRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    categoryToggle: {
+      borderRadius: radii.pill,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    categoryTogglePressed: {
+      opacity: 0.88,
+    },
+    categoryToggleText: {
+      ...typography.bodyStrong,
+      color: colors.primary,
     },
     selectionChip: {
       borderRadius: radii.pill,

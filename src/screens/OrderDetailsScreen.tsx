@@ -181,14 +181,16 @@ export function OrderDetailsScreen({ navigation, route }: OrderDetailsScreenProp
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Payment summary</Text>
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Subtotal</Text>
+          <Text style={styles.totalLabel}>Order Subtotal</Text>
           <Text style={styles.totalValue}>{formatCurrency(order.subtotal)}</Text>
         </View>
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Delivery charge</Text>
-          <Text style={styles.totalValue}>
-            {order.deliveryFee === 0 ? 'Free' : formatCurrency(order.deliveryFee)}
-          </Text>
+          <Text style={styles.totalLabel}>Seller Packing Support</Text>
+          <Text style={styles.totalValue}>{formatCurrency(order.sellerPackingSupport)}</Text>
+        </View>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>VAT</Text>
+          <Text style={styles.totalValue}>{formatCurrency(order.serviceFee)}</Text>
         </View>
         <View style={[styles.totalRow, styles.totalRowStrong]}>
           <Text style={styles.totalLabelStrong}>

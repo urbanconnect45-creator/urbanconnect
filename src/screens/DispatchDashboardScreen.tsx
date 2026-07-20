@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
+import { googleMapsSearchUrl } from '../services/location';
 import {
   acceptDispatchDeliveryJob,
   fetchDispatchDeliveryJobs,
@@ -12,11 +13,11 @@ import {
   markDispatchDeliveryArrived,
   markDispatchDeliveryPickedUp,
 } from '../services/supabaseApi';
-import type { DispatchDeliveryJob, DispatchRiderProfile } from '../types/business';
+import type { DeliveryLocation, DispatchDeliveryJob, DispatchRiderProfile } from '../types/business';
 import type { AppColors } from '../theme';
 import { radii, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { formatCurrency, formatDateTime } from '../utils/format';
+import { formatDateTime } from '../utils/format';
 
 function statusLabel(status: DispatchDeliveryJob['status']) {
   switch (status) {
@@ -37,12 +38,33 @@ function statusLabel(status: DispatchDeliveryJob['status']) {
   }
 }
 
+function fallbackDeliveryLocation(job: DispatchDeliveryJob): DeliveryLocation {
+  return {
+    userId: '',
+    formattedAddress: job.deliveryAddress,
+    country: '',
+    stateOrRegion: '',
+    city: '',
+    areaOrDistrict: '',
+    streetName: '',
+    buildingInfo: '',
+    landmark: '',
+    latitude: null,
+    longitude: null,
+    additionalInstructions: '',
+    source: 'manual',
+    updatedAt: job.updatedAt,
+  };
+}
+
 export function DispatchDashboardScreen() {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const { signOut, supabaseAccessToken, user } = useAuth();
   const { getNotificationsForUser, markNotificationsRead } = useBusinessDirectory();
-  const dispatchNotifications = getNotificationsForUser(user);
+  const dispatchNotifications = getNotificationsForUser(user).filter(
+    (notification) => notification.audience === 'dispatch' || notification.userId === user?.id,
+  );
   const unreadDispatchNotificationCount = dispatchNotifications.filter(
     (notification) => !notification.readAt,
   ).length;
@@ -127,12 +149,31 @@ export function DispatchDashboardScreen() {
     }
   };
 
+  const openBuyerLocation = async (job: DispatchDeliveryJob) => {
+    try {
+      await Linking.openURL(googleMapsSearchUrl(job.deliveryLocation ?? fallbackDeliveryLocation(job)));
+    } catch {
+      setError('Unable to open the buyer location on this device.');
+    }
+  };
+
+  const callBuyer = async (phoneNumber: string) => {
+    try {
+      await Linking.openURL(`tel:${phoneNumber.replace(/[^\d+]/g, '')}`);
+    } catch {
+      setError('Unable to open the phone dialer on this device.');
+    }
+  };
+
   if (!user) {
     return null;
   }
 
   const riderReady = riderProfile?.status === 'active';
   const riderStatusLabel = riderProfile?.status ?? 'pending';
+  const activeDispatchJobs = jobs.filter(
+    (job) => job.status !== 'completed' && job.status !== 'cancelled',
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
@@ -146,8 +187,8 @@ export function DispatchDashboardScreen() {
           </Text>
         </View>
         <View style={styles.heroMetric}>
-          <Text style={styles.metricValue}>{jobs.length}</Text>
-          <Text style={styles.metricLabel}>Jobs loaded</Text>
+          <Text style={styles.metricValue}>{activeDispatchJobs.length}</Text>
+          <Text style={styles.metricLabel}>Active jobs</Text>
         </View>
       </View>
 
@@ -232,8 +273,8 @@ export function DispatchDashboardScreen() {
       </View>
 
       <View style={styles.list}>
-        {jobs.length > 0 ? (
-          jobs.map((job) => (
+        {activeDispatchJobs.length > 0 ? (
+          activeDispatchJobs.map((job) => (
             <View key={job.id} style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={styles.cardTitleCopy}>
@@ -253,22 +294,37 @@ export function DispatchDashboardScreen() {
                 <View style={styles.addressBlock}>
                   <Text style={styles.cardLabel}>Drop-off</Text>
                   <Text style={styles.cardBody}>{job.deliveryAddress}</Text>
+                  {job.deliveryLocation?.additionalInstructions ? (
+                    <Text style={styles.cardMeta}>
+                      Note: {job.deliveryLocation.additionalInstructions}
+                    </Text>
+                  ) : null}
+                  {job.deliveryLocation?.latitude != null && job.deliveryLocation?.longitude != null ? (
+                    <Text style={styles.cardMeta}>
+                      Exact pin saved for dispatch navigation.
+                    </Text>
+                  ) : null}
+                  {job.deliveryContactPhone ? (
+                    <Text style={styles.cardMeta}>Call buyer: {job.deliveryContactPhone}</Text>
+                  ) : null}
                 </View>
               </View>
 
-              <View style={styles.cardGrid}>
-                <View style={styles.metricCard}>
-                  <Text style={styles.cardLabel}>Item subtotal</Text>
-                  <Text style={styles.metricValueSmall}>{formatCurrency(job.itemSubtotal)}</Text>
-                </View>
-                <View style={styles.metricCard}>
-                  <Text style={styles.cardLabel}>Delivery fee</Text>
-                  <Text style={styles.metricValueSmall}>{formatCurrency(job.deliveryFee)}</Text>
-                </View>
-              </View>
 
               <Text style={styles.cardMeta}>Created {formatDateTime(job.createdAt)}</Text>
               <View style={styles.actionRow}>
+                <AppButton
+                  label="Open buyer location"
+                  onPress={() => void openBuyerLocation(job)}
+                  variant="ghost"
+                />
+                {job.deliveryContactPhone ? (
+                  <AppButton
+                    label="Call buyer"
+                    onPress={() => void callBuyer(job.deliveryContactPhone ?? '')}
+                    variant="secondary"
+                  />
+                ) : null}
                 {job.status === 'available' ? (
                   <AppButton
                     disabled={!riderReady}
@@ -302,9 +358,9 @@ export function DispatchDashboardScreen() {
               source={{ uri: 'https://images.unsplash.com/photo-1580674284084-8c3a3f3d8f8d?auto=format&fit=crop&w=900&q=80' }}
               style={styles.emptyImage}
             />
-            <Text style={styles.cardTitle}>No delivery jobs yet</Text>
+            <Text style={styles.cardTitle}>No active delivery jobs yet</Text>
             <Text style={styles.body}>
-              When paid orders create delivery work, the queue appears here automatically.
+              New pickup and drop-off jobs will appear here when orders are ready for dispatch.
             </Text>
           </View>
         )}
@@ -478,19 +534,7 @@ function createStyles(colors: AppColors) {
       backgroundColor: colors.surface,
       padding: spacing.md,
     },
-    cardGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.sm,
-    },
-    metricCard: {
-      flex: 1,
-      minWidth: 160,
-      gap: 4,
-      borderRadius: radii.lg,
-      backgroundColor: colors.surface,
-      padding: spacing.md,
-    },
+
     actionRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',

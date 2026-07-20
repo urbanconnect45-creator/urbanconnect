@@ -75,6 +75,11 @@ type ActiveFlutterwaveCheckout = {
 
 type ListingEditForm = {
   name: string;
+  category: string;
+  address: string;
+  imageUrl: string;
+  sku: string;
+  services: string;
   price: string;
   shortDescription: string;
   longDescription: string;
@@ -93,6 +98,11 @@ function isWarehouseReleased(status: string) {
 function createListingEditForm(business: Business): ListingEditForm {
   return {
     name: business.name,
+    category: business.category,
+    address: business.address,
+    imageUrl: business.imageUrl,
+    sku: business.sku ?? '',
+    services: business.services.join(', '),
     price: business.listingType === 'product' ? String(business.price || '') : '',
     shortDescription: business.description,
     longDescription: business.longDescription,
@@ -117,7 +127,9 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     getOrdersForOwner,
     getOrdersForUser,
     getWithdrawalsForOwner,
+    isCustomerAdvertisementSource,
     isRiverParkVerifiedForUser,
+    isStoreOwnerListingSource,
     startAddFundsFlutterwaveCheckout,
     updateBusinessListing,
   } = useBusinessDirectory();
@@ -513,6 +525,16 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
       return;
     }
 
+    if (!listingEditForm.category.trim()) {
+      setListingEditError('Add the listing category before saving.');
+      return;
+    }
+
+    if (!listingEditForm.address.trim()) {
+      setListingEditError('Add the listing address before saving.');
+      return;
+    }
+
     if (!listingEditForm.shortDescription.trim()) {
       setListingEditError('Add the short description before saving.');
       return;
@@ -544,6 +566,14 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         editingListing.id,
         {
           name: listingEditForm.name,
+          category: listingEditForm.category,
+          address: listingEditForm.address,
+          imageUrl: listingEditForm.imageUrl,
+          sku: listingEditForm.sku,
+          services: listingEditForm.services
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
           description: listingEditForm.shortDescription,
           longDescription: listingEditForm.longDescription,
           ...(isProduct
@@ -568,17 +598,18 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
   };
 
   const riverParkVerified = isRiverParkVerifiedForUser(user);
+  const isBusinessOwner = user?.role === 'businessOwner';
   const selectedOwnerListings = visibleOwnerListings.filter((business) =>
-    listingView === 'product'
+    (listingView === 'product'
       ? business.listingType === 'product'
-      : business.listingType === 'profession',
+      : business.listingType === 'profession') &&
+    (isBusinessOwner ? isStoreOwnerListingSource(business) : isCustomerAdvertisementSource(business)),
   );
 
   if (!user) {
     return null;
   }
 
-  const isBusinessOwner = user.role === 'businessOwner';
   const residentActiveOrders = residentOrders.filter((order) => isOrderOpen(order.status));
   const ownerOpenOrders = ownerOrders.filter((order) => isOrderOpen(order.status));
   return (
@@ -749,15 +780,13 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
               </View>
             ) : null}
           </View>
-          {isBusinessOwner ? (
-            <Pressable
-              onPress={() => navigation.navigate('ProfileEdit')}
-              style={({ pressed }) => [styles.heroEditButton, pressed && styles.itemRowPressed]}
-            >
-              <Ionicons color={colors.white} name="create-outline" size={17} />
-              <Text style={styles.heroEditText}>Edit</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            onPress={() => navigation.navigate('ProfileEdit')}
+            style={({ pressed }) => [styles.heroEditButton, pressed && styles.itemRowPressed]}
+          >
+            <Ionicons color={colors.white} name="create-outline" size={17} />
+            <Text style={styles.heroEditText}>Edit</Text>
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -795,10 +824,10 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         )}
       </View>
 
-      {isBusinessOwner ? (
+      {isBusinessOwner || user.role === 'resident' ? (
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.sectionTitle}>My listings</Text>
+            <Text style={styles.sectionTitle}>{isBusinessOwner ? 'My listings' : 'My adverts'}</Text>
             <View style={styles.segmentedControl}>
               {(['product', 'profession'] as const).map((type) => {
                 const isActive = listingView === type;
@@ -814,7 +843,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                     ]}
                   >
                     <Text style={[styles.segmentText, isActive && styles.segmentTextActive]}>
-                      {type === 'product' ? 'Products' : 'Professions'}
+                      {type === 'product' ? 'Products' : 'Services'}
                     </Text>
                   </Pressable>
                 );
@@ -878,7 +907,8 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
               ))
             ) : (
               <Text style={styles.bodyText}>
-                No {listingView === 'product' ? 'product' : 'profession'} listings yet.
+                No {listingView === 'product' ? 'product' : 'service'}{' '}
+                {isBusinessOwner ? 'listings' : 'adverts'} yet.
               </Text>
             )}
           </View>
@@ -1011,6 +1041,13 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.actionStack}>
           <AppButton label="Shop products" onPress={() => navigation.navigate('Dashboard')} />
+          {!isBusinessOwner ? (
+            <AppButton
+              label="Subscriptions & benefits"
+              onPress={() => navigation.navigate('CustomerBenefits')}
+              variant="secondary"
+            />
+          ) : null}
           <AppButton
             label="Messages"
             onPress={() => navigation.navigate('Chats')}
@@ -1060,6 +1097,37 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                   onChangeText={(value) => updateListingEditField('name', value)}
                   placeholder="Fresh basket"
                   value={listingEditForm.name}
+                />
+                <View style={styles.modalGrid}>
+                  <View style={styles.modalGridItem}>
+                    <FormField
+                      label="Category"
+                      onChangeText={(value) => updateListingEditField('category', value)}
+                      placeholder="Electronics"
+                      value={listingEditForm.category}
+                    />
+                  </View>
+                  <View style={styles.modalGridItem}>
+                    <FormField
+                      label="SKU / reference"
+                      onChangeText={(value) => updateListingEditField('sku', value)}
+                      placeholder="UC-ITEM"
+                      value={listingEditForm.sku}
+                    />
+                  </View>
+                </View>
+                <FormField
+                  label="Listing address"
+                  multiline
+                  onChangeText={(value) => updateListingEditField('address', value)}
+                  placeholder="Saved pickup or meeting location"
+                  value={listingEditForm.address}
+                />
+                <FormField
+                  label="Cover image"
+                  onChangeText={(value) => updateListingEditField('imageUrl', value)}
+                  placeholder="Saved image path or URL"
+                  value={listingEditForm.imageUrl}
                 />
 
                 {editingListing?.listingType === 'product' ? (
@@ -1113,6 +1181,13 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                   onChangeText={(value) => updateListingEditField('longDescription', value)}
                   placeholder="Full listing details"
                   value={listingEditForm.longDescription}
+                />
+                <FormField
+                  label="Services / tags"
+                  multiline
+                  onChangeText={(value) => updateListingEditField('services', value)}
+                  placeholder="Comma-separated saved services or tags"
+                  value={listingEditForm.services}
                 />
 
                 {listingEditError ? (
@@ -2371,10 +2446,10 @@ function createStyles(colors: AppColors) {
     ownerListingCard: {
       position: 'relative',
       overflow: 'hidden',
-      flexGrow: 1,
+      flexGrow: 0,
       flexBasis: '47%',
       maxWidth: '47%',
-      minWidth: 150,
+      minWidth: 0,
       borderRadius: radii.lg,
       backgroundColor: colors.card,
       borderWidth: 1,

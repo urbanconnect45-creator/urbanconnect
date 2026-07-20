@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Alert,
   Text,
   View,
   useWindowDimensions,
@@ -20,10 +21,11 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { BusinessMedia } from '../types/business';
-import { getContactActions, openContactAction, openExternalUrl } from '../utils/contact';
+import { openExternalUrl, showProfileContact } from '../utils/contact';
 import { formatCurrency } from '../utils/format';
 import { isPublicBusiness } from '../utils/businessState';
 import { normalizeProductCategory } from '../utils/category';
+import { getProfileContactForBusiness } from '../utils/marketplaceListings';
 
 export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScreenProps) {
   const { width } = useWindowDimensions();
@@ -40,6 +42,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
     isBusinessOwnedByUser,
     isCustomerAdvertisement,
     isStoreOwnerListing,
+    ownerBusinessProfiles,
     sendChatMessage,
     updateCartQuantity,
   } =
@@ -72,6 +75,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
   const isProduct = business.listingType === 'product';
   const isAdvertisement = isCustomerAdvertisement(business);
   const isStoreProduct = isProduct && isStoreOwnerListing(business);
+  const isOwnAdvertisement = Boolean(isAdvertisement && user && business.ownerUserId === user.id);
   const displayCategory = isProduct
     ? normalizeProductCategory(
         business.category,
@@ -95,20 +99,23 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
       return;
     }
 
-    sendChatMessage(
+    if (isOwnAdvertisement) {
+      Alert.alert('This is your advert', 'You cannot message yourself about your own advert.');
+      return;
+    }
+
+    void sendChatMessage(
       business.id,
       user,
       `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
-    );
+    ).catch(() => undefined);
     navigation.navigate('Chats');
   };
   const contactAdvertiser = () => {
-    const actions = getContactActions(business.contact);
-    const preferredAction = actions.find((action) => action.id === 'whatsapp') ?? actions[0];
-
-    if (preferredAction) {
-      void openContactAction(preferredAction);
-    }
+    showProfileContact(
+      getProfileContactForBusiness(business, ownerBusinessProfiles),
+      `${business.ownerName} contact`,
+    );
   };
 
   return (
@@ -285,7 +292,11 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
           <View style={styles.buttonGroup}>
             {isAdvertisement ? (
               <>
-                <AppButton label="Message Advertiser" onPress={messageAdvertiser} />
+                <AppButton
+                  disabled={isOwnAdvertisement}
+                  label={isOwnAdvertisement ? 'Your advert' : 'Message Advertiser'}
+                  onPress={messageAdvertiser}
+                />
                 <AppButton label="Contact Advertiser" onPress={contactAdvertiser} variant="secondary" />
                 {business.ownerUserId ? (
                   <AppButton
@@ -305,7 +316,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
                 <View style={[styles.quantityControl, isOwnProduct && styles.quantityControlDisabled]}>
                   <Pressable
                     disabled={cartQuantity <= 0 || isOwnProduct}
-                    onPress={() => updateCartQuantity(business.id, cartQuantity - 1)}
+                    onPress={() => updateCartQuantity(business.id, cartQuantity - 1, user)}
                     style={({ pressed }) => [
                       styles.quantityButton,
                       pressed && styles.quantityButtonPressed,
@@ -327,7 +338,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
                         return;
                       }
 
-                      addToCart(business.id);
+                      addToCart(business.id, user);
                     }}
                     style={({ pressed }) => [
                       styles.quantityButton,

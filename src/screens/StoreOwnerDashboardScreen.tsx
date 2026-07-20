@@ -171,6 +171,8 @@ const portalNav: {
   { id: 'profile', label: 'Profile', icon: 'storefront-outline' },
 ];
 
+const openDayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 const kycOptions: { label: string; value: WithdrawalKycType }[] = [
   { label: 'BVN', value: 'bvn' },
   { label: 'NIN', value: 'nin' },
@@ -535,14 +537,20 @@ function businessPublicStatus(business: Business) {
 function buildProfileValues(userName: string, userEmail: string): OwnerBusinessProfileValues {
   return {
     ownerName: userName,
+    bio: '',
+    profileImage: '',
     phone: '',
     whatsapp: '',
     email: userEmail,
     website: '',
     instagram: '',
+    facebook: '',
+    x: '',
+    tiktok: '',
     address: '',
     openingTime: '',
     closingTime: '',
+    openDays: [],
     coverImage: '',
     galleryImages: '',
     galleryVideos: '',
@@ -654,6 +662,8 @@ export function StoreOwnerDashboardScreen() {
   const [draft, setDraft] = useState<ProductDraft>(() => initialDraft(user?.fullName));
   const [errors, setErrors] = useState<Partial<Record<keyof ProductDraft, string>>>({});
   const [isSubmittingItem, setIsSubmittingItem] = useState(false);
+  const [draftCategoryPickerOpen, setDraftCategoryPickerOpen] = useState(false);
+  const [editCategoryPickerOpen, setEditCategoryPickerOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -793,14 +803,20 @@ export function StoreOwnerDashboardScreen() {
     const source = ownerProfile ?? buildProfileValues(user.businessName ?? user.fullName, user.email);
     setProfileDraft({
       ownerName: source.ownerName,
+      bio: source.bio ?? '',
+      profileImage: source.profileImage ?? '',
       phone: source.phone || user.phoneNumber,
       whatsapp: source.whatsapp || user.phoneNumber,
       email: source.email || user.email,
-      website: '',
-      instagram: '',
+      website: source.website ?? '',
+      instagram: source.instagram ?? '',
+      facebook: source.facebook ?? '',
+      x: source.x ?? '',
+      tiktok: source.tiktok ?? '',
       address: source.address ?? '',
       openingTime: source.openingTime ?? '',
       closingTime: source.closingTime ?? '',
+      openDays: source.openDays ?? [],
       coverImage: source.coverImage ?? '',
       galleryImages: '',
       galleryVideos: '',
@@ -1053,6 +1069,7 @@ export function StoreOwnerDashboardScreen() {
       shortDescription: description,
       longDescription: details,
       price: product.price.trim(),
+      condition: 'Brand new',
       stockQuantity: product.stockQuantity.trim(),
       reorderLevel: product.reorderLevel.trim(),
       phone: user?.phoneNumber ?? '',
@@ -1405,6 +1422,62 @@ export function StoreOwnerDashboardScreen() {
     }
   };
 
+  const renderCollapsedProductCategoryPicker = (
+    selectedCategory: BusinessCategory,
+    onSelectCategory: (category: BusinessCategory) => void,
+    isOpen: boolean,
+    setIsOpen: (open: boolean) => void,
+  ) => (
+    <>
+      <Text style={styles.label}>Category</Text>
+      <View style={styles.categorySummaryRow}>
+        <View style={[styles.categoryChip, styles.categoryChipActive]}>
+          <Text style={[styles.categoryText, styles.categoryTextActive]}>
+            {selectedCategory}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setIsOpen(!isOpen)}
+          style={({ pressed }) => [
+            styles.categoryToggle,
+            pressed && styles.categoryTogglePressed,
+          ]}
+        >
+          <Text style={styles.categoryToggleText}>
+            {isOpen ? 'Hide categories' : 'Change category'}
+          </Text>
+        </Pressable>
+      </View>
+      {isOpen ? (
+        <View style={styles.categoryGrid}>
+          {productCategories.map((category) => {
+            const isActive = selectedCategory === category;
+
+            return (
+              <Pressable
+                key={category}
+                onPress={() => {
+                  onSelectCategory(category);
+                  setIsOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.categoryChip,
+                  isActive && styles.categoryChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>
+                  {category}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </>
+  );
+
   const closeItemEditor = () => {
     setEditingListingId(null);
     setEditDraft(null);
@@ -1626,7 +1699,7 @@ export function StoreOwnerDashboardScreen() {
   };
 
   const pickProfileMedia = async (
-    field: 'coverImage' | 'galleryImages',
+    field: 'profileImage' | 'coverImage' | 'galleryImages',
     mediaTypes: ImagePicker.MediaType[],
     allowsMultipleSelection: boolean,
   ) => {
@@ -1667,8 +1740,11 @@ export function StoreOwnerDashboardScreen() {
       return;
     }
 
-    if (field === 'coverImage') {
-      setProfileDraft((current) => ({ ...current, coverImage: nextUris[0] ?? current.coverImage }));
+    if (field === 'profileImage' || field === 'coverImage') {
+      setProfileDraft((current) => ({
+        ...current,
+        [field]: nextUris[0] ?? current[field],
+      }));
       return;
     }
 
@@ -1761,6 +1837,11 @@ export function StoreOwnerDashboardScreen() {
       setProfileError(null);
       setProfileMessage(null);
 
+      const uploadedProfileImage = await persistPickedMediaUri(
+        profileDraft.profileImage.trim(),
+        'identity',
+        'profile-avatar',
+      );
       const uploadedCoverImage = await persistPickedMediaUri(
         profileDraft.coverImage.trim(),
         'identity',
@@ -1773,6 +1854,7 @@ export function StoreOwnerDashboardScreen() {
       );
       const nextProfileDraft: OwnerBusinessProfileValues = {
         ...profileDraft,
+        profileImage: uploadedProfileImage,
         coverImage: uploadedCoverImage,
         galleryImages: uploadedGalleryImages.join(', '),
       };
@@ -1785,6 +1867,17 @@ export function StoreOwnerDashboardScreen() {
     } finally {
       setIsSavingProfile(false);
     }
+  };
+
+  const toggleProfileOpenDay = (day: string) => {
+    setProfileDraft((current) => {
+      const currentDays = current.openDays ?? [];
+      const nextDays = currentDays.includes(day)
+        ? currentDays.filter((item) => item !== day)
+        : [...currentDays, day];
+
+      return { ...current, openDays: nextDays };
+    });
   };
 
   const verifyBusinessCac = async () => {
@@ -2184,28 +2277,12 @@ export function StoreOwnerDashboardScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>Category</Text>
-          <View style={styles.categoryGrid}>
-            {productCategories.map((category) => {
-              const isActive = editDraft.category === category;
-
-              return (
-                <Pressable
-                  key={category}
-                  onPress={() => setEditDraft({ ...editDraft, category })}
-                  style={({ pressed }) => [
-                    styles.categoryChip,
-                    isActive && styles.categoryChipActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>
-                    {category}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {renderCollapsedProductCategoryPicker(
+            editDraft.category,
+            (category) => setEditDraft({ ...editDraft, category }),
+            editCategoryPickerOpen,
+            setEditCategoryPickerOpen,
+          )}
 
           <View style={styles.formRow}>
             <View style={styles.formColumn}>
@@ -2544,28 +2621,12 @@ export function StoreOwnerDashboardScreen() {
             <FormField error={errors.reorderLevel} keyboardType="numeric" label="Reorder level" onChangeText={(value) => updateDraft('reorderLevel', value.replace(/[^\d]/g, ''))} placeholder="1" value={draft.reorderLevel} />
           </View>
         </View>
-        <Text style={styles.label}>Category</Text>
-        <View style={styles.categoryGrid}>
-          {productCategories.map((category) => {
-            const isActive = draft.category === category;
-
-            return (
-              <Pressable
-                key={category}
-                onPress={() => updateDraft('category', category)}
-                style={({ pressed }) => [
-                  styles.categoryChip,
-                  isActive && styles.categoryChipActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>
-                  {category}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {renderCollapsedProductCategoryPicker(
+          draft.category,
+          (category) => updateDraft('category', category),
+          draftCategoryPickerOpen,
+          setDraftCategoryPickerOpen,
+        )}
         <FormField error={errors.shortDescription} label="Short description (optional)" onChangeText={(value) => updateDraft('shortDescription', value)} placeholder="Small pack available for quick delivery" value={draft.shortDescription} />
         <Text style={styles.label}>Does this item have a barcode, NAFDAC number, or SKU?</Text>
         <View style={styles.categoryGrid}>
@@ -3191,6 +3252,19 @@ export function StoreOwnerDashboardScreen() {
           </View>
         )}
         <View style={styles.profileCoverPreviewBody}>
+          {profileDraft.profileImage.trim() ? (
+            <Image
+              resizeMode="cover"
+              source={{ uri: profileDraft.profileImage }}
+              style={styles.profileAvatarPreview}
+            />
+          ) : (
+            <View style={styles.profileAvatarFallback}>
+              <Text style={styles.profileAvatarFallbackText}>
+                {(profileDraft.ownerName.trim() || user.businessName || user.fullName).slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+          )}
           <Text style={styles.rowTitle}>
             {profileDraft.ownerName.trim() || user.businessName || user.fullName}
           </Text>
@@ -3201,6 +3275,11 @@ export function StoreOwnerDashboardScreen() {
             {profileDraft.openingTime?.trim() || profileDraft.closingTime?.trim()
               ? `${profileDraft.openingTime?.trim() || 'Opening time'} - ${profileDraft.closingTime?.trim() || 'Closing time'}`
               : 'Opening and closing time preview'}
+          </Text>
+          <Text style={styles.mutedText}>
+            {profileDraft.openDays?.length
+              ? `Open ${profileDraft.openDays.join(', ')}`
+              : 'Open days preview'}
           </Text>
         </View>
       </View>
@@ -3218,6 +3297,41 @@ export function StoreOwnerDashboardScreen() {
         </View>
         <View style={styles.formColumn}>
           <FormField autoCapitalize="none" keyboardType="email-address" label="Email" onChangeText={(value) => setProfileDraft({ ...profileDraft, email: value })} value={profileDraft.email} />
+        </View>
+      </View>
+      <FormField autoCapitalize="none" keyboardType="url" label="Website" onChangeText={(value) => setProfileDraft({ ...profileDraft, website: value })} value={profileDraft.website} />
+      <FormField
+        label="Bio"
+        multiline
+        onChangeText={(value) => setProfileDraft({ ...profileDraft, bio: value })}
+        placeholder="Tell buyers what your store sells and why they should trust it."
+        value={profileDraft.bio}
+      />
+      <MediaPickerField
+        assets={profileDraft.profileImage ? [{ label: assetLabelFromUri(profileDraft.profileImage, 'Profile picture', 0), uri: profileDraft.profileImage }] : []}
+        buttonLabel="Choose profile picture"
+        helper="Used only for small circular avatars, not product or listing photos."
+        kind="image"
+        label="Profile picture"
+        onClear={() => setProfileDraft({ ...profileDraft, profileImage: '' })}
+        onPick={() => {
+          void pickProfileMedia('profileImage', ['images'], false);
+        }}
+      />
+      <View style={styles.formRow}>
+        <View style={styles.formColumn}>
+          <FormField label="Instagram" onChangeText={(value) => setProfileDraft({ ...profileDraft, instagram: value })} placeholder="@yourhandle" value={profileDraft.instagram} />
+        </View>
+        <View style={styles.formColumn}>
+          <FormField label="Facebook" onChangeText={(value) => setProfileDraft({ ...profileDraft, facebook: value })} placeholder="Facebook name" value={profileDraft.facebook} />
+        </View>
+      </View>
+      <View style={styles.formRow}>
+        <View style={styles.formColumn}>
+          <FormField label="X / Twitter" onChangeText={(value) => setProfileDraft({ ...profileDraft, x: value })} placeholder="@yourhandle" value={profileDraft.x} />
+        </View>
+        <View style={styles.formColumn}>
+          <FormField label="TikTok" onChangeText={(value) => setProfileDraft({ ...profileDraft, tiktok: value })} placeholder="@yourhandle" value={profileDraft.tiktok} />
         </View>
       </View>
       <FormField label="Pickup/business address" onChangeText={(value) => setProfileDraft({ ...profileDraft, address: value })} value={profileDraft.address} />
@@ -3239,10 +3353,34 @@ export function StoreOwnerDashboardScreen() {
           />
         </View>
       </View>
+      <View style={styles.openDaysSection}>
+        <Text style={styles.label}>Open days</Text>
+        <View style={styles.categoryGrid}>
+          {openDayOptions.map((day) => {
+            const isSelected = profileDraft.openDays?.includes(day);
+
+            return (
+              <Pressable
+                key={day}
+                onPress={() => toggleProfileOpenDay(day)}
+                style={({ pressed }) => [
+                  styles.categoryChip,
+                  isSelected && styles.categoryChipActive,
+                  pressed && styles.categoryTogglePressed,
+                ]}
+              >
+                <Text style={[styles.categoryText, isSelected && styles.categoryTextActive]}>
+                  {day}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
       <MediaPickerField
         assets={profileDraft.coverImage ? [{ label: assetLabelFromUri(profileDraft.coverImage, 'Cover image', 0), uri: profileDraft.coverImage }] : []}
         buttonLabel="Choose cover photo"
-        helper="Pick a gallery image to show on your business page."
+        helper="Pick a gallery image to show as your store cover."
         kind="image"
         label="Cover photo"
         onClear={() => setProfileDraft({ ...profileDraft, coverImage: '' })}
@@ -3845,10 +3983,35 @@ function createStyles(colors: AppColors) {
       ...typography.caption,
       color: colors.text,
     },
+    openDaysSection: {
+      gap: spacing.sm,
+    },
     categoryGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
+    },
+    categorySummaryRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    categoryToggle: {
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    categoryTogglePressed: {
+      opacity: 0.88,
+    },
+    categoryToggleText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
     },
     categoryChip: {
       borderRadius: 8,
@@ -4156,6 +4319,26 @@ function createStyles(colors: AppColors) {
       gap: spacing.xs,
       paddingHorizontal: spacing.md,
       paddingBottom: spacing.md,
+    },
+    profileAvatarPreview: {
+      height: 54,
+      width: 54,
+      borderRadius: 27,
+      borderWidth: 2,
+      borderColor: colors.surface,
+      backgroundColor: colors.surfaceMuted,
+    },
+    profileAvatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 54,
+      width: 54,
+      borderRadius: 27,
+      backgroundColor: colors.primary,
+    },
+    profileAvatarFallbackText: {
+      ...typography.bodyStrong,
+      color: colors.white,
     },
     marketplacePreviewBody: {
       gap: spacing.sm,

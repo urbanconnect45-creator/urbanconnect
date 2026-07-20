@@ -51,11 +51,6 @@ export function ProductCard({
     business.description,
     business.longDescription,
   );
-  const isGoldListing =
-    (business.subscriptionStatus === 'paid' || business.subscriptionStatus === 'active') &&
-    (!business.subscriptionNextBillingAt ||
-      new Date(business.subscriptionNextBillingAt).getTime() > Date.now()) &&
-    Boolean(business.riverParkVerified);
   const plusDisabled = addDisabled || (maxQuantity !== undefined && quantity >= maxQuantity);
   const minusDisabled = addDisabled || quantity <= 0;
 
@@ -64,22 +59,16 @@ export function ProductCard({
       onPress={onPress}
       style={({ pressed }) => [
         styles.card,
-        isGoldListing && styles.goldCard,
         pressed && styles.cardPressed,
         style,
       ]}
     >
-      <Image resizeMode="cover" source={{ uri: business.imageUrl }} style={styles.image} />
+      <Image resizeMode="contain" source={{ uri: business.imageUrl }} style={styles.image} />
 
       <View style={styles.badgeRow}>
         <View style={[styles.badge, styles.categoryBadge]}>
           <Text style={styles.badgeText}>{displayCategory}</Text>
         </View>
-        {isGoldListing ? (
-          <View style={[styles.badge, styles.goldBadge]}>
-            <Text style={styles.goldBadgeText}>Gold</Text>
-          </View>
-        ) : null}
       </View>
 
       <View style={styles.content}>
@@ -157,17 +146,14 @@ function createStyles(colors: AppColors) {
       borderColor: colors.border,
       ...shadows.card,
     },
-    goldCard: {
-      borderColor: colors.accent,
-      borderWidth: 2,
-    },
     cardPressed: {
       opacity: 0.96,
       transform: [{ translateY: 1 }],
     },
     image: {
-      height: 146,
+      height: 160,
       width: '100%',
+      backgroundColor: colors.card,
     },
     badgeRow: {
       position: 'absolute',
@@ -188,17 +174,9 @@ function createStyles(colors: AppColors) {
     categoryBadge: {
       backgroundColor: 'rgba(240, 132, 92, 0.88)',
     },
-    goldBadge: {
-      backgroundColor: colors.accent,
-    },
     badgeText: {
       ...typography.caption,
       color: colors.white,
-    },
-    goldBadgeText: {
-      ...typography.caption,
-      color: colors.white,
-      fontWeight: '800',
     },
     content: {
       gap: spacing.xs,

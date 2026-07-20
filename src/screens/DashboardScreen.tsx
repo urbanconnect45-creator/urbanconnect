@@ -18,8 +18,10 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Business } from '../types/business';
-import { getContactActions, openContactAction } from '../utils/contact';
+import { showProfileContact } from '../utils/contact';
+import { hasActiveCustomerAdvertPromotion } from '../utils/customerBenefits';
 import { formatNumber } from '../utils/format';
+import { getProfileContactForBusiness, profileMatchesBusiness } from '../utils/marketplaceListings';
 
 export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>) {
   const { user } = useAuth();
@@ -28,7 +30,9 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
   const {
     businesses,
     isCustomerAdvertisement,
+    ownerBusinessProfiles,
     sendChatMessage,
+    subscriptionPayments,
   } = useBusinessDirectory();
   const { width } = useWindowDimensions();
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -40,10 +44,30 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
       businesses
         .filter(isCustomerAdvertisement)
         .sort(
-          (leftBusiness, rightBusiness) =>
-            new Date(rightBusiness.createdAt).getTime() - new Date(leftBusiness.createdAt).getTime(),
+          (leftBusiness, rightBusiness) => {
+            const now = Date.now();
+            const leftIsPremium = hasActiveCustomerAdvertPromotion(
+              leftBusiness,
+              subscriptionPayments,
+              now,
+            );
+            const rightIsPremium = hasActiveCustomerAdvertPromotion(
+              rightBusiness,
+              subscriptionPayments,
+              now,
+            );
+
+            if (leftIsPremium !== rightIsPremium) {
+              return leftIsPremium ? -1 : 1;
+            }
+
+            return (
+              new Date(rightBusiness.createdAt).getTime() -
+              new Date(leftBusiness.createdAt).getTime()
+            );
+          },
         ),
-    [businesses, isCustomerAdvertisement],
+    [businesses, isCustomerAdvertisement, subscriptionPayments],
   );
   const availableCategories = useMemo(
     () => ['All', ...new Set(advertisements.map((business) => business.category))],
@@ -82,20 +106,22 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
       return;
     }
 
-    sendChatMessage(
+    if (advertisement.ownerUserId === user.id) {
+      return;
+    }
+
+    void sendChatMessage(
       advertisement.id,
       user,
       `Hi ${advertisement.ownerName}, I am interested in your advertisement: ${advertisement.name}.`,
-    );
+    ).catch(() => undefined);
     navigation.navigate('Chats');
   };
   const contactAdvertiser = (advertisement: Business) => {
-    const actions = getContactActions(advertisement.contact);
-    const preferredAction = actions.find((action) => action.id === 'whatsapp') ?? actions[0];
-
-    if (preferredAction) {
-      void openContactAction(preferredAction);
-    }
+    showProfileContact(
+      getProfileContactForBusiness(advertisement, ownerBusinessProfiles),
+      `${advertisement.ownerName} contact`,
+    );
   };
 
   return (
@@ -211,20 +237,30 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
         data={filteredAdvertisements}
         keyExtractor={(item) => item.id}
         numColumns={columnCount}
-        renderItem={({ item }) => (
-          <AdvertisementCard
-            advertisement={item}
-            onContactPress={() => contactAdvertiser(item)}
-            onMessagePress={() => messageAdvertiser(item)}
-            onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
-            onProfilePress={() => {
-              if (item.ownerUserId) {
-                navigation.navigate('SellerProfile', { userId: item.ownerUserId });
-              }
-            }}
-            style={styles.columnCard}
-          />
-        )}
+        renderItem={({ item }) => {
+          const advertiserProfile = ownerBusinessProfiles.find((profile) =>
+            profileMatchesBusiness(profile, item),
+          );
+          const ownListing = Boolean(user && item.ownerUserId === user.id);
+
+          return (
+            <AdvertisementCard
+              advertisement={item}
+              advertiserProfileImage={advertiserProfile?.profileImage || undefined}
+              ownListing={ownListing}
+              premium={hasActiveCustomerAdvertPromotion(item, subscriptionPayments)}
+              onContactPress={() => contactAdvertiser(item)}
+              onMessagePress={() => messageAdvertiser(item)}
+              onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
+              onProfilePress={() => {
+                if (item.ownerUserId) {
+                  navigation.navigate('SellerProfile', { userId: item.ownerUserId });
+                }
+              }}
+              style={styles.columnCard}
+            />
+          );
+        }}
         showsVerticalScrollIndicator={false}
       />
     </View>

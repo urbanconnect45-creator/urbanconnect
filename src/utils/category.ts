@@ -2,7 +2,7 @@ import type { BusinessCategory } from '../types/business';
 
 const categorySignals: Array<{ category: BusinessCategory; keywords: string[] }> = [
   {
-    category: 'Infant',
+    category: 'Baby & Kids',
     keywords: [
       'baby',
       'diaper',
@@ -12,6 +12,19 @@ const categorySignals: Array<{ category: BusinessCategory; keywords: string[] }>
       'nappy',
       'newborn',
       'toddler',
+      'toy',
+    ],
+  },
+  {
+    category: 'Health & Pharmacy',
+    keywords: [
+      'drug',
+      'health',
+      'medical',
+      'medicine',
+      'pharmacy',
+      'vitamin',
+      'wellness',
     ],
   },
   {
@@ -30,7 +43,7 @@ const categorySignals: Array<{ category: BusinessCategory; keywords: string[] }>
     ],
   },
   {
-    category: 'Food',
+    category: 'Food & Groceries',
     keywords: [
       'baked',
       'bakery',
@@ -58,18 +71,39 @@ const categorySignals: Array<{ category: BusinessCategory; keywords: string[] }>
     category: 'Electronics',
     keywords: [
       'charger',
-      'computer',
-      'earbuds',
       'electronic',
+      'earbuds',
       'headphone',
-      'laptop',
-      'phone',
       'speaker',
       'television',
     ],
   },
   {
-    category: 'Beauty',
+    category: 'Phones & Tablets',
+    keywords: [
+      'android',
+      'iphone',
+      'ipad',
+      'phone',
+      'smartphone',
+      'tablet',
+    ],
+  },
+  {
+    category: 'Computers & Accessories',
+    keywords: [
+      'computer',
+      'desktop',
+      'keyboard',
+      'laptop',
+      'macbook',
+      'monitor',
+      'mouse',
+      'printer',
+    ],
+  },
+  {
+    category: 'Beauty & Personal Care',
     keywords: [
       'beauty',
       'cosmetic',
@@ -97,21 +131,89 @@ const categorySignals: Array<{ category: BusinessCategory; keywords: string[] }>
     ],
   },
   {
-    category: 'Home Essentials',
+    category: 'Home & Furniture',
     keywords: [
-      'appliance',
       'bed',
       'chair',
       'furniture',
       'home',
-      'kitchen',
       'mattress',
-      'detergent',
-      'soap',
+      'sofa',
       'table',
+      'wardrobe',
+    ],
+  },
+  {
+    category: 'Home Essentials',
+    keywords: [
+      'detergent',
+      'kitchen',
+      'soap',
       'tissue',
       'utensil',
     ],
+  },
+  {
+    category: 'Appliances',
+    keywords: [
+      'air conditioner',
+      'appliance',
+      'blender',
+      'freezer',
+      'fridge',
+      'generator',
+      'microwave',
+      'washing machine',
+    ],
+  },
+  {
+    category: 'Vehicles',
+    keywords: [
+      'bike',
+      'car',
+      'corolla',
+      'motorcycle',
+      'suv',
+      'toyota',
+      'vehicle',
+    ],
+  },
+  {
+    category: 'Property',
+    keywords: [
+      'apartment',
+      'flat',
+      'house',
+      'land',
+      'office',
+      'property',
+      'rent',
+      'shop',
+    ],
+  },
+  {
+    category: 'Sports & Outdoors',
+    keywords: ['fitness', 'football', 'gym', 'outdoor', 'sport'],
+  },
+  {
+    category: 'Books & Stationery',
+    keywords: ['book', 'notebook', 'pen', 'school', 'stationery', 'textbook'],
+  },
+  {
+    category: 'Jobs',
+    keywords: ['hire', 'job', 'recruit', 'vacancy', 'work'],
+  },
+  {
+    category: 'Pets',
+    keywords: ['cat', 'dog', 'pet', 'puppy'],
+  },
+  {
+    category: 'Agriculture',
+    keywords: ['farm', 'feed', 'fertilizer', 'seed'],
+  },
+  {
+    category: 'Tools & Equipment',
+    keywords: ['drill', 'equipment', 'machine', 'tool'],
   },
 ];
 
@@ -134,11 +236,23 @@ export function normalizeProductCategory(
   const normalizedCategory = category.trim().toLowerCase();
 
   if (normalizedCategory === 'groceries' || normalizedCategory === 'grocery') {
-    return 'Food';
+    return 'Food & Groceries';
   }
 
   if (normalizedCategory === 'food & drinks' || normalizedCategory === 'food and drinks') {
-    return inferListingCategory(...listingCopy) === 'Drinks' ? 'Drinks' : 'Food';
+    return inferListingCategory(...listingCopy) === 'Drinks' ? 'Drinks' : 'Food & Groceries';
+  }
+
+  if (normalizedCategory === 'beauty') {
+    return 'Beauty & Personal Care';
+  }
+
+  if (normalizedCategory === 'real estate' || normalizedCategory === 'realestate') {
+    return 'Property';
+  }
+
+  if (normalizedCategory === 'cars') {
+    return 'Vehicles';
   }
 
   return category;

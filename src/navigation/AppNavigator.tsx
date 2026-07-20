@@ -350,6 +350,7 @@ export function AppNavigator() {
     getOrderById,
     markNotificationsRead,
     securitySettings,
+    syncCustomerAccountData,
   } = useBusinessDirectory();
   const adminWebEntrypoint = useMemo(() => isAdminWebEntrypoint(), []);
   const catalogAdminWebEntrypoint = useMemo(() => isCatalogAdminWebEntrypoint(), []);
@@ -418,6 +419,10 @@ export function AppNavigator() {
       Alert.alert('Unable to open social app', 'Please try again from your browser.');
     });
   }, []);
+
+  useEffect(() => {
+    void syncCustomerAccountData(user).catch(() => undefined);
+  }, [user?.id]);
 
   const unlockPasscodeGate = useCallback(() => {
     if (user) {
@@ -761,6 +766,7 @@ export function AppNavigator() {
             screen === 'SellerMode' ||
             screen === 'RegisterBusiness' ||
             screen === 'Subscription' ||
+            screen === 'CustomerBenefits' ||
             screen === 'Chats' ||
             screen === 'Account' ||
             screen === 'ProfileEdit' ||
@@ -845,6 +851,7 @@ export function AppNavigator() {
           screen === 'SellerMode' ||
           screen === 'RegisterBusiness' ||
           screen === 'Subscription' ||
+          screen === 'CustomerBenefits' ||
           screen === 'Chats' ||
           screen === 'Account' ||
           screen === 'ProfileEdit' ||

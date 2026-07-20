@@ -58,6 +58,43 @@ export async function openContactAction(action: ContactAction) {
   await Linking.openURL(action.url);
 }
 
+export function showProfileContact(contact: BusinessContact, title = 'Seller contact') {
+  const actions = getContactActions(contact);
+  const callAction = actions.find((action) => action.id === 'call');
+  const whatsappAction = actions.find((action) => action.id === 'whatsapp');
+  const buttons = [
+    { text: 'Close', style: 'cancel' as const },
+    ...(callAction
+      ? [
+          {
+            text: 'Call',
+            onPress: () => {
+              void openContactAction(callAction);
+            },
+          },
+        ]
+      : []),
+    ...(whatsappAction
+      ? [
+          {
+            text: 'WhatsApp',
+            onPress: () => {
+              void openContactAction(whatsappAction);
+            },
+          },
+        ]
+      : []),
+  ];
+
+  Alert.alert(
+    title,
+    `Phone Number: ${contact.phone || 'Not provided'}\nWhatsApp Number: ${
+      contact.whatsapp || 'Not provided'
+    }`,
+    buttons,
+  );
+}
+
 export async function openExternalUrl(url: string, label: string) {
   const supported = await Linking.canOpenURL(url);
 

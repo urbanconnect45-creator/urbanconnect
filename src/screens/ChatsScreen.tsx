@@ -1,6 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Image,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
@@ -8,7 +20,12 @@ import type { MainTabsScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import type { ChatMessage, SupportMessage } from '../types/business';
+import type {
+  ChatAttachmentType,
+  ChatMessage,
+  ChatMessageAttachment,
+  SupportMessage,
+} from '../types/business';
 
 function chatTime(value?: string) {
   if (!value) {
@@ -20,6 +37,49 @@ function chatTime(value?: string) {
 
 function isSupportMessage(message: ChatMessage | SupportMessage): message is SupportMessage {
   return 'senderRole' in message;
+}
+
+function attachmentTypeFromMime(mimeType?: string | null, name = ''): ChatAttachmentType {
+  const lowerMime = mimeType?.toLowerCase() ?? '';
+  const lowerName = name.toLowerCase();
+
+  if (lowerMime.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(lowerName)) {
+    return 'image';
+  }
+
+  if (lowerMime.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(lowerName)) {
+    return 'video';
+  }
+
+  return 'file';
+}
+
+function attachmentIcon(type: ChatAttachmentType): keyof typeof Ionicons.glyphMap {
+  if (type === 'image') {
+    return 'image-outline';
+  }
+
+  if (type === 'video') {
+    return 'videocam-outline';
+  }
+
+  return 'document-attach-outline';
+}
+
+function fallbackAttachmentName(uri: string, fallback: string) {
+  return uri.split('/').pop()?.split('?')[0] || fallback;
+}
+
+function formatAttachmentSize(size?: number) {
+  if (!size || size <= 0) {
+    return '';
+  }
+
+  if (size < 1024 * 1024) {
+    return `${Math.ceil(size / 1024)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
@@ -37,6 +97,9 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
   const [isThreadOpen, setIsThreadOpen] = useState(false);
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [selectedAttachments, setSelectedAttachments] = useState<ChatMessageAttachment[]>([]);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const supportConversation = getSupportConversation(user);
   const supportMessages = supportConversation?.messages ?? [];
   const lastSupportMessage = supportConversation?.lastMessage;
@@ -54,18 +117,104 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
     return null;
   }
 
-  const handleSend = () => {
-    if (!draft.trim()) {
+  const handlePickMedia = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert(
+        'Permission needed',
+        'Allow gallery access in your device settings so you can attach photos or videos.',
+      );
       return;
     }
 
-    if (activeAdvertiserConversation) {
-      sendChatMessage(activeAdvertiserConversation.business.id, user, draft);
-    } else {
-      sendSupportMessage(user, draft);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: false,
+      allowsMultipleSelection: true,
+      mediaTypes: ['images', 'videos'],
+      quality: 0.85,
+      selectionLimit: 6,
+    });
+
+    if (result.canceled) {
+      return;
     }
 
-    setDraft('');
+    const pickedAttachments = result.assets.map<ChatMessageAttachment>((asset, index) => {
+      const name = asset.fileName ?? fallbackAttachmentName(asset.uri, `Media ${index + 1}`);
+      const type = asset.type === 'video' ? 'video' : 'image';
+
+      return {
+        id: `attachment-${Date.now()}-${index}`,
+        type,
+        url: asset.uri,
+        name,
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+        ...(asset.fileSize ? { size: asset.fileSize } : {}),
+      };
+    });
+
+    setSelectedAttachments((current) => [...current, ...pickedAttachments].slice(-6));
+    setSendError(null);
+  };
+
+  const handlePickFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      multiple: true,
+      type: '*/*',
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    const pickedAttachments = result.assets.map<ChatMessageAttachment>((asset, index) => ({
+      id: `attachment-${Date.now()}-${index}`,
+      type: attachmentTypeFromMime(asset.mimeType, asset.name),
+      url: asset.uri,
+      name: asset.name || fallbackAttachmentName(asset.uri, `File ${index + 1}`),
+      ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+      ...(asset.size ? { size: asset.size } : {}),
+    }));
+
+    setSelectedAttachments((current) => [...current, ...pickedAttachments].slice(-6));
+    setSendError(null);
+  };
+
+  const removeSelectedAttachment = (attachmentId: string) => {
+    setSelectedAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    );
+  };
+
+  const handleSend = async () => {
+    if (!draft.trim() && selectedAttachments.length === 0) {
+      return;
+    }
+
+    try {
+      setIsSending(true);
+      setSendError(null);
+
+      if (activeAdvertiserConversation) {
+        await sendChatMessage(
+          activeAdvertiserConversation.business.id,
+          user,
+          draft,
+          selectedAttachments,
+        );
+      } else {
+        await sendSupportMessage(user, draft, undefined, selectedAttachments);
+      }
+
+      setDraft('');
+      setSelectedAttachments([]);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : 'Unable to send this message.');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   if (!isThreadOpen) {
@@ -200,6 +349,7 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
                   message.senderRole === 'owner' ||
                   message.senderRole === 'system'
                 : message.senderUserId !== user.id && message.senderName !== user.fullName;
+              const attachments = message.attachments ?? [];
 
               return (
                 <View
@@ -223,6 +373,59 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
                     >
                       {message.text}
                     </Text>
+                    {attachments.length > 0 ? (
+                      <View style={styles.messageAttachmentStack}>
+                        {attachments.map((attachment) =>
+                          attachment.type === 'image' ? (
+                            <Pressable
+                              key={attachment.id}
+                              onPress={() => {
+                                void Linking.openURL(attachment.url);
+                              }}
+                              style={({ pressed }) => [
+                                styles.messageImageAttachment,
+                                pressed && styles.rowPressed,
+                              ]}
+                            >
+                              <Image
+                                resizeMode="cover"
+                                source={{ uri: attachment.url }}
+                                style={styles.messageAttachmentImage}
+                              />
+                              <Text numberOfLines={1} style={styles.messageAttachmentName}>
+                                {attachment.name}
+                              </Text>
+                            </Pressable>
+                          ) : (
+                            <Pressable
+                              key={attachment.id}
+                              onPress={() => {
+                                void Linking.openURL(attachment.url);
+                              }}
+                              style={({ pressed }) => [
+                                styles.messageFileAttachment,
+                                pressed && styles.rowPressed,
+                              ]}
+                            >
+                              <Ionicons
+                                color={colors.primary}
+                                name={attachmentIcon(attachment.type)}
+                                size={18}
+                              />
+                              <View style={styles.attachmentCopy}>
+                                <Text numberOfLines={1} style={styles.messageAttachmentName}>
+                                  {attachment.name}
+                                </Text>
+                                <Text style={styles.messageAttachmentMeta}>
+                                  {attachment.type === 'video' ? 'Video' : 'File'}{' '}
+                                  {formatAttachmentSize(attachment.size)}
+                                </Text>
+                              </View>
+                            </Pressable>
+                          ),
+                        )}
+                      </View>
+                    ) : null}
                   </View>
                 </View>
               );
@@ -242,7 +445,55 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
         </View>
       </ScrollView>
 
+      {sendError ? <Text style={styles.errorText}>{sendError}</Text> : null}
+      {selectedAttachments.length > 0 ? (
+        <View style={styles.selectedAttachmentPanel}>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.selectedAttachmentRow}
+          >
+            {selectedAttachments.map((attachment) => (
+              <View key={attachment.id} style={styles.selectedAttachmentChip}>
+                <Ionicons
+                  color={colors.primary}
+                  name={attachmentIcon(attachment.type)}
+                  size={17}
+                />
+                <Text numberOfLines={1} style={styles.selectedAttachmentText}>
+                  {attachment.name}
+                </Text>
+                <Pressable
+                  accessibilityLabel={`Remove ${attachment.name}`}
+                  onPress={() => removeSelectedAttachment(attachment.id)}
+                  style={({ pressed }) => [
+                    styles.removeAttachmentButton,
+                    pressed && styles.rowPressed,
+                  ]}
+                >
+                  <Ionicons color={colors.textMuted} name="close-outline" size={16} />
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
       <View style={styles.composer}>
+        <Pressable
+          accessibilityLabel="Attach photo or video"
+          onPress={() => void handlePickMedia()}
+          style={({ pressed }) => [styles.attachButton, pressed && styles.rowPressed]}
+        >
+          <Ionicons color={colors.primary} name="image-outline" size={20} />
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Attach file"
+          onPress={() => void handlePickFile()}
+          style={({ pressed }) => [styles.attachButton, pressed && styles.rowPressed]}
+        >
+          <Ionicons color={colors.primary} name="document-attach-outline" size={20} />
+        </Pressable>
         <TextInput
           onChangeText={setDraft}
           placeholder={activeAdvertiserConversation ? 'Message advertiser' : 'Message customer care'}
@@ -251,10 +502,15 @@ export function ChatsScreen(_props: MainTabsScreenProps<'Chats'>) {
           value={draft}
         />
         <Pressable
-          onPress={handleSend}
-          style={({ pressed }) => [styles.sendButton, pressed && styles.rowPressed]}
+          disabled={isSending || (!draft.trim() && selectedAttachments.length === 0)}
+          onPress={() => void handleSend()}
+          style={({ pressed }) => [
+            styles.sendButton,
+            pressed && styles.rowPressed,
+            (isSending || (!draft.trim() && selectedAttachments.length === 0)) && styles.sendButtonDisabled,
+          ]}
         >
-          <Ionicons color={colors.white} name="send" size={18} />
+          <Ionicons color={colors.white} name={isSending ? 'hourglass-outline' : 'send'} size={18} />
         </Pressable>
       </View>
     </View>
@@ -396,6 +652,50 @@ function createStyles(colors: AppColors) {
     messageTextCare: {
       color: colors.text,
     },
+    messageAttachmentStack: {
+      gap: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    messageImageAttachment: {
+      overflow: 'hidden',
+      width: 178,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    messageAttachmentImage: {
+      height: 132,
+      width: '100%',
+    },
+    messageFileAttachment: {
+      maxWidth: 230,
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.sm,
+    },
+    attachmentCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    messageAttachmentName: {
+      ...typography.caption,
+      color: colors.text,
+      fontWeight: '800',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 5,
+    },
+    messageAttachmentMeta: {
+      ...typography.caption,
+      color: colors.textMuted,
+    },
     emptyCard: {
       gap: spacing.xs,
       borderRadius: radii.lg,
@@ -451,6 +751,53 @@ function createStyles(colors: AppColors) {
       alignItems: 'center',
       gap: spacing.sm,
     },
+    selectedAttachmentPanel: {
+      borderRadius: radii.lg,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.sm,
+    },
+    selectedAttachmentRow: {
+      gap: spacing.sm,
+    },
+    selectedAttachmentChip: {
+      maxWidth: 220,
+      minHeight: 38,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: radii.pill,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingLeft: spacing.sm,
+      paddingRight: 4,
+    },
+    selectedAttachmentText: {
+      ...typography.caption,
+      color: colors.text,
+      maxWidth: 140,
+      fontWeight: '700',
+    },
+    removeAttachmentButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 28,
+      width: 28,
+      borderRadius: 14,
+      backgroundColor: colors.surface,
+    },
+    attachButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 44,
+      width: 44,
+      borderRadius: 22,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
     composerInput: {
       flex: 1,
       minHeight: 48,
@@ -469,6 +816,13 @@ function createStyles(colors: AppColors) {
       width: 48,
       borderRadius: 24,
       backgroundColor: colors.primary,
+    },
+    sendButtonDisabled: {
+      opacity: 0.55,
+    },
+    errorText: {
+      ...typography.caption,
+      color: colors.danger,
     },
   });
 }

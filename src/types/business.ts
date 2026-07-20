@@ -10,6 +10,12 @@ export type PaymentPlanCycle = (typeof paymentPlanCycles)[number];
 export const businessSubscriptionStatuses = ['pending', 'paid', 'active'] as const;
 export type BusinessSubscriptionStatus = (typeof businessSubscriptionStatuses)[number];
 
+export const listingSources = ['sellerPortal', 'customerAccount', 'adminCatalog'] as const;
+export type ListingSource = (typeof listingSources)[number];
+
+export const listingAudiences = ['storeProduct', 'customerAdvert'] as const;
+export type ListingAudience = (typeof listingAudiences)[number];
+
 export type PaymentPlan = {
   cycle: PaymentPlanCycle;
   title: string;
@@ -19,13 +25,30 @@ export type PaymentPlan = {
 };
 
 export const productCategories = [
-  'Food',
-  'Drinks',
   'Electronics',
-  'Beauty',
+  'Phones & Tablets',
+  'Computers & Accessories',
   'Fashion',
+  'Beauty & Personal Care',
+  'Health & Pharmacy',
+  'Home & Furniture',
   'Home Essentials',
+  'Appliances',
+  'Food & Groceries',
+  'Food',
+  'Groceries',
+  'Drinks',
+  'Baby & Kids',
   'Infant',
+  'Vehicles',
+  'Property',
+  'Sports & Outdoors',
+  'Books & Stationery',
+  'Services',
+  'Jobs',
+  'Pets',
+  'Agriculture',
+  'Tools & Equipment',
 ] as const;
 
 export const professionCategories = [
@@ -37,7 +60,16 @@ export const professionCategories = [
   'Plumber',
 ] as const;
 
+export const listingConditions = [
+  'Brand new',
+  'Used - like new',
+  'Used - good',
+  'Used - fair',
+  'Refurbished',
+] as const;
+
 export type BusinessCategory = string;
+export type ListingCondition = (typeof listingConditions)[number];
 
 export const riverParkClusters = [
   'Cluster 1',
@@ -97,6 +129,8 @@ export type Business = {
   id: string;
   estateId: string;
   listingType: ListingType;
+  listingSource?: ListingSource;
+  listingAudience?: ListingAudience;
   status?: BusinessStatus;
   subscriptionCycle?: PaymentPlanCycle;
   subscriptionStatus?: BusinessSubscriptionStatus;
@@ -141,6 +175,7 @@ export type BusinessProfileFormValues = {
   shortDescription: string;
   longDescription: string;
   price: string;
+  condition: ListingCondition;
   stockQuantity: string;
   reorderLevel: string;
   phone: string;
@@ -176,14 +211,20 @@ export type CentralCatalogProductValues = {
 
 export type OwnerBusinessProfileValues = {
   ownerName: string;
+  bio: string;
+  profileImage: string;
   phone: string;
   whatsapp: string;
   email: string;
   website: string;
   instagram: string;
+  facebook: string;
+  x: string;
+  tiktok: string;
   address: string;
   openingTime?: string;
   closingTime?: string;
+  openDays?: string[];
   coverImage: string;
   galleryImages: string;
   galleryVideos: string;
@@ -261,6 +302,7 @@ export type SupportMessage = {
   contextType?: 'order' | 'listing' | 'general';
   contextId?: string;
   contextLabel?: string;
+  attachments?: ChatMessageAttachment[];
   createdAt: string;
 };
 
@@ -292,6 +334,8 @@ export type AppNotification = {
 export type CartItem = {
   businessId: string;
   quantity: number;
+  userId?: string;
+  updatedAt?: string;
 };
 
 export type CartEntry = {
@@ -308,13 +352,45 @@ export type ChatMessage = {
   senderName: string;
   senderType: 'resident' | 'owner';
   text: string;
+  attachments?: ChatMessageAttachment[];
   createdAt: string;
+};
+
+export type ChatAttachmentType = 'image' | 'video' | 'file';
+
+export type ChatMessageAttachment = {
+  id: string;
+  type: ChatAttachmentType;
+  url: string;
+  name: string;
+  mimeType?: string;
+  size?: number;
 };
 
 export type ChatConversation = {
   business: Business;
   messages: ChatMessage[];
   lastMessage: ChatMessage;
+};
+
+export type DeliveryLocationSource = 'manual' | 'search' | 'gps' | 'pin';
+
+export type DeliveryLocation = {
+  userId: string;
+  formattedAddress: string;
+  country: string;
+  stateOrRegion: string;
+  city: string;
+  areaOrDistrict: string;
+  streetName: string;
+  buildingInfo: string;
+  landmark: string;
+  latitude: number | null;
+  longitude: number | null;
+  additionalInstructions: string;
+  placeId?: string;
+  source: DeliveryLocationSource;
+  updatedAt: string;
 };
 
 export const orderStatuses = [
@@ -359,9 +435,12 @@ export type Order = {
   estateId: string;
   deliveryAddress: string;
   deliveryCluster: string;
+  deliveryContactPhone: string;
+  deliveryLocation?: DeliveryLocation;
   note?: string;
   items: OrderItem[];
   subtotal: number;
+  sellerPackingSupport: number;
   serviceFee: number;
   deliveryFee: number;
   totalAmount: number;
@@ -392,6 +471,8 @@ export type DispatchDeliveryJob = {
   sellerType: 'storeOwner' | 'individualSeller';
   pickupAddress: string;
   deliveryAddress: string;
+  deliveryContactPhone?: string | null;
+  deliveryLocation?: DeliveryLocation;
   itemSubtotal: number;
   deliveryFee: number;
   status: DispatchDeliveryJobStatus;
@@ -426,6 +507,8 @@ export type OrderProgressSettings = {
 export type CheckoutPayload = {
   deliveryAddress: string;
   deliveryCluster: string;
+  deliveryContactPhone: string;
+  deliveryLocation?: DeliveryLocation;
   note?: string;
   paymentMethod: PaymentMethod;
 };

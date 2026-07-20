@@ -1,4 +1,5 @@
 import {
+  listingConditions,
   productCategories,
   professionCategories,
   riverParkClusters,
@@ -6,6 +7,7 @@ import {
   type ListingType,
 } from '../types/business';
 import { supermarketListingTemplates } from '../data/supermarketListings';
+import { normalizeProductCategory } from './category';
 
 type ListingTemplate = {
   name: string;
@@ -17,6 +19,7 @@ type ListingTemplate = {
   reorderLevel?: number;
   services: string[];
   images: string[];
+  condition?: BusinessProfileFormValues['condition'];
 };
 
 const supermarketProductTemplates: ListingTemplate[] = supermarketListingTemplates.map((template) => ({
@@ -221,10 +224,40 @@ function uniqueSuffix() {
   return String(Date.now()).slice(-4);
 }
 
+const defaultSampleLocation = 'Lugbe, Abuja';
+
+const sampleLocations = [
+  defaultSampleLocation,
+  'Gwarinpa, Abuja',
+  'Wuse 2, Abuja',
+  'Jabi, Abuja',
+  'Lokogoma, Abuja',
+  'Life Camp, Abuja',
+];
+
 function pickTemplate(listingType: ListingType) {
   return listingType === 'product'
     ? pickRandom(supermarketProductTemplates, supermarketProductTemplates[0]!)
     : pickRandom(serviceTemplates, serviceTemplates[0]!);
+}
+
+function normalizeTemplateCategory(template: ListingTemplate, listingType: ListingType) {
+  if (listingType === 'profession') {
+    return professionCategories.includes(template.category as (typeof professionCategories)[number])
+      ? template.category
+      : professionCategories[0];
+  }
+
+  const normalized = normalizeProductCategory(
+    template.category,
+    template.name,
+    template.shortDescription,
+    template.longDescription,
+  );
+
+  return productCategories.includes(normalized as (typeof productCategories)[number])
+    ? normalized
+    : productCategories[0];
 }
 
 export function createRandomListingForm(
@@ -235,8 +268,7 @@ export function createRandomListingForm(
   const images = template.images;
   const coverImage = images[0] ?? current.coverImage;
   const galleryImages = images.slice(1).join(', ');
-  const categoryFallback =
-    listingType === 'product' ? productCategories[0] : professionCategories[0];
+  const categoryFallback = normalizeTemplateCategory(template, listingType);
 
   return {
     ...current,
@@ -244,15 +276,15 @@ export function createRandomListingForm(
     businessName:
       listingType === 'product' ? `${template.name} ${uniqueSuffix()}` : template.name,
     cluster: pickRandom(riverParkClusters, current.cluster),
-    category:
-      template.category ||
-      pickRandom(
-        listingType === 'product' ? productCategories : professionCategories,
-        categoryFallback,
-      ),
+    category: categoryFallback,
     shortDescription: template.shortDescription,
     longDescription: template.longDescription,
     price: listingType === 'product' ? String(template.price ?? 15000) : '',
+    condition:
+      listingType === 'product'
+        ? template.condition ?? pickRandom(listingConditions, listingConditions[0])
+        : current.condition,
+    address: pickRandom(sampleLocations, current.address || defaultSampleLocation),
     stockQuantity:
       listingType === 'product' ? String(template.stockQuantity ?? 12) : current.stockQuantity,
     reorderLevel:

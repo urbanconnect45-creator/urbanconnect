@@ -202,16 +202,16 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
                   return;
                 }
 
-                addToCart(item.id);
+                addToCart(item.id, user);
               }}
-              onDecreaseQuantity={() => updateCartQuantity(item.id, cartQuantity - 1)}
+              onDecreaseQuantity={() => updateCartQuantity(item.id, cartQuantity - 1, user)}
               onIncreaseQuantity={() => {
                 if (!user) {
                   navigation.navigate('AuthPrompt');
                   return;
                 }
 
-                addToCart(item.id);
+                addToCart(item.id, user);
               }}
               onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
               onProfilePress={() => {

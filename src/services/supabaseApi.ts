@@ -5,6 +5,12 @@ import type {
   AutomatedEmailLog,
   Business,
   BusinessMedia,
+  CartItem,
+  ChatMessage,
+  ChatMessageAttachment,
+  DeliveryLocation,
+  ListingAudience,
+  ListingSource,
   DispatchDeliveryJob,
   DispatchRiderProfile,
   DynamicDepositAccount,
@@ -118,6 +124,8 @@ type SupabaseBusinessRow = {
   id: string;
   estate_id: string;
   listing_type: 'product' | 'profession';
+  listing_source?: ListingSource | null;
+  listing_audience?: ListingAudience | null;
   status?: 'active' | 'archived' | null;
   subscription_cycle?: PaymentPlanCycle | null;
   subscription_status?: 'pending' | 'paid' | 'active' | null;
@@ -178,8 +186,22 @@ type SupabaseOrderRow = {
   estate_id: string;
   delivery_address: string;
   delivery_cluster: string;
+  delivery_contact_phone?: string | null;
+  delivery_country?: string | null;
+  delivery_state_region?: string | null;
+  delivery_city?: string | null;
+  delivery_area_district?: string | null;
+  delivery_street_name?: string | null;
+  delivery_building_info?: string | null;
+  delivery_landmark?: string | null;
+  delivery_latitude?: number | string | null;
+  delivery_longitude?: number | string | null;
+  delivery_place_id?: string | null;
+  delivery_location_source?: DeliveryLocation['source'] | null;
+  delivery_instructions?: string | null;
   note?: string | null;
   subtotal: number | string;
+  seller_packing_support?: number | string | null;
   service_fee: number | string;
   delivery_fee: number | string;
   total_amount: number | string;
@@ -199,14 +221,20 @@ type SupabaseOwnerProfileRow = {
   account_name: string;
   account_email: string;
   owner_name: string;
+  bio?: string | null;
+  profile_image?: string | null;
   phone: string;
   whatsapp?: string | null;
   email: string;
   website?: string | null;
   instagram?: string | null;
+  facebook?: string | null;
+  x?: string | null;
+  tiktok?: string | null;
   address: string;
   opening_time?: string | null;
   closing_time?: string | null;
+  open_days?: string[] | null;
   cover_image?: string | null;
   gallery_images?: string | null;
   gallery_videos?: string | null;
@@ -390,7 +418,45 @@ type SupabaseSupportMessageRow = {
   context_type?: SupportMessage['contextType'] | null;
   context_id?: string | null;
   context_label?: string | null;
+  attachments?: unknown;
   created_at: string;
+};
+
+type SupabaseChatMessageRow = {
+  id: string;
+  business_id: string;
+  sender_user_id?: string | null;
+  recipient_user_id?: string | null;
+  sender_name: string;
+  sender_type: ChatMessage['senderType'];
+  text: string;
+  attachments?: unknown;
+  created_at: string;
+};
+
+type SupabaseCustomerCartItemRow = {
+  user_id: string;
+  business_id: string;
+  quantity: number;
+  updated_at: string;
+};
+
+type SupabaseDeliveryLocationRow = {
+  user_id: string;
+  formatted_address: string;
+  country?: string | null;
+  state_region?: string | null;
+  city?: string | null;
+  area_district?: string | null;
+  street_name?: string | null;
+  building_info?: string | null;
+  landmark?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  additional_instructions?: string | null;
+  place_id?: string | null;
+  source?: DeliveryLocation['source'] | null;
+  updated_at: string;
 };
 
 export type MarketplaceSnapshot = {
@@ -402,6 +468,7 @@ export type MarketplaceSnapshot = {
   emailLogs: AutomatedEmailLog[];
   auditLogs: AuditLog[];
   notifications: AppNotification[];
+  chatThreads: Record<string, ChatMessage[]>;
   supportThreads: Record<string, SupportMessage[]>;
   subscriptionPayments: SubscriptionPayment[];
   withdrawalRequests: WithdrawalRequest[];
@@ -418,6 +485,19 @@ type SupabaseDeliveryJobRow = {
   seller_type: 'storeOwner' | 'individualSeller';
   pickup_address: string;
   delivery_address: string;
+  delivery_contact_phone?: string | null;
+  delivery_country?: string | null;
+  delivery_state_region?: string | null;
+  delivery_city?: string | null;
+  delivery_area_district?: string | null;
+  delivery_street_name?: string | null;
+  delivery_building_info?: string | null;
+  delivery_landmark?: string | null;
+  delivery_latitude?: number | string | null;
+  delivery_longitude?: number | string | null;
+  delivery_place_id?: string | null;
+  delivery_location_source?: DeliveryLocation['source'] | null;
+  delivery_instructions?: string | null;
   item_subtotal: number | string;
   delivery_fee: number | string;
   status: DispatchDeliveryJob['status'];
@@ -599,7 +679,9 @@ function isHostedMediaUri(uri: string) {
   return /^https?:\/\//i.test(uri);
 }
 
-function extensionFromMimeType(mimeType: string, kind: BusinessMedia['type']) {
+type StorageMediaKind = BusinessMedia['type'] | 'file';
+
+function extensionFromMimeType(mimeType: string, kind: StorageMediaKind) {
   if (/png/i.test(mimeType)) {
     return 'png';
   }
@@ -624,10 +706,26 @@ function extensionFromMimeType(mimeType: string, kind: BusinessMedia['type']) {
     return 'mp4';
   }
 
-  return kind === 'video' ? 'mp4' : 'jpg';
+  if (/pdf/i.test(mimeType)) {
+    return 'pdf';
+  }
+
+  if (/wordprocessingml|msword/i.test(mimeType)) {
+    return /wordprocessingml/i.test(mimeType) ? 'docx' : 'doc';
+  }
+
+  if (/spreadsheetml|excel/i.test(mimeType)) {
+    return /spreadsheetml/i.test(mimeType) ? 'xlsx' : 'xls';
+  }
+
+  if (/plain/i.test(mimeType)) {
+    return 'txt';
+  }
+
+  return kind === 'video' ? 'mp4' : kind === 'file' ? 'bin' : 'jpg';
 }
 
-function mimeTypeFromUri(uri: string, kind: BusinessMedia['type']) {
+function mimeTypeFromUri(uri: string, kind: StorageMediaKind) {
   const cleanUri = uri.split('?')[0]?.toLowerCase() ?? '';
 
   if (cleanUri.endsWith('.png')) {
@@ -654,7 +752,31 @@ function mimeTypeFromUri(uri: string, kind: BusinessMedia['type']) {
     return 'video/mp4';
   }
 
-  return 'image/jpeg';
+  if (cleanUri.endsWith('.pdf')) {
+    return 'application/pdf';
+  }
+
+  if (cleanUri.endsWith('.docx')) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+
+  if (cleanUri.endsWith('.doc')) {
+    return 'application/msword';
+  }
+
+  if (cleanUri.endsWith('.xlsx')) {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+
+  if (cleanUri.endsWith('.xls')) {
+    return 'application/vnd.ms-excel';
+  }
+
+  if (cleanUri.endsWith('.txt')) {
+    return 'text/plain';
+  }
+
+  return kind === 'file' ? 'application/octet-stream' : 'image/jpeg';
 }
 
 function sanitizeStorageSegment(value: string) {
@@ -669,7 +791,7 @@ function encodeStoragePath(path: string) {
 export async function uploadMediaUriToSupabaseStorage(
   uri: string,
   path: string,
-  kind: BusinessMedia['type'],
+  kind: StorageMediaKind,
 ) {
   const mediaResponse = await fetch(uri);
   const mediaBlob = await mediaResponse.blob();
@@ -704,6 +826,29 @@ export async function uploadMediaUriToSupabaseStorage(
   }
 
   return `${supabaseConfig.url}/storage/v1/object/public/${listingMediaBucket}/${encodedPath}`;
+}
+
+export async function uploadChatAttachmentToSupabaseStorage(
+  attachment: ChatMessageAttachment,
+  messageId: string,
+  ownerKey: string,
+) {
+  if (!isSupabaseConfigured || !attachment.url || isHostedMediaUri(attachment.url)) {
+    return attachment;
+  }
+
+  const path = [
+    'chat-attachments',
+    sanitizeStorageSegment(ownerKey),
+    sanitizeStorageSegment(messageId),
+    sanitizeStorageSegment(attachment.name || attachment.id),
+  ].join('/');
+  const publicUrl = await uploadMediaUriToSupabaseStorage(attachment.url, path, attachment.type);
+
+  return {
+    ...attachment,
+    url: publicUrl,
+  };
 }
 
 export async function uploadBusinessMediaToSupabase(business: Business) {
@@ -1717,6 +1862,8 @@ function businessRowToBusiness(row: SupabaseBusinessRow): Business {
     id: row.id,
     estateId: row.estate_id,
     listingType: row.listing_type,
+    ...(row.listing_source ? { listingSource: row.listing_source } : {}),
+    ...(row.listing_audience ? { listingAudience: row.listing_audience } : {}),
     status: row.status ?? 'active',
     ...(row.subscription_cycle ? { subscriptionCycle: row.subscription_cycle } : {}),
     ...(row.subscription_status ? { subscriptionStatus: row.subscription_status } : {}),
@@ -1760,7 +1907,9 @@ function orderRowToOrder(row: SupabaseOrderRow): Order {
   const note = optionalString(row.note);
   const expectedDeliveryAt = optionalString(row.expected_delivery_at);
   const userEmail = optionalString(row.user_email);
+  const deliveryContactPhone = optionalString(row.delivery_contact_phone);
   const itemsByBusinessId = new Map<string, OrderItem>();
+  const deliveryLocation = orderRowDeliveryLocation(row);
 
   (row.order_items ?? []).forEach((item) => {
     const ownerUserId = optionalString(item.owner_user_id);
@@ -1822,9 +1971,12 @@ function orderRowToOrder(row: SupabaseOrderRow): Order {
     estateId: row.estate_id,
     deliveryAddress: row.delivery_address,
     deliveryCluster: row.delivery_cluster,
+    deliveryContactPhone: deliveryContactPhone || '',
+    ...(deliveryLocation ? { deliveryLocation } : {}),
     ...(note ? { note } : {}),
     items,
     subtotal: toNumber(row.subtotal),
+    sellerPackingSupport: toNumber(row.seller_packing_support),
     serviceFee: toNumber(row.service_fee),
     deliveryFee: toNumber(row.delivery_fee),
     totalAmount: toNumber(row.total_amount),
@@ -1841,7 +1993,12 @@ function orderRowToOrder(row: SupabaseOrderRow): Order {
 function ownerProfileRowToProfile(row: SupabaseOwnerProfileRow): OwnerBusinessProfile {
   const whatsapp = optionalString(row.whatsapp);
   const website = optionalString(row.website);
+  const bio = optionalString(row.bio);
+  const profileImage = optionalString(row.profile_image);
   const instagram = optionalString(row.instagram);
+  const facebook = optionalString(row.facebook);
+  const x = optionalString(row.x);
+  const tiktok = optionalString(row.tiktok);
   const coverImage = optionalString(row.cover_image);
   const galleryImages = optionalString(row.gallery_images);
   const galleryVideos = optionalString(row.gallery_videos);
@@ -1861,14 +2018,20 @@ function ownerProfileRowToProfile(row: SupabaseOwnerProfileRow): OwnerBusinessPr
     accountName: row.account_name,
     accountEmail: row.account_email,
     ownerName: row.owner_name,
+    bio: bio ?? '',
+    profileImage: profileImage ?? '',
     phone: row.phone,
     whatsapp: whatsapp ?? '',
     email: row.email,
     website: website ?? '',
     instagram: instagram ?? '',
+    facebook: facebook ?? '',
+    x: x ?? '',
+    tiktok: tiktok ?? '',
     address: row.address,
     ...(openingTime ? { openingTime } : {}),
     ...(closingTime ? { closingTime } : {}),
+    openDays: Array.isArray(row.open_days) ? row.open_days.filter(Boolean) : [],
     coverImage: coverImage ?? '',
     galleryImages: galleryImages ?? '',
     galleryVideos: galleryVideos ?? '',
@@ -2469,10 +2632,119 @@ export async function saveSupportMessageToSupabase(message: SupportMessage) {
       context_type: message.contextType ?? null,
       context_id: message.contextId ?? null,
       context_label: message.contextLabel ?? null,
+      attachments: message.attachments ?? [],
       created_at: message.createdAt,
     },
     headers: {
       Prefer: 'return=minimal',
+    },
+  });
+}
+
+export async function saveChatMessageToSupabase(message: ChatMessage) {
+  return supabaseRequest('/rest/v1/listing_messages?on_conflict=id', {
+    method: 'POST',
+    body: {
+      id: message.id,
+      business_id: message.businessId,
+      sender_user_id: message.senderUserId ?? null,
+      recipient_user_id: message.recipientUserId ?? null,
+      sender_name: message.senderName,
+      sender_type: message.senderType,
+      text: message.text,
+      attachments: message.attachments ?? [],
+      created_at: message.createdAt,
+    },
+    headers: {
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+  });
+}
+
+export async function fetchCustomerCartFromSupabase(userId: string): Promise<CartItem[]> {
+  const rows = await supabaseRequest<SupabaseCustomerCartItemRow[]>(
+    `/rest/v1/customer_cart_items?select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc`,
+  );
+
+  return rows.map((row) => ({
+    userId: row.user_id,
+    businessId: row.business_id,
+    quantity: row.quantity,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function saveCartItemToSupabase(userId: string, item: CartItem) {
+  return supabaseRequest('/rest/v1/customer_cart_items?on_conflict=user_id,business_id', {
+    method: 'POST',
+    body: {
+      user_id: userId,
+      business_id: item.businessId,
+      quantity: item.quantity,
+      updated_at: item.updatedAt ?? new Date().toISOString(),
+    },
+    headers: {
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+  });
+}
+
+export async function deleteCartItemFromSupabase(userId: string, businessId: string) {
+  return supabaseRequest(
+    `/rest/v1/customer_cart_items?user_id=eq.${encodeURIComponent(userId)}&business_id=eq.${encodeURIComponent(businessId)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Prefer: 'return=minimal',
+      },
+    },
+  );
+}
+
+export async function clearCustomerCartInSupabase(userId: string) {
+  return supabaseRequest(
+    `/rest/v1/customer_cart_items?user_id=eq.${encodeURIComponent(userId)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Prefer: 'return=minimal',
+      },
+    },
+  );
+}
+
+export async function fetchCustomerDeliveryLocationFromSupabase(
+  userId: string,
+): Promise<DeliveryLocation | undefined> {
+  const rows = await supabaseRequest<SupabaseDeliveryLocationRow[]>(
+    `/rest/v1/customer_delivery_locations?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+  );
+
+  return rows[0] ? deliveryLocationRowToLocation(rows[0]) : undefined;
+}
+
+export async function saveCustomerDeliveryLocationToSupabase(location: DeliveryLocation) {
+  return supabaseRequest('/rest/v1/customer_delivery_locations?on_conflict=user_id', {
+    method: 'POST',
+    body: {
+      user_id: location.userId,
+      formatted_address: location.formattedAddress,
+      country: location.country || null,
+      state_region: location.stateOrRegion || null,
+      city: location.city || null,
+      area_district: location.areaOrDistrict || null,
+      street_name: location.streetName || null,
+      building_info: location.buildingInfo || null,
+      landmark: location.landmark || null,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      additional_instructions: location.additionalInstructions || null,
+      place_id: location.placeId ?? null,
+      source: location.source,
+      updated_at: location.updatedAt,
+    },
+    headers: {
+      Prefer: 'resolution=merge-duplicates,return=minimal',
     },
   });
 }
@@ -2564,6 +2836,7 @@ export async function verifyTermiiPhoneOtp(pinId: string, pin: string) {
 }
 
 export async function saveOrderToSupabase(order: Order) {
+  const deliveryLocation = order.deliveryLocation;
   const body = {
     id: order.id,
     user_id: order.userId,
@@ -2572,8 +2845,22 @@ export async function saveOrderToSupabase(order: Order) {
     estate_id: order.estateId,
     delivery_address: order.deliveryAddress,
     delivery_cluster: order.deliveryCluster,
+    delivery_contact_phone: order.deliveryContactPhone || null,
+    delivery_country: deliveryLocation?.country || null,
+    delivery_state_region: deliveryLocation?.stateOrRegion || null,
+    delivery_city: deliveryLocation?.city || null,
+    delivery_area_district: deliveryLocation?.areaOrDistrict || null,
+    delivery_street_name: deliveryLocation?.streetName || null,
+    delivery_building_info: deliveryLocation?.buildingInfo || null,
+    delivery_landmark: deliveryLocation?.landmark || null,
+    delivery_latitude: deliveryLocation?.latitude ?? null,
+    delivery_longitude: deliveryLocation?.longitude ?? null,
+    delivery_place_id: deliveryLocation?.placeId ?? null,
+    delivery_location_source: deliveryLocation?.source ?? null,
+    delivery_instructions: deliveryLocation?.additionalInstructions || null,
     note: order.note ?? null,
     subtotal: order.subtotal,
+    seller_packing_support: order.sellerPackingSupport,
     service_fee: order.serviceFee,
     delivery_fee: order.deliveryFee,
     total_amount: order.totalAmount,
@@ -2584,7 +2871,7 @@ export async function saveOrderToSupabase(order: Order) {
     created_at: order.createdAt,
     updated_at: order.updatedAt,
   };
-  const upsertOrder = (payload: typeof body) =>
+  const upsertOrder = (payload: Record<string, unknown>) =>
     supabaseRequest('/rest/v1/orders?on_conflict=id', {
       method: 'POST',
       body: payload,
@@ -2597,6 +2884,29 @@ export async function saveOrderToSupabase(order: Order) {
     await upsertOrder(body);
   } catch (error) {
     if (
+      error instanceof SupabaseApiError &&
+      /seller_packing_support|delivery_contact_phone|delivery_country|delivery_state_region|delivery_city|delivery_area_district|delivery_street_name|delivery_building_info|delivery_landmark|delivery_latitude|delivery_longitude|delivery_place_id|delivery_location_source|delivery_instructions|schema cache|column/i.test(error.message)
+    ) {
+      const {
+        seller_packing_support: _sellerPackingSupport,
+        delivery_contact_phone: _deliveryContactPhone,
+        delivery_country: _deliveryCountry,
+        delivery_state_region: _deliveryStateRegion,
+        delivery_city: _deliveryCity,
+        delivery_area_district: _deliveryAreaDistrict,
+        delivery_street_name: _deliveryStreetName,
+        delivery_building_info: _deliveryBuildingInfo,
+        delivery_landmark: _deliveryLandmark,
+        delivery_latitude: _deliveryLatitude,
+        delivery_longitude: _deliveryLongitude,
+        delivery_place_id: _deliveryPlaceId,
+        delivery_location_source: _deliveryLocationSource,
+        delivery_instructions: _deliveryInstructions,
+        ...fallbackBody
+      } = body;
+
+      await upsertOrder(fallbackBody);
+    } else if (
       error instanceof SupabaseApiError &&
       /payment_method|orders_payment_method_check|check constraint/i.test(error.message)
     ) {
@@ -2700,43 +3010,74 @@ export async function deleteOrderFromSupabase(orderId: string) {
 }
 
 export async function saveOwnerBusinessProfileToSupabase(profile: OwnerBusinessProfile) {
-  return supabaseRequest('/rest/v1/owner_business_profiles?on_conflict=id', {
-    method: 'POST',
-    body: {
-      id: profile.id,
-      owner_user_id: profile.ownerUserId,
-      account_name: profile.accountName,
-      account_email: profile.accountEmail,
-      owner_name: profile.ownerName,
-      phone: profile.phone,
-      whatsapp: profile.whatsapp || null,
-      email: profile.email,
-      website: profile.website || null,
-      instagram: profile.instagram || null,
-      address: profile.address,
-      opening_time: profile.openingTime || null,
-      closing_time: profile.closingTime || null,
-      cover_image: profile.coverImage || null,
-      gallery_images: profile.galleryImages || null,
-      gallery_videos: profile.galleryVideos || null,
-      subscription_cycle: profile.subscriptionCycle ?? null,
-      subscription_status: profile.subscriptionStatus ?? null,
-      verified_amount: profile.verifiedAmount ?? null,
-      subscription_paid_at: profile.subscriptionPaidAt ?? null,
-      subscription_next_billing_at: profile.subscriptionNextBillingAt ?? null,
-      subscription_item_count: profile.subscriptionItemCount ?? null,
-      river_park_verified: profile.riverParkVerified ?? false,
-      payout_bank_code: profile.payoutBankCode ?? null,
-      payout_bank_name: profile.payoutBankName ?? null,
-      payout_account_number: profile.payoutAccountNumber ?? null,
-      payout_account_name: profile.payoutAccountName ?? null,
-      payout_verified_at: profile.payoutVerifiedAt ?? null,
-      updated_at: profile.updatedAt,
-    },
-    headers: {
-      Prefer: 'resolution=merge-duplicates,return=minimal',
-    },
-  });
+  const body = {
+    id: profile.id,
+    owner_user_id: profile.ownerUserId,
+    account_name: profile.accountName,
+    account_email: profile.accountEmail,
+    owner_name: profile.ownerName,
+    bio: profile.bio || null,
+    profile_image: profile.profileImage || null,
+    phone: profile.phone,
+    whatsapp: profile.whatsapp || null,
+    email: profile.email,
+    website: profile.website || null,
+    instagram: profile.instagram || null,
+    facebook: profile.facebook || null,
+    x: profile.x || null,
+    tiktok: profile.tiktok || null,
+    address: profile.address,
+    opening_time: profile.openingTime || null,
+    closing_time: profile.closingTime || null,
+    open_days: profile.openDays ?? [],
+    cover_image: profile.coverImage || null,
+    gallery_images: profile.galleryImages || null,
+    gallery_videos: profile.galleryVideos || null,
+    subscription_cycle: profile.subscriptionCycle ?? null,
+    subscription_status: profile.subscriptionStatus ?? null,
+    verified_amount: profile.verifiedAmount ?? null,
+    subscription_paid_at: profile.subscriptionPaidAt ?? null,
+    subscription_next_billing_at: profile.subscriptionNextBillingAt ?? null,
+    subscription_item_count: profile.subscriptionItemCount ?? null,
+    river_park_verified: profile.riverParkVerified ?? false,
+    payout_bank_code: profile.payoutBankCode ?? null,
+    payout_bank_name: profile.payoutBankName ?? null,
+    payout_account_number: profile.payoutAccountNumber ?? null,
+    payout_account_name: profile.payoutAccountName ?? null,
+    payout_verified_at: profile.payoutVerifiedAt ?? null,
+    updated_at: profile.updatedAt,
+  };
+  const upsertOwnerProfile = (payload: Record<string, unknown>) =>
+    supabaseRequest('/rest/v1/owner_business_profiles?on_conflict=id', {
+      method: 'POST',
+      body: payload,
+      headers: {
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+    });
+
+  try {
+    return await upsertOwnerProfile(body);
+  } catch (error) {
+    if (
+      error instanceof SupabaseApiError &&
+      /bio|profile_image|open_days|facebook|tiktok|\bx\b|schema cache|column/i.test(error.message)
+    ) {
+      const {
+        bio: _bio,
+        profile_image: _profileImage,
+        open_days: _openDays,
+        facebook: _facebook,
+        x: _x,
+        tiktok: _tiktok,
+        ...fallbackBody
+      } = body;
+
+      return upsertOwnerProfile(fallbackBody);
+    }
+
+    throw error;
+  }
 }
 
 export async function deleteSupportConversationFromSupabase(conversationId: string) {
@@ -2769,6 +3110,8 @@ export async function saveBusinessToSupabase(business: Business) {
     id: business.id,
     estate_id: business.estateId,
     listing_type: business.listingType,
+    listing_source: business.listingSource ?? null,
+    listing_audience: business.listingAudience ?? null,
     status: business.status ?? 'active',
     subscription_cycle: business.subscriptionCycle ?? null,
     subscription_status: business.subscriptionStatus ?? null,
@@ -2813,9 +3156,14 @@ export async function saveBusinessToSupabase(business: Business) {
   } catch (error) {
     if (
       error instanceof SupabaseApiError &&
-      /river_park_verified|schema cache|column/i.test(error.message)
+      /river_park_verified|listing_source|listing_audience|schema cache|column/i.test(error.message)
     ) {
-      const { river_park_verified: _riverParkVerified, ...fallbackBody } = body;
+      const {
+        listing_source: _listingSource,
+        listing_audience: _listingAudience,
+        river_park_verified: _riverParkVerified,
+        ...fallbackBody
+      } = body;
 
       return supabaseRequest('/rest/v1/businesses?on_conflict=id', {
         method: 'POST',
@@ -2968,6 +3316,9 @@ function supportRowToMessage(row: SupabaseSupportMessageRow): SupportMessage {
   const contextType = row.context_type ?? undefined;
   const contextId = optionalString(row.context_id);
   const contextLabel = optionalString(row.context_label);
+  const attachments = Array.isArray(row.attachments)
+    ? row.attachments.filter(isChatMessageAttachment)
+    : [];
 
   return {
     id: row.id,
@@ -2981,11 +3332,166 @@ function supportRowToMessage(row: SupabaseSupportMessageRow): SupportMessage {
     ...(contextType ? { contextType } : {}),
     ...(contextId ? { contextId } : {}),
     ...(contextLabel ? { contextLabel } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
     createdAt: row.created_at,
   };
 }
 
+function chatRowToMessage(row: SupabaseChatMessageRow): ChatMessage {
+  const senderUserId = optionalString(row.sender_user_id);
+  const recipientUserId = optionalString(row.recipient_user_id);
+  const attachments = Array.isArray(row.attachments)
+    ? row.attachments.filter(isChatMessageAttachment)
+    : [];
+
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    ...(senderUserId ? { senderUserId } : {}),
+    ...(recipientUserId ? { recipientUserId } : {}),
+    senderName: row.sender_name,
+    senderType: row.sender_type,
+    text: row.text,
+    ...(attachments.length > 0 ? { attachments } : {}),
+    createdAt: row.created_at,
+  };
+}
+
+function isChatMessageAttachment(value: unknown): value is ChatMessageAttachment {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const attachment = value as Partial<ChatMessageAttachment>;
+  return (
+    typeof attachment.id === 'string' &&
+    typeof attachment.url === 'string' &&
+    typeof attachment.name === 'string' &&
+    (attachment.type === 'image' || attachment.type === 'video' || attachment.type === 'file')
+  );
+}
+
+function groupChatMessages(messages: ChatMessage[]) {
+  return messages.reduce<Record<string, ChatMessage[]>>((accumulator, message) => {
+    accumulator[message.businessId] = [
+      ...(accumulator[message.businessId] ?? []),
+      message,
+    ];
+    return accumulator;
+  }, {});
+}
+
+function deliveryLocationRowToLocation(row: SupabaseDeliveryLocationRow): DeliveryLocation {
+  const placeId = optionalString(row.place_id);
+
+  return {
+    userId: row.user_id,
+    formattedAddress: row.formatted_address,
+    country: optionalString(row.country) ?? '',
+    stateOrRegion: optionalString(row.state_region) ?? '',
+    city: optionalString(row.city) ?? '',
+    areaOrDistrict: optionalString(row.area_district) ?? '',
+    streetName: optionalString(row.street_name) ?? '',
+    buildingInfo: optionalString(row.building_info) ?? '',
+    landmark: optionalString(row.landmark) ?? '',
+    latitude:
+      row.latitude !== undefined && row.latitude !== null ? Number(row.latitude) : null,
+    longitude:
+      row.longitude !== undefined && row.longitude !== null ? Number(row.longitude) : null,
+    additionalInstructions: optionalString(row.additional_instructions) ?? '',
+    ...(placeId ? { placeId } : {}),
+    source: row.source ?? 'manual',
+    updatedAt: row.updated_at,
+  };
+}
+
+function orderRowDeliveryLocation(row: SupabaseOrderRow): DeliveryLocation | undefined {
+  const hasLocation =
+    row.delivery_country ||
+    row.delivery_state_region ||
+    row.delivery_city ||
+    row.delivery_area_district ||
+    row.delivery_street_name ||
+    row.delivery_building_info ||
+    row.delivery_landmark ||
+    row.delivery_latitude !== undefined ||
+    row.delivery_longitude !== undefined ||
+    row.delivery_instructions;
+
+  if (!hasLocation) {
+    return undefined;
+  }
+
+  return {
+    userId: row.user_id,
+    formattedAddress: row.delivery_address,
+    country: optionalString(row.delivery_country) ?? '',
+    stateOrRegion: optionalString(row.delivery_state_region) ?? '',
+    city: optionalString(row.delivery_city) ?? '',
+    areaOrDistrict: optionalString(row.delivery_area_district) ?? '',
+    streetName: optionalString(row.delivery_street_name) ?? '',
+    buildingInfo: optionalString(row.delivery_building_info) ?? '',
+    landmark: optionalString(row.delivery_landmark) ?? '',
+    latitude:
+      row.delivery_latitude !== undefined && row.delivery_latitude !== null
+        ? Number(row.delivery_latitude)
+        : null,
+    longitude:
+      row.delivery_longitude !== undefined && row.delivery_longitude !== null
+        ? Number(row.delivery_longitude)
+        : null,
+    additionalInstructions: optionalString(row.delivery_instructions) ?? '',
+    ...(row.delivery_place_id ? { placeId: row.delivery_place_id } : {}),
+    source: row.delivery_location_source ?? 'manual',
+    updatedAt: row.updated_at,
+  };
+}
+
+function deliveryJobRowLocation(row: SupabaseDeliveryJobRow): DeliveryLocation | undefined {
+  const hasLocation =
+    row.delivery_country ||
+    row.delivery_state_region ||
+    row.delivery_city ||
+    row.delivery_area_district ||
+    row.delivery_street_name ||
+    row.delivery_building_info ||
+    row.delivery_landmark ||
+    row.delivery_latitude !== undefined ||
+    row.delivery_longitude !== undefined ||
+    row.delivery_instructions;
+
+  if (!hasLocation) {
+    return undefined;
+  }
+
+  return {
+    userId: '',
+    formattedAddress: row.delivery_address,
+    country: optionalString(row.delivery_country) ?? '',
+    stateOrRegion: optionalString(row.delivery_state_region) ?? '',
+    city: optionalString(row.delivery_city) ?? '',
+    areaOrDistrict: optionalString(row.delivery_area_district) ?? '',
+    streetName: optionalString(row.delivery_street_name) ?? '',
+    buildingInfo: optionalString(row.delivery_building_info) ?? '',
+    landmark: optionalString(row.delivery_landmark) ?? '',
+    latitude:
+      row.delivery_latitude !== undefined && row.delivery_latitude !== null
+        ? Number(row.delivery_latitude)
+        : null,
+    longitude:
+      row.delivery_longitude !== undefined && row.delivery_longitude !== null
+        ? Number(row.delivery_longitude)
+        : null,
+    additionalInstructions: optionalString(row.delivery_instructions) ?? '',
+    ...(row.delivery_place_id ? { placeId: row.delivery_place_id } : {}),
+    source: row.delivery_location_source ?? 'manual',
+    updatedAt: row.updated_at,
+  };
+}
+
 function deliveryJobRowToJob(row: SupabaseDeliveryJobRow): DispatchDeliveryJob {
+  const deliveryLocation = deliveryJobRowLocation(row);
+
   return {
     id: row.id,
     orderId: row.order_id,
@@ -2995,6 +3501,8 @@ function deliveryJobRowToJob(row: SupabaseDeliveryJobRow): DispatchDeliveryJob {
     sellerType: row.seller_type,
     pickupAddress: row.pickup_address,
     deliveryAddress: row.delivery_address,
+    ...(row.delivery_contact_phone ? { deliveryContactPhone: row.delivery_contact_phone } : {}),
+    ...(deliveryLocation ? { deliveryLocation } : {}),
     itemSubtotal: Number(row.item_subtotal),
     deliveryFee: Number(row.delivery_fee),
     status: row.status,
@@ -3044,6 +3552,7 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     emailRows,
     auditRows,
     notificationRows,
+    chatRows,
     supportRows,
     subscriptionPaymentRows,
     withdrawalRows,
@@ -3064,6 +3573,9 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     supabaseRequest<SupabaseNotificationRow[]>(
       '/rest/v1/notifications?select=*&order=created_at.desc',
     ),
+    supabaseRequest<SupabaseChatMessageRow[]>(
+      '/rest/v1/listing_messages?select=*&order=created_at.asc',
+    ).catch(() => [] as SupabaseChatMessageRow[]),
     supabaseRequest<SupabaseSupportMessageRow[]>(
       '/rest/v1/support_messages?select=*&order=created_at.asc',
     ),
@@ -3096,6 +3608,7 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     emailLogs: emailRows.map(emailRowToLog),
     auditLogs: auditRows.map(auditRowToLog),
     notifications: notificationRows.map(notificationRowToNotification),
+    chatThreads: groupChatMessages(chatRows.map(chatRowToMessage)),
     supportThreads: groupSupportMessages(supportRows.map(supportRowToMessage)),
     subscriptionPayments: subscriptionPaymentRows.map(subscriptionPaymentRowToPayment),
     withdrawalRequests: withdrawalRows.map(withdrawalRowToWithdrawal),

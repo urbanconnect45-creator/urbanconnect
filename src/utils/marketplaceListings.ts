@@ -1,8 +1,18 @@
-import type { Business, OwnerBusinessProfile } from '../types/business';
+import type { Business, BusinessContact, OwnerBusinessProfile } from '../types/business';
 import { isPublicBusiness } from './businessState';
 
 function normalizeKey(value?: string | null) {
   return value?.trim().toLowerCase() ?? '';
+}
+
+function hasCustomerAdvertMarkers(business: Business) {
+  return (
+    business.listingAudience === 'customerAdvert' ||
+    business.listingSource === 'customerAccount' ||
+    business.tags.includes('Customer advertisement') ||
+    business.tags.includes('Customer account advert') ||
+    business.tags.includes('Advertiser')
+  );
 }
 
 export function profileMatchesBusiness(profile: OwnerBusinessProfile, business: Business) {
@@ -25,6 +35,25 @@ export function isStoreOwnerListing(
   business: Business,
   ownerProfiles: OwnerBusinessProfile[],
 ) {
+  return isStoreOwnerListingSource(business, ownerProfiles);
+}
+
+export function isStoreOwnerListingSource(
+  business: Business,
+  ownerProfiles: OwnerBusinessProfile[],
+) {
+  if (hasCustomerAdvertMarkers(business)) {
+    return false;
+  }
+
+  if (business.listingSource === 'sellerPortal' || business.listingSource === 'adminCatalog') {
+    return true;
+  }
+
+  if (business.listingAudience === 'storeProduct') {
+    return true;
+  }
+
   return (
     ownerProfiles.some((profile) => profileMatchesBusiness(profile, business)) ||
     business.tags.includes('Store owner') ||
@@ -47,7 +76,40 @@ export function isCustomerAdvertisement(
   business: Business,
   ownerProfiles: OwnerBusinessProfile[],
 ) {
-  return isPublicBusiness(business) && !isStoreOwnerListing(business, ownerProfiles);
+  return isPublicBusiness(business) && isCustomerAdvertisementSource(business, ownerProfiles);
+}
+
+export function isCustomerAdvertisementSource(
+  business: Business,
+  ownerProfiles: OwnerBusinessProfile[],
+) {
+  if (hasCustomerAdvertMarkers(business)) {
+    return true;
+  }
+
+  return !isStoreOwnerListingSource(business, ownerProfiles);
+}
+
+export function getProfileContactForBusiness(
+  business: Business,
+  ownerProfiles: OwnerBusinessProfile[],
+): BusinessContact {
+  const profile = ownerProfiles.find((item) => profileMatchesBusiness(item, business));
+
+  if (!profile) {
+    return business.contact;
+  }
+
+  return {
+    phone: profile.phone || business.contact.phone,
+    email: profile.email || business.contact.email,
+    ...(profile.whatsapp ? { whatsapp: profile.whatsapp } : {}),
+    ...(profile.website ? { website: profile.website } : {}),
+    ...(profile.instagram ? { instagram: profile.instagram } : {}),
+    ...(profile.facebook ? { facebook: profile.facebook } : {}),
+    ...(profile.x ? { x: profile.x } : {}),
+    ...(profile.tiktok ? { tiktok: profile.tiktok } : {}),
+  };
 }
 
 export function getAdvertiserProfileListings(

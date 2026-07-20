@@ -17,19 +17,25 @@ import { formatCurrency } from '../utils/format';
 
 type AdvertisementCardProps = {
   advertisement: Business;
+  advertiserProfileImage?: string | undefined;
   onContactPress?: () => void;
   onMessagePress?: () => void;
   onPress?: () => void;
   onProfilePress?: () => void;
+  ownListing?: boolean;
+  premium?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
 export function AdvertisementCard({
   advertisement,
+  advertiserProfileImage,
   onContactPress,
   onMessagePress,
   onPress,
   onProfilePress,
+  ownListing = false,
+  premium = false,
   style,
 }: AdvertisementCardProps) {
   const { colors } = useAppTheme();
@@ -52,6 +58,18 @@ export function AdvertisementCard({
           <View style={[styles.badge, styles.adBadge]}>
             <Text style={styles.adBadgeText}>Advertisement</Text>
           </View>
+          {ownListing ? (
+            <View style={[styles.badge, styles.ownBadge]}>
+              <Ionicons color={colors.primary} name="person-circle-outline" size={13} />
+              <Text style={styles.ownBadgeText}>Your ad</Text>
+            </View>
+          ) : null}
+          {premium ? (
+            <View style={[styles.badge, styles.premiumBadge]}>
+              <Ionicons color="#7A4A00" name="ribbon-outline" size={13} />
+              <Text style={styles.premiumBadgeText}>Premium</Text>
+            </View>
+          ) : null}
         </View>
 
         <Text numberOfLines={2} style={styles.title}>
@@ -71,7 +89,17 @@ export function AdvertisementCard({
           }}
           style={({ pressed }) => [styles.metaRow, pressed && styles.metaRowPressed]}
         >
-          <Ionicons color={colors.textMuted} name="person-circle-outline" size={17} />
+          {advertiserProfileImage ? (
+            <Image
+              resizeMode="cover"
+              source={{ uri: advertiserProfileImage }}
+              style={styles.profileAvatar}
+            />
+          ) : (
+            <View style={styles.profileAvatarFallback}>
+              <Ionicons color={colors.textMuted} name="person-outline" size={15} />
+            </View>
+          )}
           <Text numberOfLines={1} style={styles.metaText}>
             {advertisement.ownerName}
           </Text>
@@ -86,14 +114,26 @@ export function AdvertisementCard({
 
       <View style={styles.footer}>
         <Pressable
+          disabled={ownListing}
           onPress={(event) => {
             event.stopPropagation();
+            if (ownListing) {
+              return;
+            }
             onMessagePress?.();
           }}
-          style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed]}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            ownListing && styles.primaryButtonDisabled,
+            pressed && !ownListing && styles.buttonPressed,
+          ]}
         >
-          <Ionicons color={colors.white} name="chatbubble-ellipses-outline" size={16} />
-          <Text style={styles.primaryText}>Message</Text>
+          <Ionicons
+            color={colors.white}
+            name={ownListing ? 'lock-closed-outline' : 'chatbubble-ellipses-outline'}
+            size={16}
+          />
+          <Text style={styles.primaryText}>{ownListing ? 'Your ad' : 'Message'}</Text>
         </Pressable>
         <Pressable
           onPress={(event) => {
@@ -149,6 +189,18 @@ function createStyles(colors: AppColors) {
     adBadge: {
       backgroundColor: colors.accentSoft,
     },
+    premiumBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: '#FFE7A3',
+    },
+    ownBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.surfaceMuted,
+    },
     badgeText: {
       ...typography.caption,
       color: colors.primary,
@@ -158,6 +210,16 @@ function createStyles(colors: AppColors) {
       ...typography.caption,
       color: colors.accent,
       fontWeight: '800',
+    },
+    premiumBadgeText: {
+      ...typography.caption,
+      color: '#7A4A00',
+      fontWeight: '900',
+    },
+    ownBadgeText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '900',
     },
     title: {
       ...typography.bodyStrong,
@@ -177,6 +239,22 @@ function createStyles(colors: AppColors) {
       alignItems: 'center',
       gap: spacing.xs,
       minWidth: 0,
+    },
+    profileAvatar: {
+      height: 24,
+      width: 24,
+      borderRadius: 12,
+      backgroundColor: colors.card,
+    },
+    profileAvatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 24,
+      width: 24,
+      borderRadius: 12,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     metaRowPressed: {
       opacity: 0.85,
@@ -203,6 +281,9 @@ function createStyles(colors: AppColors) {
       borderRadius: 8,
       backgroundColor: colors.primary,
       paddingHorizontal: spacing.sm,
+    },
+    primaryButtonDisabled: {
+      backgroundColor: colors.textMuted,
     },
     secondaryButton: {
       flex: 1,

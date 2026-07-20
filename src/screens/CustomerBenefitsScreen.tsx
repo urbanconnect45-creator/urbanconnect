@@ -10,37 +10,52 @@ import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { PaymentPlanCycle, SubscriptionPayment } from '../types/business';
+import {
+  parseCustomerSubscriptionPayload,
+  type CustomerSubscriptionPayload,
+} from '../utils/customerBenefits';
 import { formatCurrency, formatDateTime } from '../utils/format';
 
-type CustomerSubscriptionPayload = {
-  amountBeforeDiscount?: number;
-  discountAmount?: number;
-  durationLabel?: string;
-  durationMonths?: number;
-  nextBillingAt?: string;
-  planTitle?: string;
-  subscriptionType?: string;
-};
-
 const benefitDurationOptions = [
-  { months: 1, discountRate: 0 },
-  { months: 3, discountRate: 0.05 },
-  { months: 6, discountRate: 0.1 },
-  { months: 12, discountRate: 0.15 },
+  {
+    id: 'testing-30m',
+    label: '30-Minute Testing',
+    minutes: 30,
+    discountRate: 0,
+    description: 'Short test promotion for checking Home priority and the premium badge.',
+  },
+  {
+    id: '1-month',
+    label: '1 month',
+    months: 1,
+    discountRate: 0,
+    description: 'Promotes approved customer adverts for one month.',
+  },
+  {
+    id: '3-months',
+    label: '3 months',
+    months: 3,
+    discountRate: 0.05,
+    description: 'Keeps approved customer adverts prioritized for three months.',
+  },
+  {
+    id: '6-months',
+    label: '6 months',
+    months: 6,
+    discountRate: 0.1,
+    description: 'Longer advert priority with a stronger discount.',
+  },
+  {
+    id: '12-months',
+    label: '12 months',
+    months: 12,
+    discountRate: 0.15,
+    description: 'Year-round priority placement for approved customer adverts.',
+  },
 ] as const;
 
 function discountCopy(rate: number) {
   return rate > 0 ? `${Math.round(rate * 100)}% off` : 'No discount';
-}
-
-function parseCustomerSubscriptionPayload(payment: SubscriptionPayment) {
-  try {
-    const payload = payment.rawPayload ? JSON.parse(payment.rawPayload) as CustomerSubscriptionPayload : {};
-
-    return payload.subscriptionType === 'customerBenefits' ? payload : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function benefitsFromDescription(description: string) {
@@ -65,17 +80,22 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const [selectedCycle, setSelectedCycle] = useState<PaymentPlanCycle>('monthly');
-  const [selectedMonths, setSelectedMonths] = useState(1);
+  const [selectedDurationId, setSelectedDurationId] = useState('1-month');
   const [isPaying, setIsPaying] = useState(false);
   const selectedPlan =
     paymentPlans.find((plan) => plan.cycle === selectedCycle) ??
     paymentPlans.find((plan) => plan.cycle === 'monthly') ??
     paymentPlans[0];
   const selectedDuration =
-    benefitDurationOptions.find((option) => option.months === selectedMonths) ??
-    benefitDurationOptions[0];
+    benefitDurationOptions.find((option) => option.id === selectedDurationId) ??
+    benefitDurationOptions[1];
+  const durationMonths = 'months' in selectedDuration ? selectedDuration.months : 1;
+  const durationMinutes = 'minutes' in selectedDuration ? selectedDuration.minutes : undefined;
+  const planMinutes = selectedPlan?.cycle === 'weekly' ? 7 * 24 * 60 : 30 * 24 * 60;
   const amountBeforeDiscount = selectedPlan
-    ? selectedPlan.amount * selectedDuration.months
+    ? durationMinutes
+      ? Math.max(100, Math.round((selectedPlan.amount * durationMinutes) / planMinutes))
+      : selectedPlan.amount * durationMonths
     : 0;
   const discountAmount = Math.round(amountBeforeDiscount * selectedDuration.discountRate);
   const amountDue = Math.max(0, amountBeforeDiscount - discountAmount);
@@ -115,7 +135,8 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
       const payment = payCustomerBenefitSubscriptionWithAccount(
         user,
         selectedPlan.cycle,
-        selectedDuration.months,
+        durationMonths,
+        durationMinutes,
         amountDue,
         discountAmount,
       );
@@ -158,6 +179,10 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
         <Text style={styles.subtitle}>
           Plan names, prices, and benefit copy are controlled from the admin payment plan editor.
         </Text>
+        <Text style={styles.subtitle}>
+          Active plans promote your approved customer adverts on Home and show a premium badge
+          only while the plan is active.
+        </Text>
       </View>
 
       <View style={styles.statusGrid}>
@@ -194,6 +219,11 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Choose a plan</Text>
+        <Text style={styles.bodyText}>
+          Customer advert plans move your approved adverts above normal adverts during the active
+          period. When the plan expires, priority placement stops and the advert returns to normal
+          date-based placement.
+        </Text>
         <View style={styles.planGrid}>
           {paymentPlans.map((plan) => {
             const isSelected = selectedCycle === plan.cycle;
@@ -236,12 +266,12 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
         <Text style={styles.sectionTitle}>Choose duration</Text>
         <View style={styles.durationGrid}>
           {benefitDurationOptions.map((option) => {
-            const isSelected = selectedDuration.months === option.months;
+            const isSelected = selectedDuration.id === option.id;
 
             return (
               <Pressable
-                key={option.months}
-                onPress={() => setSelectedMonths(option.months)}
+                key={option.id}
+                onPress={() => setSelectedDurationId(option.id)}
                 style={({ pressed }) => [
                   styles.durationCard,
                   isSelected && styles.durationCardActive,
@@ -249,10 +279,13 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
                 ]}
               >
                 <Text style={[styles.durationLabel, isSelected && styles.planTitleActive]}>
-                  {option.months} month{option.months === 1 ? '' : 's'}
+                  {option.label}
                 </Text>
                 <Text style={[styles.durationMeta, isSelected && styles.planTitleActive]}>
                   {discountCopy(option.discountRate)}
+                </Text>
+                <Text style={[styles.durationMeta, isSelected && styles.planTitleActive]}>
+                  {option.description}
                 </Text>
               </Pressable>
             );
@@ -300,10 +333,15 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
                 <Text style={styles.bodyText}>
                   {formatCurrency(payment.amount)} paid {formatDateTime(payment.createdAt)}
                 </Text>
-                {payload.durationLabel || payload.durationMonths ? (
+                {payload.durationLabel || payload.durationMinutes || payload.durationMonths ? (
                   <Text style={styles.bodyText}>
                     Duration{' '}
                     {payload.durationLabel ??
+                      (payload.durationMinutes
+                        ? `${payload.durationMinutes} minute${
+                            payload.durationMinutes === 1 ? '' : 's'
+                          }`
+                        : undefined) ??
                       `${payload.durationMonths} month${payload.durationMonths === 1 ? '' : 's'}`}
                   </Text>
                 ) : null}
