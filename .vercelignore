@@ -1,0 +1,7 @@
+release/
+electron/
+android/
+credentials/
+*.jks
+*.log
+.github/
