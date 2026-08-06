@@ -3,6 +3,7 @@ node_modules/
 .expo-shared/
 dist/
 dist-check/
+release/
 web-build/
 coverage/
 npm-debug.*

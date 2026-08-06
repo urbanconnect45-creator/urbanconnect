@@ -9,6 +9,7 @@ export function buildSellerRegistrationHtml({
   publicSupabaseKey,
   publicSupabaseUrl,
   sellerPortalPath,
+  sellerDesktopPath,
 }) {
   return `<div class="registration-page">
     <section class="page-hero">
@@ -18,6 +19,7 @@ export function buildSellerRegistrationHtml({
         <p class="hero-lead">Apply as a customer or store owner, choose Free or Gold, and finish signup only after your email code is confirmed.</p>
         <div class="store-row mobile-web-hidden">
           <a class="primary-link" href="/${sellerPortalPath}/">Seller login</a>
+          <a class="primary-link ghost" href="/${sellerDesktopPath}/">Download Windows seller app</a>
         </div>
       </div>
     </section>

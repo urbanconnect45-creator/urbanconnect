@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -38,6 +39,18 @@ function isValidEmail(value: string) {
 
 function hasValidPhone(value: string) {
   return value.replace(/[^\d]/g, '').length >= 10;
+}
+
+const countryCodes = [
+  { code: '+234', label: 'NG' },
+  { code: '+233', label: 'GH' },
+  { code: '+1', label: 'US' },
+  { code: '+44', label: 'UK' },
+] as const;
+
+function normalizeLocalPhoneDigits(value: string, countryCode: string) {
+  const digits = value.replace(/\D/g, '').replace(/^0+/, '');
+  return countryCode === '+234' ? digits.slice(0, 10) : digits.slice(0, 15);
 }
 
 const verificationCodeLength = 8;
@@ -77,6 +90,9 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
       '',
     ) === '';
   const [form, setForm] = useState<SignUpFormValues>(initialForm);
+  const [countryCode, setCountryCode] = useState('+234');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [acceptedAgreement, setAcceptedAgreement] = useState(false);
   const [showAgreement, setShowAgreement] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +116,8 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
   };
 
   const signupsAllowedForRole = securitySettings.allowResidentSignups;
+  const phoneDigits = normalizeLocalPhoneDigits(form.phoneNumber, countryCode);
+  const normalizedSignupPhone = `${countryCode}${phoneDigits}`;
 
   const validateSignupForm = () => {
     if (securitySettings.maintenanceMode) {
@@ -114,8 +132,14 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
     if (!form.lastName.trim()) {
       return 'Last name is required.';
     }
-    if (!hasValidPhone(form.phoneNumber)) {
-      return 'Use a valid phone number.';
+    if (
+      countryCode === '+234'
+        ? phoneDigits.length !== 10
+        : !hasValidPhone(normalizedSignupPhone)
+    ) {
+      return countryCode === '+234'
+        ? 'Enter the 10 digit Nigerian phone number after +234.'
+        : 'Use a valid phone number.';
     }
     if (!isValidEmail(form.email)) {
       return 'Use a valid email address.';
@@ -147,7 +171,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
 
     try {
       setIsLoading(true);
-      await requestSignUpVerification(form);
+      await requestSignUpVerification({ ...form, phoneNumber: normalizedSignupPhone });
       setVerification({ email, recipientName: fullName, expiresAt });
       setVerificationCodeDraft('');
       setSignupStep('verification');
@@ -209,7 +233,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
 
     try {
       setIsLoading(true);
-      await signUp(form, verificationCode);
+      await signUp({ ...form, phoneNumber: normalizedSignupPhone }, verificationCode);
     } catch (signupError) {
       const message =
         signupError instanceof Error ? signupError.message : 'Unable to create account right now.';
@@ -229,6 +253,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
     return (
       <AuthPageBackground
         contentContainerStyle={[styles.container, isWideWeb && styles.containerWide]}
+        minimalMobile={!isWideWeb}
       >
         {isWideWeb ? (
           <AuthVisualPanel
@@ -321,6 +346,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
   return (
     <AuthPageBackground
       contentContainerStyle={[styles.container, isWideWeb && styles.containerWide]}
+      minimalMobile={!isWideWeb}
     >
       {isWideWeb ? (
         <AuthVisualPanel
@@ -330,7 +356,33 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
         />
       ) : null}
 
-      <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
+      {!isWideWeb ? (
+        <View style={styles.mobileHero}>
+          <View style={styles.mobileHeroBrandRow}>
+            <View style={styles.mobileHeroBrand}>
+              <View style={styles.mobileHeroIcon}>
+                <Ionicons color={colors.white} name="storefront-outline" size={22} />
+              </View>
+              <Text style={styles.mobileHeroBrandName}>View2Connect</Text>
+            </View>
+            <View style={styles.mobileHeroBadge}>
+              <Text style={styles.mobileHeroBadgeText}>Customer</Text>
+            </View>
+          </View>
+          <Text style={styles.mobileHeroTitle}>Create your account</Text>
+          <Text style={styles.mobileHeroText}>
+            Join your local marketplace and keep shopping, payments, and delivery in one place.
+          </Text>
+        </View>
+      ) : null}
+
+      <View
+        style={[
+          styles.formColumn,
+          !isWideWeb && styles.formColumnMobile,
+          isWideWeb && styles.formColumnWide,
+        ]}
+      >
         <View
           style={[
             styles.formCard,
@@ -358,7 +410,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
         ) : null}
 
         <View style={styles.signupFieldsGrid}>
-          <View style={styles.signupField}>
+          <View style={[styles.signupField, !isWideWeb && styles.signupFieldMobile]}>
             <FormField
               label="First name"
               onChangeText={(value) => updateField('firstName', value)}
@@ -366,7 +418,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               value={form.firstName}
             />
           </View>
-          <View style={styles.signupField}>
+          <View style={[styles.signupField, !isWideWeb && styles.signupFieldMobile]}>
             <FormField
               label="Last name"
               onChangeText={(value) => updateField('lastName', value)}
@@ -374,16 +426,57 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               value={form.lastName}
             />
           </View>
-          <View style={styles.signupField}>
-            <FormField
-              keyboardType="phone-pad"
-              label="Phone number"
-              onChangeText={(value) => updateField('phoneNumber', value)}
-              placeholder="0800 123 4567"
-              value={form.phoneNumber}
-            />
+          <View style={[styles.signupField, !isWideWeb && styles.signupFieldMobile]}>
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>Phone number</Text>
+              <View style={styles.countryCodeRow}>
+                {countryCodes.map((country) => {
+                  const isActive = country.code === countryCode;
+
+                  return (
+                    <Pressable
+                      key={country.code}
+                      onPress={() => {
+                        setCountryCode(country.code);
+                        updateField(
+                          'phoneNumber',
+                          normalizeLocalPhoneDigits(form.phoneNumber, country.code),
+                        );
+                      }}
+                      style={({ pressed }) => [
+                        styles.countryChip,
+                        isActive && styles.countryChipActive,
+                        pressed && styles.agreementRowPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.countryChipText,
+                          isActive && styles.countryChipTextActive,
+                        ]}
+                      >
+                        {country.label} {country.code}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.phoneInputRow}>
+                <Text style={styles.phonePrefix}>{countryCode}</Text>
+                <TextInput
+                  keyboardType="phone-pad"
+                  onChangeText={(value) =>
+                    updateField('phoneNumber', normalizeLocalPhoneDigits(value, countryCode))
+                  }
+                  placeholder={countryCode === '+234' ? '8012345678' : 'Phone number'}
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.inlineInput}
+                  value={form.phoneNumber}
+                />
+              </View>
+            </View>
           </View>
-          <View style={styles.signupField}>
+          <View style={[styles.signupField, !isWideWeb && styles.signupFieldMobile]}>
             <FormField
               autoCapitalize="none"
               keyboardType="email-address"
@@ -393,23 +486,65 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               value={form.email}
             />
           </View>
-          <View style={styles.signupField}>
-            <FormField
-              label="Password"
-              onChangeText={(value) => updateField('password', value)}
-              placeholder="Password"
-              secureTextEntry
-              value={form.password}
-            />
+          <View style={[styles.signupField, !isWideWeb && styles.signupFieldMobile]}>
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>Password</Text>
+              <View style={styles.passwordInputRow}>
+                <TextInput
+                  onChangeText={(value) => updateField('password', value)}
+                  placeholder="Password"
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry={!passwordVisible}
+                  style={styles.inlineInput}
+                  value={form.password}
+                />
+                <Pressable
+                  accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+                  accessibilityRole="button"
+                  onPress={() => setPasswordVisible((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.passwordToggle,
+                    pressed && styles.agreementRowPressed,
+                  ]}
+                >
+                  <Ionicons
+                    color={colors.primary}
+                    name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                  />
+                </Pressable>
+              </View>
+            </View>
           </View>
-          <View style={styles.signupField}>
-            <FormField
-              label="Confirm password"
-              onChangeText={(value) => updateField('confirmPassword', value)}
-              placeholder="Repeat"
-              secureTextEntry
-              value={form.confirmPassword}
-            />
+          <View style={[styles.signupField, !isWideWeb && styles.signupFieldMobile]}>
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>Confirm password</Text>
+              <View style={styles.passwordInputRow}>
+                <TextInput
+                  onChangeText={(value) => updateField('confirmPassword', value)}
+                  placeholder="Repeat"
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry={!confirmPasswordVisible}
+                  style={styles.inlineInput}
+                  value={form.confirmPassword}
+                />
+                <Pressable
+                  accessibilityLabel={confirmPasswordVisible ? 'Hide password' : 'Show password'}
+                  accessibilityRole="button"
+                  onPress={() => setConfirmPasswordVisible((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.passwordToggle,
+                    pressed && styles.agreementRowPressed,
+                  ]}
+                >
+                  <Ionicons
+                    color={colors.primary}
+                    name={confirmPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                  />
+                </Pressable>
+              </View>
+            </View>
           </View>
         </View>
 
@@ -454,7 +589,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
         />
         </View>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, !isWideWeb && styles.footerMobile]}>
           <Text style={styles.footerText}>Already have an account?</Text>
           <AppButton label="Back to login" onPress={() => navigation.goBack()} variant="ghost" />
           {isPublicStoreWeb ? (
@@ -548,6 +683,19 @@ function createStyles(colors: AppColors) {
       padding: spacing.md,
       ...shadows.card,
     },
+    formColumnMobile: {
+      maxWidth: 460,
+      borderWidth: 1,
+      borderRadius: 24,
+      borderColor: 'rgba(91,43,203,0.13)',
+      backgroundColor: colors.white,
+      padding: spacing.lg,
+      shadowColor: '#2F175F',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.1,
+      shadowRadius: 24,
+      elevation: 5,
+    },
     formColumnWide: {
       flex: 1,
       width: 'auto',
@@ -583,6 +731,75 @@ function createStyles(colors: AppColors) {
       borderRadius: 0,
       gap: spacing.md,
       padding: 0,
+    },
+    mobileHero: {
+      width: '100%',
+      maxWidth: 460,
+      alignSelf: 'center',
+      minHeight: 184,
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      borderRadius: 24,
+      backgroundColor: colors.primary,
+      padding: spacing.lg,
+      overflow: 'hidden',
+      shadowColor: '#321070',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.18,
+      shadowRadius: 22,
+      elevation: 6,
+    },
+    mobileHeroBrandRow: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    mobileHeroBrand: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    mobileHeroIcon: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 42,
+      width: 42,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.28)',
+      backgroundColor: 'rgba(255,255,255,0.14)',
+    },
+    mobileHeroBrandName: {
+      ...typography.bodyStrong,
+      color: colors.white,
+      fontWeight: '800',
+    },
+    mobileHeroBadge: {
+      minHeight: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radii.pill,
+      backgroundColor: colors.white,
+      paddingHorizontal: spacing.sm,
+    },
+    mobileHeroBadgeText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
+    },
+    mobileHeroTitle: {
+      color: colors.white,
+      fontSize: 28,
+      lineHeight: 34,
+      fontWeight: '800',
+      letterSpacing: 0,
+    },
+    mobileHeroText: {
+      ...typography.body,
+      color: 'rgba(255,255,255,0.82)',
+      lineHeight: 22,
     },
     mobileBrand: {
       flexDirection: 'row',
@@ -648,6 +865,89 @@ function createStyles(colors: AppColors) {
       flexShrink: 1,
       flexBasis: '45%',
       minWidth: '45%',
+    },
+    signupFieldMobile: {
+      flexBasis: '100%',
+      minWidth: '100%',
+    },
+    fieldWrapper: {
+      gap: spacing.xs,
+    },
+    fieldLabel: {
+      ...typography.caption,
+      color: colors.text,
+      letterSpacing: 0.3,
+    },
+    countryCodeRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+    },
+    countryChip: {
+      minHeight: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.sm,
+    },
+    countryChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    countryChipText: {
+      ...typography.caption,
+      color: colors.textMuted,
+      fontWeight: '700',
+    },
+    countryChipTextActive: {
+      color: colors.white,
+    },
+    phoneInputRow: {
+      minHeight: 52,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: 'rgba(91,43,203,0.18)',
+      backgroundColor: '#FCFAFF',
+      paddingHorizontal: spacing.md,
+      ...shadows.soft,
+    },
+    phonePrefix: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    passwordInputRow: {
+      minHeight: 52,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: 'rgba(91,43,203,0.18)',
+      backgroundColor: '#FCFAFF',
+      paddingLeft: spacing.lg,
+      paddingRight: spacing.xs,
+      ...shadows.soft,
+    },
+    inlineInput: {
+      flex: 1,
+      minHeight: 50,
+      color: colors.text,
+      ...typography.body,
+      fontSize: Platform.OS === 'web' ? 16 : typography.body.fontSize,
+    },
+    passwordToggle: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 42,
+      width: 42,
+      borderRadius: 21,
+      backgroundColor: colors.primarySoft,
     },
     randomFillRow: {
       flexDirection: 'row',
@@ -808,6 +1108,11 @@ function createStyles(colors: AppColors) {
     footer: {
       gap: spacing.sm,
       paddingBottom: spacing.md,
+    },
+    footerMobile: {
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(91,43,203,0.1)',
+      paddingTop: spacing.md,
     },
     footerText: {
       ...typography.body,

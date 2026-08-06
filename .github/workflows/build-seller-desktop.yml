@@ -1,0 +1,31 @@
+name: Build Seller Desktop Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'seller-desktop-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: View2Connect-Seller-Portal-Setup
+          path: release/View2Connect-Seller-Portal-Setup.exe
+          if-no-files-found: error
+      - if: startsWith(github.ref, 'refs/tags/seller-desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/View2Connect-Seller-Portal-Setup.exe

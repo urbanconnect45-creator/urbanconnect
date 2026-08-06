@@ -1,0 +1,8 @@
+{
+  "name": "view2connect-seller-portal",
+  "version": "1.0.0",
+  "description": "View2Connect Windows seller portal for store catalog, order, and account management.",
+  "author": "View2Connect",
+  "private": true,
+  "main": "main.cjs"
+}

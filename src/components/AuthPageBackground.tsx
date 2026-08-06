@@ -14,12 +14,29 @@ const marketplaceBackground = require('../../assets/seller-registration-marketpl
 type AuthPageBackgroundProps = {
   children: ReactNode;
   contentContainerStyle: StyleProp<ViewStyle>;
+  minimalMobile?: boolean;
 };
 
 export function AuthPageBackground({
   children,
   contentContainerStyle,
+  minimalMobile = false,
 }: AuthPageBackgroundProps) {
+  if (minimalMobile) {
+    return (
+      <View style={styles.minimalBackground}>
+        <ScrollView
+          contentContainerStyle={contentContainerStyle}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={styles.scroll}
+        >
+          {children}
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <ImageBackground
       resizeMode="cover"
@@ -46,6 +63,10 @@ const styles = StyleSheet.create({
     height: Platform.OS === 'web' ? ('100vh' as never) : undefined,
     minHeight: Platform.OS === 'web' ? ('100vh' as never) : undefined,
     backgroundColor: '#160F25',
+  },
+  minimalBackground: {
+    flex: 1,
+    backgroundColor: '#F7F5FC',
   },
   dim: {
     ...StyleSheet.absoluteFillObject,

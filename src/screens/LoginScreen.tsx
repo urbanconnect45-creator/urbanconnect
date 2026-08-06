@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -48,6 +49,13 @@ type PasswordResetAccount = {
   accountType: 'user' | 'admin';
 };
 
+const countryCodes = [
+  { code: '+234', label: 'NG' },
+  { code: '+233', label: 'GH' },
+  { code: '+1', label: 'US' },
+  { code: '+44', label: 'UK' },
+] as const;
+
 function looksLikeEmail(value: string) {
   return /\S+@\S+\.\S+/.test(value);
 }
@@ -58,6 +66,11 @@ function looksLikePhone(value: string) {
 
 function normalizePhone(value: string) {
   return value.replace(/[^\d+]/g, '');
+}
+
+function normalizeLocalPhoneDigits(value: string, countryCode: string) {
+  const digits = value.replace(/\D/g, '').replace(/^0+/, '');
+  return countryCode === '+234' ? digits.slice(0, 10) : digits.slice(0, 15);
 }
 
 const verificationCodeLength = 8;
@@ -109,8 +122,10 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
     ) === '';
   const [loginMode, setLoginMode] = useState<LoginMode>('email');
   const [email, setEmail] = useState('');
+  const [countryCode, setCountryCode] = useState('+234');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordReset, setPasswordReset] = useState<PasswordResetState | null>(null);
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [resetCodeDraft, setResetCodeDraft] = useState('');
@@ -124,7 +139,9 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
   const copy = accountCopy(accountRole);
   const allowPublicSignup = accountRole !== 'dispatch';
 
-  const currentIdentifier = loginMode === 'email' ? email.trim() : phoneNumber.trim();
+  const phoneDigits = normalizeLocalPhoneDigits(phoneNumber, countryCode);
+  const currentIdentifier =
+    loginMode === 'email' ? email.trim() : `${countryCode}${phoneDigits}`;
 
   const closePasswordReset = () => {
     setShowPasswordReset(false);
@@ -145,8 +162,13 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
       return 'Use a valid email address.';
     }
 
-    if (loginMode === 'phone' && !looksLikePhone(currentIdentifier)) {
-      return 'Use a valid phone number.';
+    if (
+      loginMode === 'phone' &&
+      (countryCode === '+234' ? phoneDigits.length !== 10 : !looksLikePhone(currentIdentifier))
+    ) {
+      return countryCode === '+234'
+        ? 'Enter the 10 digit Nigerian phone number after +234.'
+        : 'Use a valid phone number.';
     }
 
     if (password.trim().length < 6) {
@@ -299,6 +321,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
   return (
     <AuthPageBackground
       contentContainerStyle={[styles.container, isWideWeb && styles.containerWide]}
+      minimalMobile={!isWideWeb}
     >
       {isWideWeb ? (
         <AuthVisualPanel
@@ -308,7 +331,33 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
         />
       ) : null}
 
-      <View style={[styles.formColumn, isWideWeb && styles.formColumnWide]}>
+      {!isWideWeb ? (
+        <View style={styles.mobileHero}>
+          <View style={styles.mobileHeroBrandRow}>
+            <View style={styles.mobileHeroBrand}>
+              <View style={styles.mobileHeroIcon}>
+                <Ionicons color={colors.white} name="storefront-outline" size={22} />
+              </View>
+              <Text style={styles.mobileHeroBrandName}>View2Connect</Text>
+            </View>
+            <View style={styles.mobileHeroBadge}>
+              <Text style={styles.mobileHeroBadgeText}>Customer</Text>
+            </View>
+          </View>
+          <Text style={styles.mobileHeroTitle}>Welcome back</Text>
+          <Text style={styles.mobileHeroText}>
+            Sign in to shop nearby stores, pay securely, and follow every order.
+          </Text>
+        </View>
+      ) : null}
+
+      <View
+        style={[
+          styles.formColumn,
+          !isWideWeb && styles.formColumnMobile,
+          isWideWeb && styles.formColumnWide,
+        ]}
+      >
         <View
           style={[
             styles.formCard,
@@ -377,23 +426,83 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
               value={email}
             />
           ) : (
-            <FormField
-              keyboardType="phone-pad"
-              label="Phone number"
-              onChangeText={(value) => {
-                setPhoneNumber(value);
-              }}
-              placeholder="+2348000000000"
-              value={phoneNumber}
-            />
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>Phone number</Text>
+              <View style={styles.countryCodeRow}>
+                {countryCodes.map((country) => {
+                  const isActive = country.code === countryCode;
+
+                  return (
+                    <Pressable
+                      key={country.code}
+                      onPress={() => {
+                        setCountryCode(country.code);
+                        setPhoneNumber((current) =>
+                          normalizeLocalPhoneDigits(current, country.code),
+                        );
+                        setError(null);
+                      }}
+                      style={({ pressed }) => [
+                        styles.countryChip,
+                        isActive && styles.countryChipActive,
+                        pressed && styles.switchButtonPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.countryChipText,
+                          isActive && styles.countryChipTextActive,
+                        ]}
+                      >
+                        {country.label} {country.code}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.phoneInputRow}>
+                <Text style={styles.phonePrefix}>{countryCode}</Text>
+                <TextInput
+                  keyboardType="phone-pad"
+                  onChangeText={(value) => {
+                    setPhoneNumber(normalizeLocalPhoneDigits(value, countryCode));
+                  }}
+                  placeholder={countryCode === '+234' ? '8012345678' : 'Phone number'}
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.inlineInput}
+                  value={phoneNumber}
+                />
+              </View>
+            </View>
           )}
-          <FormField
-            label="Password"
-            onChangeText={setPassword}
-            placeholder="Enter your password"
-            secureTextEntry
-            value={password}
-          />
+          <View style={styles.fieldWrapper}>
+            <Text style={styles.fieldLabel}>Password</Text>
+            <View style={styles.passwordInputRow}>
+              <TextInput
+                onChangeText={setPassword}
+                placeholder="Enter your password"
+                placeholderTextColor={colors.textMuted}
+                secureTextEntry={!passwordVisible}
+                style={styles.inlineInput}
+                value={password}
+              />
+              <Pressable
+                accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+                accessibilityRole="button"
+                onPress={() => setPasswordVisible((current) => !current)}
+                style={({ pressed }) => [
+                  styles.passwordToggle,
+                  pressed && styles.switchButtonPressed,
+                ]}
+              >
+                <Ionicons
+                  color={colors.primary}
+                  name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                />
+              </Pressable>
+            </View>
+          </View>
 
           <Pressable
             onPress={() => {
@@ -421,7 +530,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
           <SocialAuthButtons webRedirectPath="/auth/callback?oauthRole=resident" />
         </View>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, !isWideWeb && styles.footerMobile]}>
           {allowPublicSignup ? (
             <>
               <Text style={styles.footerText}>Need an account?</Text>
@@ -596,6 +705,19 @@ function createStyles(colors: AppColors) {
       padding: spacing.md,
       ...shadows.card,
     },
+    formColumnMobile: {
+      maxWidth: 460,
+      borderWidth: 1,
+      borderRadius: 24,
+      borderColor: 'rgba(91,43,203,0.13)',
+      backgroundColor: colors.white,
+      padding: spacing.lg,
+      shadowColor: '#2F175F',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.1,
+      shadowRadius: 24,
+      elevation: 5,
+    },
     formColumnWide: {
       flex: 1,
       width: 'auto',
@@ -629,6 +751,76 @@ function createStyles(colors: AppColors) {
     formCardMobile: {
       borderRadius: 0,
       padding: 0,
+      gap: spacing.md,
+    },
+    mobileHero: {
+      width: '100%',
+      maxWidth: 460,
+      alignSelf: 'center',
+      minHeight: 184,
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      borderRadius: 24,
+      backgroundColor: colors.primary,
+      padding: spacing.lg,
+      overflow: 'hidden',
+      shadowColor: '#321070',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.18,
+      shadowRadius: 22,
+      elevation: 6,
+    },
+    mobileHeroBrandRow: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    mobileHeroBrand: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    mobileHeroIcon: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 42,
+      width: 42,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.28)',
+      backgroundColor: 'rgba(255,255,255,0.14)',
+    },
+    mobileHeroBrandName: {
+      ...typography.bodyStrong,
+      color: colors.white,
+      fontWeight: '800',
+    },
+    mobileHeroBadge: {
+      minHeight: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radii.pill,
+      backgroundColor: colors.white,
+      paddingHorizontal: spacing.sm,
+    },
+    mobileHeroBadgeText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '800',
+    },
+    mobileHeroTitle: {
+      color: colors.white,
+      fontSize: 28,
+      lineHeight: 34,
+      fontWeight: '800',
+      letterSpacing: 0,
+    },
+    mobileHeroText: {
+      ...typography.body,
+      color: 'rgba(255,255,255,0.82)',
+      lineHeight: 22,
     },
     mobileBrand: {
       flexDirection: 'row',
@@ -665,13 +857,92 @@ function createStyles(colors: AppColors) {
       ...typography.body,
       color: colors.textMuted,
     },
+    fieldWrapper: {
+      gap: spacing.xs,
+    },
+    fieldLabel: {
+      ...typography.caption,
+      color: colors.text,
+      letterSpacing: 0.3,
+    },
+    countryCodeRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+    },
+    countryChip: {
+      minHeight: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.sm,
+    },
+    countryChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    countryChipText: {
+      ...typography.caption,
+      color: colors.textMuted,
+      fontWeight: '700',
+    },
+    countryChipTextActive: {
+      color: colors.white,
+    },
+    phoneInputRow: {
+      minHeight: 52,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: 'rgba(91,43,203,0.18)',
+      backgroundColor: '#FCFAFF',
+      paddingHorizontal: spacing.md,
+      ...shadows.soft,
+    },
+    phonePrefix: {
+      ...typography.bodyStrong,
+      color: colors.primary,
+    },
+    passwordInputRow: {
+      minHeight: 52,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: 'rgba(91,43,203,0.18)',
+      backgroundColor: '#FCFAFF',
+      paddingLeft: spacing.lg,
+      paddingRight: spacing.xs,
+      ...shadows.soft,
+    },
+    inlineInput: {
+      flex: 1,
+      minHeight: 50,
+      color: colors.text,
+      ...typography.body,
+      fontSize: Platform.OS === 'web' ? 16 : typography.body.fontSize,
+    },
+    passwordToggle: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 42,
+      width: 42,
+      borderRadius: 21,
+      backgroundColor: colors.primarySoft,
+    },
     switchShell: {
       flexDirection: 'row',
       gap: spacing.xs,
       borderRadius: radii.pill,
-      backgroundColor: colors.card,
+      backgroundColor: '#F5F1FC',
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: 'rgba(91,43,203,0.12)',
       padding: 4,
     },
     switchButton: {
@@ -834,6 +1105,11 @@ function createStyles(colors: AppColors) {
     footer: {
       gap: spacing.sm,
       paddingBottom: spacing.md,
+    },
+    footerMobile: {
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(91,43,203,0.1)',
+      paddingTop: spacing.md,
     },
     footerText: {
       ...typography.body,

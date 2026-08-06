@@ -11,7 +11,10 @@ const adminPath = 'admin-portal';
 const catalogAdminPath = 'catalog-admin';
 const appPath = 'app';
 const sellerPortalPath = 'seller-portal';
+const sellerDesktopPath = 'seller-desktop';
 const defaultSiteUrl = 'https://www.view2connect.ng';
+const defaultSellerDesktopDownloadUrl =
+  'https://github.com/urbanconnect45-creator/urbanconnect/releases/latest/download/View2Connect-Seller-Portal-Setup.exe';
 const siteName = 'View2Connect';
 const siteDescription =
   'View2Connect is a CAC-registered Nigerian marketplace where customers discover products, food, local stores, secure payments, receipts, and delivery updates.';
@@ -344,6 +347,7 @@ const navLinks = [
   { href: '/', label: 'Home' },
   { href: '/how-it-works/', label: 'How it works' },
   { href: '/business-registration/', label: 'Business registration', mobileHidden: true },
+  { href: '/seller-desktop/', label: 'Seller desktop', mobileHidden: true },
   { href: '/about/', label: 'About' },
   { href: '/contact/', label: 'Contact' },
 ];
@@ -2118,6 +2122,35 @@ function buildBusinessRegistrationHtml() {
   });
 }
 
+function buildSellerDesktopHtml({ desktopDownloadUrl }) {
+  const body = `<section class="page-hero">
+      <div class="shell">
+        <p class="section-kicker">Seller desktop app</p>
+        <h1>Run your seller portal as a Windows desktop app.</h1>
+        <p class="hero-lead">Install the View2Connect Seller Portal on a Windows 10 or Windows 11 laptop or desktop. It opens directly to your store dashboard, catalog, orders, and account tools.</p>
+        <div class="store-row">
+          <a class="primary-link" href="${escapeHtml(desktopDownloadUrl)}">Download for Windows</a>
+          <a class="primary-link ghost" href="/${sellerPortalPath}/">Use seller portal in browser</a>
+        </div>
+      </div>
+    </section>
+    <section class="section tight">
+      <div class="shell feature-grid">
+        <article class="feature-card"><span class="feature-icon">01</span><strong>Install once</strong><p>Download the setup file, run the installer, and choose where it should be installed.</p></article>
+        <article class="feature-card"><span class="feature-icon">02</span><strong>Sign in securely</strong><p>Use the same separate store owner account you use in the browser. Customer and dispatch accounts cannot enter the seller portal.</p></article>
+        <article class="feature-card"><span class="feature-icon">03</span><strong>Keep it current</strong><p>The app opens the live seller portal, so catalog and order changes remain connected to the same Supabase data.</p></article>
+      </div>
+    </section>`;
+
+  return buildDocument({
+    activePath: '/seller-desktop/',
+    body,
+    canonicalPath: '/seller-desktop/',
+    description: 'Download the View2Connect Seller Portal Windows desktop app for store owner catalog and order management.',
+    title: 'Download Seller Portal for Windows | View2Connect',
+  });
+}
+
 function buildContactHtml() {
   const body = `<section class="page-hero">
       <div class="shell">
@@ -2220,6 +2253,9 @@ export async function prepareWebOutput(rootDir) {
   const siteUrl = normalizeBaseUrl(
     process.env.VIEW2CONNECT_SITE_URL ?? process.env.URBANCONNECT_SITE_URL,
   );
+  const sellerDesktopDownloadUrl =
+    process.env.VIEW2CONNECT_SELLER_DESKTOP_DOWNLOAD_URL?.trim() ||
+    defaultSellerDesktopDownloadUrl;
   const distDir = path.join(rootDir, 'dist');
   const indexPath = path.join(distDir, 'index.html');
   const expoIndex = await fs.readFile(indexPath, 'utf8');
@@ -2265,7 +2301,14 @@ export async function prepareWebOutput(rootDir) {
       'You need to enable JavaScript to run this app.',
       'View2Connect is a Nigerian marketplace for products, food, groceries, local stores, secure payments, receipts, seller onboarding, and delivery updates.',
     );
-  const routes = ['/', '/how-it-works/', '/business-registration/', '/about/', '/contact/'];
+  const routes = [
+    '/',
+    '/how-it-works/',
+    '/business-registration/',
+    '/seller-desktop/',
+    '/about/',
+    '/contact/',
+  ];
   const lastmod = new Date().toISOString().slice(0, 10);
   const robotsTxt = `User-agent: *
 Allow: /
@@ -2359,6 +2402,7 @@ ${routes
       body: buildSellerRegistrationHtml({
         publicSupabaseKey,
         publicSupabaseUrl,
+        sellerDesktopPath,
         sellerPortalPath,
       }),
       canonicalPath: '/business-registration/',
@@ -2366,6 +2410,11 @@ ${routes
         'Apply as a store owner, choose Free or Gold, and create a separate seller account after email verification.',
       title: 'Seller Registration | View2Connect',
     }),
+  );
+  await writePage(
+    distDir,
+    '/seller-desktop/',
+    buildSellerDesktopHtml({ desktopDownloadUrl: sellerDesktopDownloadUrl }),
   );
   await writePage(distDir, '/about/', buildAboutHtml());
   await writePage(distDir, '/contact/', buildContactHtml());

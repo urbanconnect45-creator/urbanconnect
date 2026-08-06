@@ -8,8 +8,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'portrait',
   scheme: 'urbanconnect',
   userInterfaceStyle: 'light',
+
+  extra: {
+    eas: {
+      projectId: '3cfa24a8-5a29-4392-afaf-2696ed97b87d',
+    },
+  },
+
   ios: {
-    bundleIdentifier: 'com.urbanconnect.app',
+    bundleIdentifier: 'com.view2connect.ng',
     supportsTablet: true,
     infoPlist: {
       NSFaceIDUsageDescription:
@@ -17,7 +24,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   android: {
-    package: 'com.urbanconnect.app',
+    package: 'com.view2connect.ng',
+    intentFilters: [
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [
+          {
+            scheme: 'urbanconnect',
+            host: 'auth',
+            pathPrefix: '/callback',
+          },
+        ],
+      },
+    ],
   },
   web: {
     bundler: 'metro',

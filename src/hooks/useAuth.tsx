@@ -7,6 +7,7 @@ import {
   type PropsWithChildren,
 } from 'react';
 import { Alert, Linking, Platform } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
 import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { localTestUsers } from '../data/localTestUsers';
@@ -30,6 +31,7 @@ import { canAdminEditSensitiveData, isUserActive } from '../utils/businessState'
 import { RANDOM_SIGNUP_PASSWORD } from '../utils/randomSignup';
 import { usePersistentState } from './usePersistentState';
 import {
+  addOAuthContextToCallbackUrl,
   completeSupabaseOAuth,
   createDispatchAccountWithSupabase,
   fetchSupabaseUserProfiles,
@@ -58,6 +60,8 @@ type AuthContextValue = {
   signIn: (values: SignInFormValues) => Promise<void>;
   requestSignUpVerification: (values: SignUpFormValues) => Promise<void>;
   signUp: (values: SignUpFormValues, verificationCode: string) => Promise<void>;
+  beginSocialSignIn: (webRedirectPath?: string) => void;
+  completeSocialSignIn: (callbackUrl: string | null) => Promise<boolean>;
   changePassword: (currentPassword: string, nextPassword: string) => Promise<void>;
   deleteCurrentAccount: () => Promise<void>;
   userSecurityPreference: UserSecurityPreference;
@@ -186,6 +190,17 @@ function roleConflictMessage(
   )} login for that role.`;
 }
 
+function normalizeSignupVerificationError(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : 'Unable to send the verification code right now.';
+
+  if (/verification email could not be sent|verification code could not be sent/i.test(message)) {
+    return 'Verification code could not be sent because View2Connect email delivery is not fully configured. Please contact support.';
+  }
+
+  return message;
+}
+
 function migrateStoredUser(user: StoredUser): StoredUser {
   const nameParts =
     typeof user.fullName === 'string' && user.fullName.trim().length > 0
@@ -264,6 +279,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     null,
   );
   const oauthCallbackHandledRef = useRef(false);
+  const oauthCallbackUrlRef = useRef<string | null>(null);
+  const pendingOAuthRedirectPathRef = useRef<string | undefined>(undefined);
   const syncedProfileSessionRef = useRef<string | null>(null);
   const [userProfileOverrides, setUserProfileOverrides] = usePersistentState<
     Record<string, UserProfileOverride>
@@ -450,46 +467,96 @@ export function AuthProvider({ children }: PropsWithChildren) {
       });
   }, [rawUser?.id, supabaseSession?.accessToken]);
 
+  const beginSocialSignIn = (webRedirectPath?: string) => {
+    pendingOAuthRedirectPathRef.current = webRedirectPath;
+    oauthCallbackHandledRef.current = false;
+    oauthCallbackUrlRef.current = null;
+  };
+
+  const completeSocialSignIn = async (callbackUrl: string | null) => {
+    const contextualCallbackUrl = callbackUrl
+      ? addOAuthContextToCallbackUrl(
+          callbackUrl,
+          pendingOAuthRedirectPathRef.current ??
+            (Platform.OS === 'web' ? undefined : '/auth/callback?oauthRole=resident'),
+        )
+      : null;
+
+    if (
+      !isSupabaseConfigured ||
+      !contextualCallbackUrl ||
+      !contextualCallbackUrl.includes('access_token=')
+    ) {
+      return false;
+    }
+
+    if (Platform.OS !== 'web') {
+      // Close the in-app auth surface immediately. Profile syncing can finish
+      // after the customer is already back inside View2Connect.
+      try {
+        WebBrowser.dismissAuthSession();
+      } catch {
+        void WebBrowser.dismissBrowser().catch(() => undefined);
+      }
+    }
+
+    // Android can deliver the callback through Linking and then resolve the
+    // WebBrowser auth request with the same URL. Treat that second delivery as
+    // a completed login instead of showing a false error.
+    if (oauthCallbackHandledRef.current) {
+      return oauthCallbackUrlRef.current === contextualCallbackUrl;
+    }
+
+    oauthCallbackHandledRef.current = true;
+    oauthCallbackUrlRef.current = contextualCallbackUrl;
+
+    try {
+      const result = await completeSupabaseOAuth(contextualCallbackUrl);
+
+      if (!result) {
+        oauthCallbackHandledRef.current = false;
+        return false;
+      }
+
+      cacheStoredUser(result.storedUser);
+      setSupabaseSession(result.session);
+      setUser(result.user);
+      notifyUserLogin(result.user);
+      pendingOAuthRedirectPathRef.current = undefined;
+
+      if (Platform.OS !== 'web') {
+        // A deep link opens the app but does not automatically close Android's
+        // Chrome Custom Tab. Dismiss it after the session has been persisted.
+        void WebBrowser.dismissBrowser().catch(() => undefined);
+      }
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.history.replaceState(
+          null,
+          '',
+          `${window.location.pathname}${window.location.search}`,
+        );
+      }
+
+      return true;
+    } catch (error) {
+      oauthCallbackHandledRef.current = false;
+      oauthCallbackUrlRef.current = null;
+      throw error;
+    }
+  };
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
       return undefined;
     }
 
     const handleCallbackUrl = (url: string | null) => {
-      if (
-        !url ||
-        !url.includes('access_token=') ||
-        oauthCallbackHandledRef.current
-      ) {
-        return;
-      }
-
-      oauthCallbackHandledRef.current = true;
-      completeSupabaseOAuth(url)
-        .then((result) => {
-          if (!result) {
-            oauthCallbackHandledRef.current = false;
-            return;
-          }
-
-          cacheStoredUser(result.storedUser);
-          setSupabaseSession(result.session);
-          setUser(result.user);
-          notifyUserLogin(result.user);
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.history.replaceState(
-              null,
-              '',
-              `${window.location.pathname}${window.location.search}`,
-            );
-          }
-        })
-        .catch((error) => {
-          oauthCallbackHandledRef.current = false;
-          if (error instanceof Error) {
-            Alert.alert('Login failed', error.message);
-          }
-        });
+      completeSocialSignIn(url).catch((error) => {
+        if (error instanceof Error) {
+          Alert.alert('Login failed', error.message);
+        }
+      });
     };
 
     const subscription = Linking.addEventListener('url', (event) => {
@@ -508,7 +575,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, [setSupabaseSession, setUser]);
 
-  const notifyUserLogin = (loggedInUser: AppUser) => {
+  function notifyUserLogin(loggedInUser: AppUser) {
     const roleNotificationCopy =
       loggedInUser.role === 'businessOwner'
         ? {
@@ -541,7 +608,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       contextType: 'general',
       contextId: `login-${loggedInUser.id}-${Date.now()}`,
     });
-  };
+  }
 
   const signIn = async (values: SignInFormValues) => {
     if (securitySettings.maintenanceMode) {
@@ -857,7 +924,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       throw new Error('Email verification is not configured yet. Please contact customer care.');
     }
 
-    await sendSupabaseSignupVerificationCode(values);
+    try {
+      await sendSupabaseSignupVerificationCode(values);
+    } catch (error) {
+      throw new Error(normalizeSignupVerificationError(error));
+    }
   };
 
   const signUp = async (values: SignUpFormValues, verificationCode: string) => {
@@ -1331,6 +1402,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       signIn,
       requestSignUpVerification,
       signUp,
+      beginSocialSignIn,
+      completeSocialSignIn,
       changePassword,
       deleteCurrentAccount,
       userSecurityPreference,

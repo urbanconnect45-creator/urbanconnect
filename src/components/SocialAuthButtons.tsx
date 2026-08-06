@@ -1,8 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { isUrbanConnectLocalTestMode } from '../config/runtime';
-import { getSupabaseOAuthUrl, isSupabaseConfigured } from '../services/supabaseApi';
+import { useAuth } from '../hooks/useAuth';
+import {
+  getSupabaseNativeOAuthCallbackUrl,
+  getSupabaseOAuthUrl,
+  isSupabaseConfigured,
+} from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -22,7 +28,10 @@ const providers: {
   { id: 'apple', label: 'Apple', icon: 'logo-apple' },
 ];
 
+WebBrowser.maybeCompleteAuthSession();
+
 export function SocialAuthButtons({ webRedirectPath }: SocialAuthButtonsProps = {}) {
+  const { beginSocialSignIn, completeSocialSignIn } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
 
@@ -46,11 +55,46 @@ export function SocialAuthButtons({ webRedirectPath }: SocialAuthButtonsProps = 
     }
 
     try {
-      await Linking.openURL(getSupabaseOAuthUrl(provider, webRedirectPath));
-    } catch {
+      if (Platform.OS === 'web') {
+        await Linking.openURL(getSupabaseOAuthUrl(provider, webRedirectPath));
+        return;
+      }
+
+      const redirectUrl = getSupabaseNativeOAuthCallbackUrl();
+      const authUrl = getSupabaseOAuthUrl(provider, webRedirectPath, { redirectTo: redirectUrl });
+      beginSocialSignIn(webRedirectPath);
+      const result = await WebBrowser.openAuthSessionAsync(
+        authUrl,
+        redirectUrl,
+        {
+          createTask: false,
+          showInRecents: false,
+          showTitle: false,
+          toolbarColor: '#5B2BCB',
+        },
+      );
+
+      if (result.type === 'success') {
+        const handled = await completeSocialSignIn(result.url);
+
+        if (handled) {
+          return;
+        }
+
+        throw new Error('Google returned without a usable View2Connect login token.');
+      }
+
+      if (result.type === 'cancel' || result.type === 'dismiss') {
+        return;
+      }
+
+      throw new Error('Google sign-in did not finish. Please try again.');
+    } catch (error) {
       Alert.alert(
         'Social login unavailable',
-        'Enable this provider in Supabase Auth, then try again.',
+        error instanceof Error
+          ? error.message
+          : 'Enable this provider in Supabase Auth, then try again.',
       );
     }
   };

@@ -13,7 +13,9 @@
     "web": "expo start --web",
     "web:local": "set EXPO_PUBLIC_URBANCONNECT_LOCAL_TEST_MODE=true&& expo start --web",
     "export:web": "node scripts/export-web.mjs",
-    "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
+    "desktop:build:win": "npm run export:web && electron-builder --win nsis",
+    "desktop:dir": "npm run export:web && electron-builder --win --dir"
   },
   "dependencies": {
     "@expo/env": "~2.0.8",
@@ -24,6 +26,7 @@
     "@react-navigation/native-stack": "^7.8.1",
     "@supabase/supabase-js": "^2.105.4",
     "eas": "^0.1.0",
+    "eas-cli": "^21.4.0",
     "expo": "~54.0.35",
     "expo-clipboard": "~8.0.8",
     "expo-dev-client": "~6.0.21",
@@ -34,6 +37,7 @@
     "expo-local-authentication": "~17.0.8",
     "expo-location": "~19.0.8",
     "expo-status-bar": "~3.0.9",
+    "expo-web-browser": "~15.0.11",
     "naija-state-local-government": "^1.0.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -45,8 +49,37 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
     "playwright-core": "^1.55.0",
     "supabase": "^2.109.0",
     "typescript": "~5.9.2"
+  },
+  "build": {
+    "appId": "ng.view2connect.sellerportal",
+    "productName": "View2Connect Seller Portal",
+    "directories": {
+      "app": "electron",
+      "output": "release"
+    },
+    "files": [
+      "**/*"
+    ],
+    "electronDist": "node_modules/electron/dist",
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "dist/favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "View2Connect Seller Portal"
+    },
+    "artifactName": "View2Connect-Seller-Portal-Setup.exe"
   }
 }

@@ -21,6 +21,7 @@ import type {
   SecuritySettings,
   SupportMessage,
   Order,
+  OrderDeliveryUpdate,
   OrderItem,
   OrderTimelineEvent,
   PaymentPlanCycle,
@@ -512,6 +513,23 @@ type SupabaseDeliveryJobRow = {
   updated_at: string;
 };
 
+type SupabaseOrderDeliveryUpdateRow = {
+  id: string;
+  order_id: string;
+  seller_name: string;
+  delivery_address: string;
+  delivery_contact_phone?: string | null;
+  status: DispatchDeliveryJob['status'];
+  rider_user_id?: string | null;
+  rider_full_name?: string | null;
+  rider_phone_number?: string | null;
+  accepted_at?: string | null;
+  picked_up_at?: string | null;
+  rider_confirmed_at?: string | null;
+  buyer_confirmed_at?: string | null;
+  completed_at?: string | null;
+  updated_at: string;
+};
 type SupabaseRiderProfileRow = {
   auth_user_id: string;
   full_name: string;
@@ -1383,9 +1401,13 @@ async function getOrCreateProfile(
 }
 
 async function requestPasswordSession(email: string, password: string) {
+  const browserHostname =
+    typeof window !== 'undefined' && typeof window.location?.hostname === 'string'
+      ? window.location.hostname
+      : '';
   const isHostedWeb =
-    typeof window !== 'undefined' &&
-    !['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+    Boolean(browserHostname) &&
+    !['localhost', '127.0.0.1', '::1'].includes(browserHostname);
 
   if (isHostedWeb) {
     try {
@@ -1701,6 +1723,40 @@ function parseAuthCallbackParams(url: string) {
   return new URLSearchParams([query, fragment].filter(Boolean).join('&'));
 }
 
+export function addOAuthContextToCallbackUrl(
+  callbackUrl: string,
+  webRedirectPath?: string,
+) {
+  const [, redirectQuery] = (webRedirectPath ?? '').split('?');
+
+  if (!redirectQuery) {
+    return callbackUrl;
+  }
+
+  const callbackParams = parseAuthCallbackParams(callbackUrl);
+  const contextParams = new URLSearchParams(redirectQuery);
+  const additions = new URLSearchParams();
+
+  contextParams.forEach((value, key) => {
+    if (!callbackParams.has(key)) {
+      additions.set(key, value);
+    }
+  });
+
+  const additionQuery = additions.toString();
+
+  if (!additionQuery) {
+    return callbackUrl;
+  }
+
+  const fragmentStart = callbackUrl.indexOf('#');
+  const base = fragmentStart >= 0 ? callbackUrl.slice(0, fragmentStart) : callbackUrl;
+  const fragment = fragmentStart >= 0 ? callbackUrl.slice(fragmentStart) : '';
+  const separator = base.includes('?') ? '&' : '?';
+
+  return `${base}${separator}${additionQuery}${fragment}`;
+}
+
 export async function completeSupabaseOAuth(url: string) {
   const params = parseAuthCallbackParams(url);
   const accessToken = params.get('access_token');
@@ -1815,33 +1871,42 @@ export async function completeSupabaseOAuth(url: string) {
   };
 }
 
+export function getSupabaseNativeOAuthCallbackUrl() {
+  return 'urbanconnect://auth/callback';
+}
+
+export function getSupabaseNativeOAuthRedirectUrl(_webRedirectPath = '/auth/callback') {
+  // Android's auth-session listener and intent filter must receive the exact
+  // same callback URL. Role context is restored in-app after the deep link.
+  return getSupabaseNativeOAuthCallbackUrl();
+}
+
 export function getSupabaseOAuthUrl(
   provider: 'google' | 'apple',
   webRedirectPath = '/auth/callback',
+  options: { redirectTo?: string } = {},
 ) {
   const encodedProvider = encodeURIComponent(provider);
   const [redirectPath = '/auth/callback', redirectQuery] = webRedirectPath.split('?');
 
-  let redirect = 'urbanconnect://auth/callback';
+  let redirect = options.redirectTo ?? getSupabaseNativeOAuthRedirectUrl(webRedirectPath);
 
-  if (redirectQuery) {
-    redirect = `${redirect}?${redirectQuery}`;
-  }
-
-  try {
-    if (typeof window !== 'undefined' && (window as any).location?.origin) {
+  if (!options.redirectTo) {
+    try {
+      if (typeof window !== 'undefined' && (window as any).location?.origin) {
       // Use a web-friendly redirect when running in a browser so the OAuth
       // flow returns to the web app instead of the native deep link.
-      const normalizedPath = redirectPath.startsWith('/')
-        ? redirectPath
-        : `/${redirectPath}`;
-      const normalizedRedirect = redirectQuery
-        ? `${normalizedPath}?${redirectQuery}`
-        : normalizedPath;
-      redirect = `${(window as any).location.origin}${normalizedRedirect}`;
+        const normalizedPath = redirectPath.startsWith('/')
+          ? redirectPath
+          : `/${redirectPath}`;
+        const normalizedRedirect = redirectQuery
+          ? `${normalizedPath}?${redirectQuery}`
+          : normalizedPath;
+        redirect = `${(window as any).location.origin}${normalizedRedirect}`;
+      }
+    } catch {
+      // ignore and fall back to deep link
     }
-  } catch {
-    // ignore and fall back to deep link
   }
 
   const redirectTo = encodeURIComponent(redirect);
@@ -2461,7 +2526,7 @@ export async function createFlutterwaveDynamicDepositAccount(
     throw new SupabaseApiError('Enter a valid deposit amount.', 400);
   }
 
-  if (roundedAmount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
+  if (MINIMUM_ADD_FUNDS_DEPOSIT > 0 && roundedAmount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
     throw new SupabaseApiError(
       `Add funds must be higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)}.`,
       400,
@@ -3518,6 +3583,25 @@ function deliveryJobRowToJob(row: SupabaseDeliveryJobRow): DispatchDeliveryJob {
   };
 }
 
+function orderDeliveryUpdateRowToUpdate(row: SupabaseOrderDeliveryUpdateRow): OrderDeliveryUpdate {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    sellerName: row.seller_name,
+    deliveryAddress: row.delivery_address,
+    ...(row.delivery_contact_phone ? { deliveryContactPhone: row.delivery_contact_phone } : {}),
+    status: row.status,
+    ...(row.rider_user_id ? { riderUserId: row.rider_user_id } : {}),
+    ...(row.rider_full_name ? { riderFullName: row.rider_full_name } : {}),
+    ...(row.rider_phone_number ? { riderPhoneNumber: row.rider_phone_number } : {}),
+    ...(row.accepted_at ? { acceptedAt: row.accepted_at } : {}),
+    ...(row.picked_up_at ? { pickedUpAt: row.picked_up_at } : {}),
+    ...(row.rider_confirmed_at ? { riderConfirmedAt: row.rider_confirmed_at } : {}),
+    ...(row.buyer_confirmed_at ? { buyerConfirmedAt: row.buyer_confirmed_at } : {}),
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+    updatedAt: row.updated_at,
+  };
+}
 function riderProfileRowToProfile(row: SupabaseRiderProfileRow): DispatchRiderProfile {
   return {
     authUserId: row.auth_user_id,
@@ -3674,6 +3758,32 @@ export async function markDispatchDeliveryArrived(accessToken: string, targetJob
   return deliveryJobRowToJob(job);
 }
 
+export async function fetchOrderDeliveryUpdates(accessToken: string, orderId: string) {
+  const rows = await supabaseRequest<SupabaseOrderDeliveryUpdateRow[]>(
+    '/rest/v1/rpc/get_order_delivery_jobs',
+    {
+      method: 'POST',
+      accessToken,
+      body: {
+        target_order_id: orderId,
+      },
+    },
+  );
+
+  return rows.map(orderDeliveryUpdateRowToUpdate);
+}
+
+export async function buyerConfirmDeliveryJob(accessToken: string, targetJobId: string) {
+  const job = await supabaseRequest<SupabaseDeliveryJobRow>('/rest/v1/rpc/buyer_confirm_delivery', {
+    method: 'POST',
+    accessToken,
+    body: {
+      target_job_id: targetJobId,
+    },
+  });
+
+  return deliveryJobRowToJob(job);
+}
 export function isRecoverableSupabaseSetupError(error: unknown) {
   if (!(error instanceof SupabaseApiError)) {
     return false;
