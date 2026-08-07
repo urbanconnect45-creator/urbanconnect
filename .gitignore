@@ -12,6 +12,12 @@ yarn-debug.*
 yarn-error.*
 *.log
 *.err
+*.jks
+credentials.json
+credentials/
+android/
+npmnpx
+npx
 .env
 .DS_Store
 --fetch-timeout=60000/
