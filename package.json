@@ -15,7 +15,7 @@
     "export:web": "node scripts/export-web.mjs",
     "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
     "desktop:prepare": "npm install --prefix electron --ignore-scripts --no-audit --no-fund",
-    "desktop:build:win": "npm run desktop:prepare && npm run export:web && electron-builder --win nsis",
+    "desktop:build:win": "npm run desktop:prepare && npm run export:web && electron-builder --win nsis --publish never",
     "desktop:dir": "npm run desktop:prepare && npm run export:web && electron-builder --win --dir"
   },
   "dependencies": {

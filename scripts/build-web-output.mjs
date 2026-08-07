@@ -14,7 +14,7 @@ const sellerPortalPath = 'seller-portal';
 const sellerDesktopPath = 'seller-desktop';
 const defaultSiteUrl = 'https://www.view2connect.ng';
 const defaultSellerDesktopDownloadUrl =
-  'https://github.com/urbanconnect45-creator/urbanconnect/releases/download/seller-desktop-v1.0.1/View2Connect-Seller-Portal-Setup.exe';
+  'https://github.com/urbanconnect45-creator/urbanconnect/releases/download/seller-desktop-v1.0.2/View2Connect-Seller-Portal-Setup.exe';
 const siteName = 'View2Connect';
 const siteDescription =
   'View2Connect is a CAC-registered Nigerian marketplace where customers discover products, food, local stores, secure payments, receipts, and delivery updates.';
