@@ -14,8 +14,9 @@
     "web:local": "set EXPO_PUBLIC_URBANCONNECT_LOCAL_TEST_MODE=true&& expo start --web",
     "export:web": "node scripts/export-web.mjs",
     "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
-    "desktop:build:win": "npm run export:web && electron-builder --win nsis",
-    "desktop:dir": "npm run export:web && electron-builder --win --dir"
+    "desktop:prepare": "npm install --prefix electron --ignore-scripts --no-audit --no-fund",
+    "desktop:build:win": "npm run desktop:prepare && npm run export:web && electron-builder --win nsis",
+    "desktop:dir": "npm run desktop:prepare && npm run export:web && electron-builder --win --dir"
   },
   "dependencies": {
     "@expo/env": "~2.0.8",
@@ -63,7 +64,9 @@
       "output": "release"
     },
     "files": [
-      "**/*"
+      "main.cjs",
+      "package.json",
+      "!node_modules/**/*"
     ],
     "electronDist": "node_modules/electron/dist",
     "npmRebuild": false,

@@ -14,7 +14,7 @@ const sellerPortalPath = 'seller-portal';
 const sellerDesktopPath = 'seller-desktop';
 const defaultSiteUrl = 'https://www.view2connect.ng';
 const defaultSellerDesktopDownloadUrl =
-  'https://github.com/urbanconnect45-creator/urbanconnect/releases/latest/download/View2Connect-Seller-Portal-Setup.exe';
+  'https://github.com/urbanconnect45-creator/urbanconnect/releases/download/seller-desktop-v1.0.1/View2Connect-Seller-Portal-Setup.exe';
 const siteName = 'View2Connect';
 const siteDescription =
   'View2Connect is a CAC-registered Nigerian marketplace where customers discover products, food, local stores, secure payments, receipts, and delivery updates.';
@@ -2344,13 +2344,14 @@ ${routes
   const favicon96 = createFaviconPng(96);
   const favicon180 = createFaviconPng(180);
   const favicon192 = createFaviconPng(192);
+  const favicon256 = createFaviconPng(256);
   const favicon512 = createFaviconPng(512);
   await fs.writeFile(path.join(distDir, 'favicon-48x48.png'), favicon48);
   await fs.writeFile(path.join(distDir, 'favicon-96x96.png'), favicon96);
   await fs.writeFile(path.join(distDir, 'favicon-192x192.png'), favicon192);
   await fs.writeFile(path.join(distDir, 'favicon-512x512.png'), favicon512);
   await fs.writeFile(path.join(distDir, 'apple-touch-icon.png'), favicon180);
-  await fs.writeFile(path.join(distDir, 'favicon.ico'), createIcoFromPng(favicon48, 48));
+  await fs.writeFile(path.join(distDir, 'favicon.ico'), createIcoFromPng(favicon256, 256));
   await fs.writeFile(path.join(distDir, 'favicon.svg'), logoSvg);
   await fs.writeFile(path.join(assetsDir, 'view2connect-mark.svg'), logoSvg);
   await fs.writeFile(path.join(assetsDir, 'urbanconnect-mark.svg'), logoSvg);

@@ -1,4 +1,5 @@
 release/
+release-*/
 electron/
 android/
 credentials/
