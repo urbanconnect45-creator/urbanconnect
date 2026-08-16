@@ -4,10 +4,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'View2Connect',
   slug: 'urbanconnect',
-  version: '1.0.0',
+  version: '1.0.3',
   orientation: 'portrait',
   scheme: 'urbanconnect',
   userInterfaceStyle: 'light',
+  icon: './assets/app-icon.png',
 
   extra: {
     eas: {
@@ -25,6 +26,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'com.view2connect.ng',
+    blockedPermissions: [
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.SYSTEM_ALERT_WINDOW',
+    ],
     intentFilters: [
       {
         action: 'VIEW',
@@ -45,6 +52,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-font',
+    'expo-secure-store',
+    [
+      'expo-web-browser',
+      {
+        experimentalLauncherActivity: true,
+      },
+    ],
+    [
+      'expo-splash-screen',
+      {
+        backgroundColor: '#1A0638',
+        image: './assets/app-icon.png',
+        imageWidth: 128,
+      },
+    ],
     [
       'expo-local-authentication',
       {
@@ -57,6 +79,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         photosPermission:
           'Allow View2Connect to access your photos and videos so you can upload listing media from the gallery.',
+        microphonePermission: false,
       },
     ],
   ],

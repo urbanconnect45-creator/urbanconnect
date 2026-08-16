@@ -398,7 +398,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
       return;
     }
 
-    if (amount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
+    if (MINIMUM_ADD_FUNDS_DEPOSIT > 0 && amount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
       setDepositError(
         `Add funds must be higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)}.`,
       );
@@ -434,12 +434,12 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
 
     if (!Number.isFinite(amount) || amount <= 0) {
       setDepositError(
-        `Enter an amount higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)} before opening ${channel.label}.`,
+        `Enter a valid amount before opening ${channel.label}.`,
       );
       return;
     }
 
-    if (amount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
+    if (MINIMUM_ADD_FUNDS_DEPOSIT > 0 && amount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
       setDepositError(
         `Add funds must be higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)}.`,
       );
@@ -506,7 +506,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
   const handleDepositHelp = () => {
     Alert.alert(
       'Deposit help',
-      `Generate a Flutterwave account for more than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)}, transfer only the exact amount shown, and wait for Flutterwave confirmation. If no transfer is detected within ${DYNAMIC_DEPOSIT_EXPIRY_MINUTES} minutes, the deposit shows Failed.`,
+      `Generate a Flutterwave account for the amount you want to test, transfer only the exact amount shown, and wait for Flutterwave confirmation. If no transfer is detected within ${DYNAMIC_DEPOSIT_EXPIRY_MINUTES} minutes, the deposit shows Failed.`,
     );
   };
 
@@ -599,6 +599,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
 
   const riverParkVerified = isRiverParkVerifiedForUser(user);
   const isBusinessOwner = user?.role === 'businessOwner';
+  const isDispatchUser = user?.role === 'dispatch';
   const selectedOwnerListings = visibleOwnerListings.filter((business) =>
     (listingView === 'product'
       ? business.listingType === 'product'
@@ -610,6 +611,115 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     return null;
   }
 
+  if (isDispatchUser) {
+    const dispatchProfileName = savedOwnerProfile?.ownerName || user.fullName;
+    const dispatchProfileEmail = savedOwnerProfile?.email || user.email;
+    const dispatchProfilePhone = savedOwnerProfile?.phone || user.phoneNumber;
+    const dispatchProfileWhatsApp = savedOwnerProfile?.whatsapp || '';
+    const dispatchProfileAddress = savedOwnerProfile?.address || user.businessCluster || estate?.name || 'View2Connect';
+
+    return (
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={[styles.hero, styles.userCarouselCard]}>
+          <View style={styles.heroGlowOne} />
+          <View style={styles.heroGlowTwo} />
+          <Pressable
+            onPress={() => navigation.navigate('Settings')}
+            style={({ pressed }) => [styles.heroSettingsButton, pressed && styles.itemRowPressed]}
+          >
+            <Ionicons color={colors.white} name="settings-outline" size={22} />
+          </Pressable>
+          <Text style={styles.eyebrow}>Dispatch account</Text>
+          <Text style={styles.title}>{dispatchProfileName}</Text>
+          <Text style={styles.subtitle}>
+            {dispatchProfileEmail} - {dispatchProfileAddress}
+          </Text>
+          <View style={styles.heroMetaRow}>
+            <View style={styles.heroMetaChip}>
+              <Ionicons color={colors.white} name="bicycle-outline" size={16} />
+              <Text style={styles.heroMetaText}>Dispatch rider</Text>
+            </View>
+            <View style={styles.heroMetaChip}>
+              <Ionicons color={colors.white} name="call-outline" size={16} />
+              <Text style={styles.heroMetaText}>{dispatchProfilePhone || 'Phone not added'}</Text>
+            </View>
+            <View style={styles.heroMetaChip}>
+              <Ionicons color={colors.white} name="shield-checkmark-outline" size={16} />
+              <Text style={styles.heroMetaText}>Role separated</Text>
+            </View>
+          </View>
+          <Pressable
+            onPress={() => navigation.navigate('ProfileEdit')}
+            style={({ pressed }) => [styles.heroEditButton, pressed && styles.itemRowPressed]}
+          >
+            <Ionicons color={colors.white} name="create-outline" size={17} />
+            <Text style={styles.heroEditText}>Edit</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryValue}>Dispatch</Text>
+            <Text style={styles.summaryLabel}>Role</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryValue}>{dispatchProfilePhone ? 'Saved' : 'Missing'}</Text>
+            <Text style={styles.summaryLabel}>Phone</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryValue}>Active</Text>
+            <Text style={styles.summaryLabel}>Access</Text>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Dispatch profile</Text>
+          <Text style={styles.bodyText}>
+            Update your dispatch name, phone number, WhatsApp number, email, and address from Edit profile.
+          </Text>
+          <View style={styles.rowStack}>
+            <View style={styles.itemRow}>
+              <View style={styles.itemCopy}>
+                <Text style={styles.itemTitle}>Phone</Text>
+                <Text style={styles.itemMeta}>{dispatchProfilePhone || 'Not added'}</Text>
+              </View>
+            </View>
+            <View style={styles.itemRow}>
+              <View style={styles.itemCopy}>
+                <Text style={styles.itemTitle}>WhatsApp</Text>
+                <Text style={styles.itemMeta}>{dispatchProfileWhatsApp || 'Not added'}</Text>
+              </View>
+            </View>
+            <View style={styles.itemRow}>
+              <View style={styles.itemCopy}>
+                <Text style={styles.itemTitle}>Email</Text>
+                <Text style={styles.itemMeta}>{dispatchProfileEmail}</Text>
+              </View>
+            </View>
+            <View style={styles.itemRow}>
+              <View style={styles.itemCopy}>
+                <Text style={styles.itemTitle}>Address</Text>
+                <Text style={styles.itemMeta}>{dispatchProfileAddress}</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.actionStack}>
+            <AppButton label="Delivery dashboard" onPress={() => navigation.navigate('DispatchMode')} />
+            <AppButton
+              label="Edit profile"
+              onPress={() => navigation.navigate('ProfileEdit')}
+              variant="secondary"
+            />
+            <AppButton
+              label="Settings"
+              onPress={() => navigation.navigate('Settings')}
+              variant="secondary"
+            />
+          </View>
+        </View>
+      </ScrollView>
+    );
+  }
   const residentActiveOrders = residentOrders.filter((order) => isOrderOpen(order.status));
   const ownerOpenOrders = ownerOrders.filter((order) => isOrderOpen(order.status));
   return (
@@ -698,8 +808,8 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           </View>
 
           <Text style={[styles.portfolioHint, isDarkMode && styles.portfolioHintDarkReadable]}>
-            Add more than {formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)} per deposit. Unpaid
-            accounts fail after {DYNAMIC_DEPOSIT_EXPIRY_MINUTES} minutes.
+            Add funds to your View2Connect account balance. Payment status updates after provider
+            confirmation.
           </Text>
           <View style={styles.portfolioActionRow}>
             <AppButton
@@ -751,7 +861,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           <Text style={styles.eyebrow}>{isBusinessOwner ? 'Business account' : 'My account'}</Text>
           <Text style={styles.title}>{user.businessName ?? user.fullName}</Text>
           <Text style={styles.subtitle}>
-            {user.email} - {user.businessCluster ?? estate?.name ?? 'View2Connect'}
+            {user.email} - {estate?.name ?? user.businessCluster ?? 'View2Connect'}
           </Text>
           <View style={styles.heroMetaRow}>
             <View style={styles.heroMetaChip}>
@@ -1062,7 +1172,6 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
             }
             variant="secondary"
           />
-          <AppButton label="Sign out" onPress={signOut} variant="ghost" />
         </View>
       </View>
       </ScrollView>
@@ -1305,7 +1414,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                       setDepositAmount(value.replace(/[^0-9]/g, ''));
                       setDepositError(null);
                     }}
-                    placeholder={`Enter more than ${formatNumber(MINIMUM_ADD_FUNDS_DEPOSIT)}`}
+                    placeholder="Enter amount"
                     placeholderTextColor={colors.textMuted}
                     style={styles.depositAmountInput}
                     value={depositAmount}
@@ -1383,7 +1492,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                         Transfer only the exact amount
                       </Text>
                       <Text style={styles.depositInstructionText}>
-                        Do not transfer {formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)} or less.
+                        Transfer only the exact amount shown for this test deposit.
                       </Text>
                     </View>
                   </View>

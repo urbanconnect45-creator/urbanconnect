@@ -1,6 +1,6 @@
 import type { DynamicDepositAccount } from '../types/business';
 
-export const MINIMUM_ADD_FUNDS_DEPOSIT = 2000;
+export const MINIMUM_ADD_FUNDS_DEPOSIT = 0;
 export const DYNAMIC_DEPOSIT_EXPIRY_MINUTES = 30;
 export const DYNAMIC_DEPOSIT_EXPIRY_MS = DYNAMIC_DEPOSIT_EXPIRY_MINUTES * 60 * 1000;
 export const DYNAMIC_DEPOSIT_EXPIRY_SECONDS = DYNAMIC_DEPOSIT_EXPIRY_MINUTES * 60;

@@ -28,7 +28,7 @@ export const defaultPaymentPlans: PaymentPlan[] = [
     cycle: 'weekly',
     title: 'Weekly plan',
     amount: 4000,
-    description: 'Best for short promo bursts and small test listings.',
+    description: 'Best for short promotions and growing marketplace visibility.',
     updatedAt: '2026-05-19T08:00:00.000Z',
   },
   {

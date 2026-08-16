@@ -44,7 +44,7 @@ function createProfileForm(
     openingTime: savedProfile?.openingTime ?? '',
     closingTime: savedProfile?.closingTime ?? '',
     openDays: savedProfile?.openDays ?? [],
-    coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
+    coverImage: savedProfile?.coverImage ?? '',
     galleryImages: '',
     galleryVideos: '',
   };

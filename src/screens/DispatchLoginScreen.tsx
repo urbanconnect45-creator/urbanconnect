@@ -17,19 +17,12 @@ import { FormField } from '../components/FormField';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import { estates } from '../data/estates';
 import { useAuth } from '../hooks/useAuth';
-import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
+import { requestSupabasePasswordReset } from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { SignUpFormValues } from '../types/auth';
 import { riverParkClusters } from '../types/business';
-
-type PasswordResetState = {
-  identifier: string;
-  recipientEmail: string;
-  code: string;
-  expiresAt: number;
-};
 
 type DispatchAuthMode = 'login' | 'signup';
 type DispatchSignupStep = 'details' | 'verification';
@@ -42,18 +35,9 @@ function looksLikePhone(value: string) {
   return value.replace(/[^\d]/g, '').length >= 10;
 }
 
-function normalizePhone(value: string) {
-  return value.replace(/[^\d+]/g, '');
-}
-
-function generateVerificationCode() {
-  return String(Math.floor(10000000 + Math.random() * 90000000));
-}
-
 export function DispatchLoginScreen() {
   const { width } = useWindowDimensions();
-  const { appendEmailLog } = useBusinessDirectory();
-  const { requestSignUpVerification, resetPassword, signIn, signUp, users } = useAuth();
+  const { requestSignUpVerification, signIn, signUp } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const isWideLayout = width >= 980;
@@ -62,12 +46,9 @@ export function DispatchLoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
-  const [passwordReset, setPasswordReset] = useState<PasswordResetState | null>(null);
   const [resetIdentifier, setResetIdentifier] = useState('');
-  const [resetCodeDraft, setResetCodeDraft] = useState('');
-  const [resetPasswordDraft, setResetPasswordDraft] = useState('');
-  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
+  const [isResetLoading, setIsResetLoading] = useState(false);
   const [authMode, setAuthMode] = useState<DispatchAuthMode>('login');
   const [signupStep, setSignupStep] = useState<DispatchSignupStep>('details');
   const [signupDraft, setSignupDraft] = useState({
@@ -223,28 +204,11 @@ export function DispatchLoginScreen() {
 
   const closePasswordReset = () => {
     setShowPasswordReset(false);
-    setPasswordReset(null);
     setResetIdentifier('');
-    setResetCodeDraft('');
-    setResetPasswordDraft('');
-    setResetConfirmPassword('');
     setResetError(null);
   };
 
-  const findDispatchAccount = (value: string) => {
-    const normalizedValue = value.trim();
-    const normalizedEmail = normalizedValue.toLowerCase();
-    const normalizedPhone = normalizePhone(normalizedValue);
-
-    return users.find(
-      (account) =>
-        account.role === 'dispatch' &&
-        (account.email.trim().toLowerCase() === normalizedEmail ||
-          normalizePhone(account.phoneNumber) === normalizedPhone),
-    );
-  };
-
-  const sendPasswordResetCode = () => {
+  const sendPasswordResetCode = async () => {
     const currentIdentifier = resetIdentifier.trim();
 
     if (!validateIdentifier(currentIdentifier)) {
@@ -252,80 +216,23 @@ export function DispatchLoginScreen() {
       return;
     }
 
-    const matchedAccount = findDispatchAccount(currentIdentifier);
-
-    if (!matchedAccount) {
-      setResetError('This account is not registered as a dispatch account.');
-      return;
-    }
-
-    const code = generateVerificationCode();
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-
-    setPasswordReset({
-      identifier: matchedAccount.email,
-      recipientEmail: matchedAccount.email,
-      code,
-      expiresAt,
-    });
-    setResetCodeDraft('');
     setResetError(null);
-
-    appendEmailLog({
-      recipientType: 'dispatch',
-      recipientName: matchedAccount.fullName,
-      recipientEmail: matchedAccount.email,
-      subject: 'View2Connect dispatch password reset code',
-      body: `Your View2Connect dispatch password reset code is ${code}. It expires in 10 minutes.`,
-    });
-
-    Alert.alert(
-      'Reset code sent',
-      `Enter the 8 digit code sent to ${matchedAccount.email}. Testing code: ${code}`,
-    );
-  };
-
-  const handlePasswordReset = async () => {
-    if (!passwordReset) {
-      setResetError('Send a reset code first.');
-      return;
-    }
-
-    if (Date.now() > passwordReset.expiresAt) {
-      setResetError('Reset code expired. Send a new code to continue.');
-      setPasswordReset(null);
-      setResetCodeDraft('');
-      return;
-    }
-
-    if (resetCodeDraft.trim() !== passwordReset.code) {
-      setResetError('Enter the correct 8 digit reset code.');
-      return;
-    }
-
-    if (resetPasswordDraft.trim().length < 6) {
-      setResetError('New password must be at least 6 characters.');
-      return;
-    }
-
-    if (resetPasswordDraft !== resetConfirmPassword) {
-      setResetError('Passwords do not match.');
-      return;
-    }
-
+    setIsResetLoading(true);
     try {
-      await resetPassword(passwordReset.identifier, resetPasswordDraft);
-      const nextEmail = passwordReset.recipientEmail;
+      await requestSupabasePasswordReset(currentIdentifier, 'dispatch');
       closePasswordReset();
-      setIdentifier(nextEmail);
-      setPassword(resetPasswordDraft);
-      Alert.alert('Password updated', 'Your dispatch password has been updated.');
+      Alert.alert(
+        'Check your email',
+        'If that dispatch account exists, Supabase has sent a secure recovery link.',
+      );
     } catch (resetFailure) {
       const message =
         resetFailure instanceof Error
           ? resetFailure.message
           : 'Unable to reset password right now.';
       setResetError(message);
+    } finally {
+      setIsResetLoading(false);
     }
   };
 
@@ -578,7 +485,7 @@ export function DispatchLoginScreen() {
               <View style={styles.modalHeaderCopy}>
                 <Text style={styles.cardTitle}>Reset dispatch password</Text>
                 <Text style={styles.cardSubtitle}>
-                  Send a code to the dispatch email, then set a new password.
+                  Send a secure recovery link to the email on the dispatch account.
                 </Text>
               </View>
               <Pressable
@@ -606,46 +513,11 @@ export function DispatchLoginScreen() {
                 value={resetIdentifier}
               />
 
-              {!passwordReset ? (
-                <AppButton label="Send reset code" onPress={sendPasswordResetCode} />
-              ) : (
-                <>
-                  <Text style={styles.helperText}>
-                    Enter the 8 digit code sent to {passwordReset.recipientEmail}.
-                  </Text>
-                  <FormField
-                    keyboardType="numeric"
-                    label="Reset code"
-                    onChangeText={(value) => {
-                      setResetCodeDraft(value.replace(/[^\d]/g, '').slice(0, 8));
-                      setResetError(null);
-                    }}
-                    placeholder="00000000"
-                    value={resetCodeDraft}
-                  />
-                  <FormField
-                    label="New password"
-                    onChangeText={(value) => {
-                      setResetPasswordDraft(value);
-                      setResetError(null);
-                    }}
-                    placeholder="Enter new password"
-                    secureTextEntry
-                    value={resetPasswordDraft}
-                  />
-                  <FormField
-                    label="Confirm new password"
-                    onChangeText={(value) => {
-                      setResetConfirmPassword(value);
-                      setResetError(null);
-                    }}
-                    placeholder="Confirm new password"
-                    secureTextEntry
-                    value={resetConfirmPassword}
-                  />
-                  <AppButton label="Update password" onPress={() => void handlePasswordReset()} />
-                </>
-              )}
+              <AppButton
+                label="Send secure reset link"
+                loading={isResetLoading}
+                onPress={() => void sendPasswordResetCode()}
+              />
 
               {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
             </ScrollView>

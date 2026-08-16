@@ -16,6 +16,18 @@
     }
   },
   "submit": {
-    "production": {}
+    "internal": {
+      "android": {
+        "serviceAccountKeyPath": "../urbanconnect-499912-03a72fb71cf2.json",
+        "track": "internal",
+        "releaseStatus": "completed"
+      }
+    },
+    "production": {
+      "android": {
+        "track": "beta",
+        "releaseStatus": "completed"
+      }
+    }
   }
 }

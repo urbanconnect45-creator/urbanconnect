@@ -29,12 +29,22 @@ function readStoredValue<T>(key: string, initialValue: T) {
 export function usePersistentState<T>(
   key: string,
   initialValue: T,
+  options: { enabled?: boolean } = {},
 ): [T, Dispatch<SetStateAction<T>>] {
+  const isPersistenceEnabled = options.enabled ?? true;
   const storageKey = getUrbanConnectStorageKey(key);
-  const [value, setValue] = useState<T>(() => readStoredValue(storageKey, initialValue));
-  const [isNativeValueLoaded, setIsNativeValueLoaded] = useState(() => canUseWebStorage());
+  const [value, setValue] = useState<T>(() =>
+    isPersistenceEnabled ? readStoredValue(storageKey, initialValue) : initialValue,
+  );
+  const [isNativeValueLoaded, setIsNativeValueLoaded] = useState(
+    () => !isPersistenceEnabled || canUseWebStorage(),
+  );
 
   useEffect(() => {
+    if (!isPersistenceEnabled) {
+      return undefined;
+    }
+
     if (canUseWebStorage()) {
       setIsNativeValueLoaded(true);
       return;
@@ -62,9 +72,13 @@ export function usePersistentState<T>(
     return () => {
       isMounted = false;
     };
-  }, [storageKey]);
+  }, [isPersistenceEnabled, storageKey]);
 
   useEffect(() => {
+    if (!isPersistenceEnabled) {
+      return;
+    }
+
     if (!canUseWebStorage()) {
       if (!isNativeValueLoaded) {
         return;
@@ -81,7 +95,7 @@ export function usePersistentState<T>(
     } catch {
       // Ignore storage write failures so native and private browsing still work.
     }
-  }, [isNativeValueLoaded, storageKey, value]);
+  }, [isNativeValueLoaded, isPersistenceEnabled, storageKey, value]);
 
   return [value, setValue];
 }

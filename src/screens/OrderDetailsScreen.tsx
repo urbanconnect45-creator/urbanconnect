@@ -1,10 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
+import { buyerConfirmDeliveryJob, fetchOrderDeliveryUpdates } from '../services/supabaseApi';
 import type { OrderDetailsScreenProps } from '../navigation/types';
+import type { OrderDeliveryUpdate } from '../types/business';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -18,12 +21,74 @@ import {
 } from '../utils/order';
 
 export function OrderDetailsScreen({ navigation, route }: OrderDetailsScreenProps) {
-  const { user } = useAuth();
+  const { supabaseAccessToken, user } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const { getBusinessById, getOrderById } = useBusinessDirectory();
   const order = getOrderById(route.params.orderId);
+  const [deliveryUpdates, setDeliveryUpdates] = useState<OrderDeliveryUpdate[]>([]);
+  const [deliveryUpdateError, setDeliveryUpdateError] = useState<string | null>(null);
+  const [isLoadingDeliveryUpdates, setIsLoadingDeliveryUpdates] = useState(false);
+  const [confirmingJobId, setConfirmingJobId] = useState<string | null>(null);
 
+  const loadDeliveryUpdates = async () => {
+    if (!supabaseAccessToken) {
+      return;
+    }
+
+    try {
+      setIsLoadingDeliveryUpdates(true);
+      setDeliveryUpdateError(null);
+      const updates = await fetchOrderDeliveryUpdates(supabaseAccessToken, route.params.orderId);
+      setDeliveryUpdates(updates);
+    } catch (error) {
+      setDeliveryUpdateError(
+        error instanceof Error ? error.message : 'Unable to load delivery updates.',
+      );
+    } finally {
+      setIsLoadingDeliveryUpdates(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDeliveryUpdates();
+  }, [route.params.orderId, supabaseAccessToken]);
+
+  const openPhone = async (phoneNumber: string, mode: 'call' | 'message') => {
+    const cleanPhone = phoneNumber.replace(/[^\d+]/g, '');
+
+    if (!cleanPhone) {
+      return;
+    }
+
+    try {
+      await Linking.openURL(`${mode === 'call' ? 'tel' : 'sms'}:${cleanPhone}`);
+    } catch {
+      Alert.alert('Unable to open phone app', 'This device could not open the phone action.');
+    }
+  };
+
+  const confirmDelivery = async (jobId: string) => {
+    if (!supabaseAccessToken) {
+      Alert.alert('Sign in required', 'Sign in again before confirming delivery.');
+      return;
+    }
+
+    try {
+      setConfirmingJobId(jobId);
+      setDeliveryUpdateError(null);
+      await buyerConfirmDeliveryJob(supabaseAccessToken, jobId);
+      await loadDeliveryUpdates();
+      Alert.alert('Delivery confirmed', 'Thanks. This delivery is now completed.');
+    } catch (error) {
+      Alert.alert(
+        'Unable to confirm delivery',
+        error instanceof Error ? error.message : 'The delivery could not be confirmed yet.',
+      );
+    } finally {
+      setConfirmingJobId(null);
+    }
+  };
   if (!order) {
     return (
       <View style={styles.emptyShell}>
@@ -146,6 +211,68 @@ export function OrderDetailsScreen({ navigation, route }: OrderDetailsScreenProp
         </View>
       )}
 
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Delivery rider updates</Text>
+        {isLoadingDeliveryUpdates ? <Text style={styles.bodyText}>Loading delivery updates...</Text> : null}
+        {deliveryUpdateError ? <Text style={styles.noticeText}>{deliveryUpdateError}</Text> : null}
+        <View style={styles.stack}>
+          {deliveryUpdates.length > 0 ? (
+            deliveryUpdates.map((update) => {
+              const riderPhone = update.riderPhoneNumber?.trim() ?? '';
+              const canConfirm =
+                user?.id === order.userId && update.status === 'awaitingBuyerConfirmation';
+
+              return (
+                <View key={update.id} style={styles.itemCard}>
+                  <View style={styles.itemTopRow}>
+                    <View style={styles.itemCopy}>
+                      <Text style={styles.itemTitle}>{update.sellerName}</Text>
+                      <Text style={styles.itemMeta}>Status: {update.status}</Text>
+                    </View>
+                    {update.completedAt ? (
+                      <Ionicons color={colors.success} name="checkmark-circle-outline" size={22} />
+                    ) : null}
+                  </View>
+                  <Text style={styles.bodyText}>{update.deliveryAddress}</Text>
+                  {update.riderFullName ? (
+                    <Text style={styles.itemMeta}>Rider: {update.riderFullName}</Text>
+                  ) : (
+                    <Text style={styles.itemMeta}>Rider will appear after dispatch accepts.</Text>
+                  )}
+                  {riderPhone ? (
+                    <Text style={styles.itemMeta}>Rider phone: {riderPhone}</Text>
+                  ) : null}
+                  {riderPhone ? (
+                    <View style={styles.buttonRow}>
+                      <AppButton
+                        label="Call rider"
+                        onPress={() => void openPhone(riderPhone, 'call')}
+                        variant="secondary"
+                      />
+                      <AppButton
+                        label="Message rider"
+                        onPress={() => void openPhone(riderPhone, 'message')}
+                        variant="ghost"
+                      />
+                    </View>
+                  ) : null}
+                  {canConfirm ? (
+                    <AppButton
+                      label={confirmingJobId === update.id ? 'Confirming...' : 'I received this delivery'}
+                      loading={confirmingJobId === update.id}
+                      onPress={() => void confirmDelivery(update.id)}
+                    />
+                  ) : null}
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.bodyText}>
+              Delivery updates will appear here after payment creates a dispatch job.
+            </Text>
+          )}
+        </View>
+      </View>
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Items in this order</Text>
         <View style={styles.stack}>
@@ -363,6 +490,12 @@ function createStyles(colors: AppColors) {
     },
     stack: {
       gap: spacing.sm,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      marginTop: spacing.xs,
     },
     itemCard: {
       gap: 4,

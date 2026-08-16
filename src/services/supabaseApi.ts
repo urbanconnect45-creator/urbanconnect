@@ -41,9 +41,6 @@ import { formatCurrency } from '../utils/format';
 import { normalizeOrderStatus } from '../utils/order';
 import { normalizeProductCategory } from '../utils/category';
 
-const fallbackSupabaseUrl = 'https://uyhudlqajzuzonntodqk.supabase.co';
-const fallbackSupabaseKey = 'sb_publishable_Y0_i8Q_ZVknA09MPuFhL8g_76LD1dpP';
-
 type JsonRecord = Record<string, unknown>;
 
 type SupabaseAuthUser = {
@@ -82,6 +79,7 @@ export type SupabaseSession = {
   refreshToken?: string;
   expiresAt?: number;
   tokenType?: string;
+  portal?: 'app' | 'admin';
 };
 
 type SupabaseProfileRow = {
@@ -108,7 +106,7 @@ type SupabaseAdminRow = {
   id: string;
   full_name: string;
   email: string;
-  role: 'owner' | 'customerCare';
+  role: 'owner' | 'admin' | 'customerCare';
   is_active: boolean;
   created_at: string;
 };
@@ -563,7 +561,7 @@ function normalizeSupabaseUrl(value?: string) {
     !candidate ||
     /your-project-ref|myprojectid|your-project-id/i.test(candidate)
   ) {
-    return fallbackSupabaseUrl;
+    return undefined;
   }
 
   const withProtocol = /^https?:\/\//i.test(candidate)
@@ -573,14 +571,20 @@ function normalizeSupabaseUrl(value?: string) {
   try {
     return trimTrailingSlash(new URL(withProtocol).toString());
   } catch {
-    return fallbackSupabaseUrl;
+    return undefined;
   }
 }
 
 export const supabaseConfig = {
   url: normalizeSupabaseUrl(readPublicEnv('EXPO_PUBLIC_SUPABASE_URL')),
-  publishableKey: readPublicEnv('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY') ?? fallbackSupabaseKey,
+  publishableKey: readPublicEnv('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY')?.trim() || undefined,
 };
+
+let activeSupabaseAccessToken: string | undefined;
+
+export function setSupabaseAccessToken(accessToken?: string) {
+  activeSupabaseAccessToken = accessToken?.trim() || undefined;
+}
 
 const listingMediaBucket = 'urbanconnect-listing-media';
 
@@ -670,12 +674,19 @@ async function supabaseRequest<T>(
     throw new SupabaseApiError('Supabase is not configured for this app.', 0);
   }
 
-  const response = await fetch(`${supabaseConfig.url}${path}`, {
+  const supabaseUrl = supabaseConfig.url;
+  const publishableKey = supabaseConfig.publishableKey;
+
+  if (!supabaseUrl || !publishableKey) {
+    throw new SupabaseApiError('Supabase is not configured for this app.', 0);
+  }
+
+  const response = await fetch(`${supabaseUrl}${path}`, {
     method: options.method ?? 'GET',
     headers: {
       Accept: 'application/json',
-      apikey: supabaseConfig.publishableKey,
-      Authorization: `Bearer ${options.accessToken ?? supabaseConfig.publishableKey}`,
+      apikey: publishableKey,
+      Authorization: `Bearer ${options.accessToken ?? activeSupabaseAccessToken ?? publishableKey}`,
       ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
     },
@@ -811,19 +822,55 @@ export async function uploadMediaUriToSupabaseStorage(
   path: string,
   kind: StorageMediaKind,
 ) {
+  const supabaseUrl = supabaseConfig.url;
+  const publishableKey = supabaseConfig.publishableKey;
+  const accessToken = activeSupabaseAccessToken;
+
+  if (!isSupabaseConfigured || !supabaseUrl || !publishableKey) {
+    throw new SupabaseApiError('Supabase storage is not configured for this app.', 0);
+  }
+
+  if (!accessToken) {
+    throw new SupabaseApiError('Sign in before uploading media.', 401);
+  }
+
   const mediaResponse = await fetch(uri);
+  if (!mediaResponse.ok) {
+    throw new SupabaseApiError('The selected media file could not be read.', 400);
+  }
   const mediaBlob = await mediaResponse.blob();
   const contentType = mediaBlob.type || mimeTypeFromUri(uri, kind);
+  const allowedContentType =
+    kind === 'image'
+      ? /^image\/(jpeg|png|webp)$/i.test(contentType)
+      : kind === 'video'
+        ? /^video\/(mp4|webm|quicktime)$/i.test(contentType)
+        : /^(application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|application\/vnd\.ms-excel|text\/plain)$/i.test(
+            contentType,
+          );
+  const maximumSize = kind === 'video' ? 30 * 1024 * 1024 : 10 * 1024 * 1024;
+
+  if (!allowedContentType) {
+    throw new SupabaseApiError(`This ${kind} file type is not supported.`, 415);
+  }
+
+  if (mediaBlob.size > maximumSize) {
+    throw new SupabaseApiError(
+      `${kind === 'video' ? 'Videos' : 'Files'} must be ${maximumSize / 1024 / 1024} MB or smaller.`,
+      413,
+    );
+  }
+
   const extension = extensionFromMimeType(contentType, kind);
   const normalizedPath = path.includes('.') ? path : `${path}.${extension}`;
   const encodedPath = encodeStoragePath(normalizedPath);
   const uploadResponse = await fetch(
-    `${supabaseConfig.url}/storage/v1/object/${listingMediaBucket}/${encodedPath}`,
+    `${supabaseUrl}/storage/v1/object/${listingMediaBucket}/${encodedPath}`,
     {
       method: 'POST',
       headers: {
-        apikey: supabaseConfig.publishableKey,
-        Authorization: `Bearer ${supabaseConfig.publishableKey}`,
+        apikey: publishableKey,
+        Authorization: `Bearer ${accessToken}`,
         'cache-control': '3600',
         'Content-Type': contentType,
         'x-upsert': 'true',
@@ -843,7 +890,7 @@ export async function uploadMediaUriToSupabaseStorage(
     );
   }
 
-  return `${supabaseConfig.url}/storage/v1/object/public/${listingMediaBucket}/${encodedPath}`;
+  return `${supabaseUrl}/storage/v1/object/public/${listingMediaBucket}/${encodedPath}`;
 }
 
 export async function uploadChatAttachmentToSupabaseStorage(
@@ -933,6 +980,23 @@ function toSession(response: SupabaseAuthResponse): SupabaseSession | null {
       : {}),
     ...(response.token_type ? { tokenType: response.token_type } : {}),
   };
+}
+
+export async function refreshSupabaseSession(refreshToken: string) {
+  const response = await supabaseRequest<SupabaseAuthResponse>(
+    '/auth/v1/token?grant_type=refresh_token',
+    {
+      method: 'POST',
+      body: { refresh_token: refreshToken },
+    },
+  );
+  const session = toSession(response);
+
+  if (!session) {
+    throw new SupabaseApiError('Supabase did not return a refreshed session.', 401);
+  }
+
+  return session;
 }
 
 function profileToAppUser(row: SupabaseProfileRow): AppUser {
@@ -1582,8 +1646,6 @@ export async function signUpWithSupabase(
 }
 
 export async function createDispatchAccountWithSupabase(values: {
-  adminEmail: string;
-  adminPassword: string;
   fullName: string;
   email: string;
   phoneNumber: string;
@@ -1596,8 +1658,6 @@ export async function createDispatchAccountWithSupabase(values: {
     {
       method: 'POST',
       body: {
-        adminEmail: values.adminEmail.trim().toLowerCase(),
-        adminPassword: values.adminPassword,
         fullName: values.fullName.trim(),
         email: values.email.trim().toLowerCase(),
         phoneNumber: values.phoneNumber.trim(),
@@ -1646,6 +1706,16 @@ export async function signOutSupabase(accessToken: string) {
   return supabaseRequest('/auth/v1/logout?scope=global', {
     method: 'POST',
     accessToken,
+  });
+}
+
+export async function requestSupabasePasswordReset(
+  identifier: string,
+  role: UserRole,
+) {
+  await supabaseRequest('/functions/v1/request-password-reset', {
+    method: 'POST',
+    body: { identifier: identifier.trim(), role },
   });
 }
 
@@ -1700,15 +1770,50 @@ export async function setRiverParkVerificationInSupabase(userId: string, verifie
 }
 
 export async function verifySupabaseAdmin(email: string, password: string) {
-  const rows = await supabaseRequest<SupabaseAdminRow[]>('/rest/v1/rpc/verify_admin_login', {
-    method: 'POST',
-    body: {
-      admin_email: email.trim().toLowerCase(),
-      admin_password: password,
+  const authResponse = await supabaseRequest<SupabaseAuthResponse>(
+    '/auth/v1/token?grant_type=password',
+    {
+      method: 'POST',
+      body: {
+        email: email.trim().toLowerCase(),
+        password,
+      },
     },
+  );
+  const session = toSession(authResponse);
+
+  if (!session) {
+    throw new SupabaseApiError('Supabase did not return an admin session.', 502);
+  }
+  const rows = await supabaseRequest<SupabaseAdminRow[]>('/rest/v1/rpc/get_my_admin_profile', {
+    method: 'POST',
+    accessToken: session.accessToken,
+    body: {},
   });
 
-  return rows[0] ? adminRowToUser(rows[0]) : undefined;
+  if (!rows[0]) {
+    await signOutSupabase(session.accessToken).catch(() => undefined);
+    throw new SupabaseApiError('This account is not authorized for admin access.', 403);
+  }
+
+  return {
+    admin: adminRowToUser(rows[0]),
+    session: { ...session, portal: 'admin' as const },
+  };
+}
+
+export async function fetchMySupabaseAdmin(accessToken: string) {
+  const rows = await supabaseRequest<SupabaseAdminRow[]>('/rest/v1/rpc/get_my_admin_profile', {
+    method: 'POST',
+    accessToken,
+    body: {},
+  });
+
+  if (!rows[0]) {
+    throw new SupabaseApiError('This account is not authorized for admin access.', 403);
+  }
+
+  return adminRowToUser(rows[0]);
 }
 
 function parseAuthCallbackParams(url: string) {
@@ -3022,6 +3127,54 @@ export async function saveOrderToSupabase(order: Order) {
   }).catch(() => undefined);
 }
 
+export async function createServerMarketplaceOrder(values: {
+  items: Array<{ businessId: string; quantity: number }>;
+  deliveryAddress: string;
+  deliveryCluster: string;
+  deliveryContactPhone: string;
+  deliveryLocation?: DeliveryLocation;
+  note?: string;
+  paymentMethod: 'flutterwave' | 'walletAccount';
+}) {
+  const location = values.deliveryLocation;
+  const created = await supabaseRequest<SupabaseOrderRow>('/rest/v1/rpc/create_marketplace_order', {
+    method: 'POST',
+    body: {
+      p_items: values.items.map((item) => ({
+        businessId: item.businessId,
+        quantity: item.quantity,
+      })),
+      p_delivery: {
+        formattedAddress: location?.formattedAddress || values.deliveryAddress.trim(),
+        contactPhone: values.deliveryContactPhone.trim(),
+        country: location?.country ?? '',
+        stateRegion: location?.stateOrRegion ?? '',
+        city: location?.city ?? '',
+        areaDistrict: location?.areaOrDistrict || values.deliveryCluster.trim(),
+        streetName: location?.streetName ?? '',
+        buildingInfo: location?.buildingInfo ?? '',
+        landmark: location?.landmark ?? '',
+        latitude: location?.latitude ?? null,
+        longitude: location?.longitude ?? null,
+        placeId: location?.placeId ?? '',
+        source: location?.source ?? 'manual',
+        additionalInstructions: location?.additionalInstructions ?? '',
+        note: values.note?.trim() ?? '',
+      },
+      p_payment_method: values.paymentMethod,
+    },
+  });
+  const rows = await supabaseRequest<SupabaseOrderRow[]>(
+    `/rest/v1/orders?select=*,order_items(*),order_timeline_events(*)&id=eq.${encodeURIComponent(created.id)}&limit=1`,
+  );
+
+  if (!rows[0]) {
+    throw new SupabaseApiError('The server created the order but could not reload it.', 502);
+  }
+
+  return orderRowToOrder(rows[0]);
+}
+
 export async function deleteOrderTestingStateFromSupabase() {
   const deleteOptions = {
     method: 'DELETE' as const,
@@ -3627,6 +3780,9 @@ function groupSupportMessages(messages: SupportMessage[]) {
 }
 
 export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
+  const ownerProfilesPath = activeSupabaseAccessToken
+    ? '/rest/v1/owner_business_profiles?select=*&order=updated_at.desc'
+    : '/rest/v1/public_owner_business_profiles?select=*&order=updated_at.desc';
   const [
     businessRows,
     orderRows,
@@ -3646,23 +3802,27 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     supabaseRequest<SupabaseBusinessRow[]>('/rest/v1/businesses?select=*&order=created_at.desc'),
     supabaseRequest<SupabaseOrderRow[]>(
       '/rest/v1/orders?select=*,order_items(*),order_timeline_events(*)&order=created_at.desc',
-    ),
+    ).catch(() => [] as SupabaseOrderRow[]),
     supabaseRequest<SupabasePaymentPlanRow[]>('/rest/v1/payment_plans?select=*&order=cycle.asc'),
     supabaseRequest<SupabaseSecurityRow[]>('/rest/v1/security_settings?select=*&id=eq.default&limit=1'),
-    supabaseRequest<SupabaseOwnerProfileRow[]>(
-      '/rest/v1/owner_business_profiles?select=*&order=updated_at.desc',
+    supabaseRequest<SupabaseOwnerProfileRow[]>(ownerProfilesPath).catch(
+      () => [] as SupabaseOwnerProfileRow[],
     ),
-    supabaseRequest<SupabaseEmailRow[]>('/rest/v1/email_logs?select=*&order=created_at.desc'),
-    supabaseRequest<SupabaseAuditRow[]>('/rest/v1/audit_logs?select=*&order=created_at.desc'),
+    supabaseRequest<SupabaseEmailRow[]>('/rest/v1/email_logs?select=*&order=created_at.desc').catch(
+      () => [] as SupabaseEmailRow[],
+    ),
+    supabaseRequest<SupabaseAuditRow[]>('/rest/v1/audit_logs?select=*&order=created_at.desc').catch(
+      () => [] as SupabaseAuditRow[],
+    ),
     supabaseRequest<SupabaseNotificationRow[]>(
       '/rest/v1/notifications?select=*&order=created_at.desc',
-    ),
+    ).catch(() => [] as SupabaseNotificationRow[]),
     supabaseRequest<SupabaseChatMessageRow[]>(
       '/rest/v1/listing_messages?select=*&order=created_at.asc',
     ).catch(() => [] as SupabaseChatMessageRow[]),
     supabaseRequest<SupabaseSupportMessageRow[]>(
       '/rest/v1/support_messages?select=*&order=created_at.asc',
-    ),
+    ).catch(() => [] as SupabaseSupportMessageRow[]),
     supabaseRequest<SupabaseSubscriptionPaymentRow[]>(
       '/rest/v1/subscription_payments?select=*&order=created_at.desc',
     ).catch(() => [] as SupabaseSubscriptionPaymentRow[]),

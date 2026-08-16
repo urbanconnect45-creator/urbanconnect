@@ -27,7 +27,7 @@ const dynamicDepositExpiryMs = 30 * 60 * 1000;
 const flutterwaveVirtualAccountEndpoint = 'https://api.flutterwave.com/v3/virtual-account-numbers';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -195,6 +195,49 @@ function splitName(value: string) {
   return { firstName, lastName };
 }
 
+async function authenticatedOwner(request: Request) {
+  const authorization = request.headers.get('Authorization');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!authorization || !supabaseUrl || !anonKey) {
+    return undefined;
+  }
+
+  const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
+  });
+  if (!authResponse.ok) {
+    return undefined;
+  }
+
+  const authUser = (await authResponse.json()) as { id?: string };
+  if (!authUser.id) {
+    return undefined;
+  }
+
+  const profileResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?id=eq.${encodeURIComponent(
+      authUser.id,
+    )}&select=id,full_name,business_name,email,phone_number,status&limit=1`,
+    { headers: { apikey: anonKey, Authorization: authorization } },
+  );
+  if (!profileResponse.ok) {
+    return undefined;
+  }
+
+  const profiles = (await profileResponse.json()) as Array<{
+    id: string;
+    full_name: string;
+    business_name?: string | null;
+    email: string;
+    phone_number: string;
+    status?: string | null;
+  }>;
+  const profile = profiles[0];
+  return profile?.status === 'suspended' ? undefined : profile;
+}
+
 function findProviderString(value: unknown, fieldNames: string[]): string | undefined {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -248,6 +291,15 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ error: 'Invalid JSON payload.' }, 400);
   }
 
+  const authenticatedProfile = await authenticatedOwner(request);
+  if (!authenticatedProfile) {
+    return jsonResponse({ error: 'Authenticated account required.' }, 401);
+  }
+
+  if (payload.ownerUserId?.trim() && payload.ownerUserId.trim() !== authenticatedProfile.id) {
+    return jsonResponse({ error: 'You can only create an account for your own profile.' }, 403);
+  }
+
   const credentialCheck = getFlutterwaveCredentialCheck();
 
   if (payload.diagnostic) {
@@ -270,10 +322,11 @@ Deno.serve(async (request: Request) => {
 
   const flutterwaveSecretKey = credentialCheck.secretKey;
 
-  const ownerUserId = payload.ownerUserId?.trim();
-  const ownerName = payload.ownerName?.trim();
-  const ownerEmail = payload.ownerEmail?.trim().toLowerCase();
-  const phoneNumber = cleanDigits(payload.phoneNumber);
+  const ownerUserId = authenticatedProfile.id;
+  const ownerName =
+    authenticatedProfile.business_name?.trim() || authenticatedProfile.full_name.trim();
+  const ownerEmail = authenticatedProfile.email.trim().toLowerCase();
+  const phoneNumber = cleanDigits(authenticatedProfile.phone_number);
   const kycType = payload.kycType === 'nin' ? 'nin' : 'bvn';
   const kycNumber = cleanDigits(payload.kycNumber);
   const purpose = payload.purpose === 'withdrawal' ? 'withdrawal' : 'deposit';

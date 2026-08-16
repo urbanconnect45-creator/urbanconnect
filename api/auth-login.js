@@ -1,11 +1,8 @@
-const fallbackSupabaseUrl = 'https://uyhudlqajzuzonntodqk.supabase.co';
-const fallbackSupabaseKey = 'sb_publishable_Y0_i8Q_ZVknA09MPuFhL8g_76LD1dpP';
-
 function normalizeSupabaseUrl(value) {
   const candidate = String(value ?? '').trim();
 
   if (!candidate || /your-project-ref|myprojectid|your-project-id/i.test(candidate)) {
-    return fallbackSupabaseUrl;
+    return undefined;
   }
 
   const withProtocol = /^https?:\/\//i.test(candidate)
@@ -15,7 +12,7 @@ function normalizeSupabaseUrl(value) {
   try {
     return new URL(withProtocol).toString().replace(/\/+$/, '');
   } catch {
-    return fallbackSupabaseUrl;
+    return undefined;
   }
 }
 
@@ -42,9 +39,14 @@ export default async function handler(request, response) {
   }
 
   const supabaseUrl = normalizeSupabaseUrl(process.env.EXPO_PUBLIC_SUPABASE_URL);
-  const publishableKey = String(
-    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? fallbackSupabaseKey,
-  );
+  const publishableKey = String(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '').trim();
+
+  if (!supabaseUrl || !publishableKey) {
+    json(response, 503, {
+      error: 'Authentication is not configured. Contact View2Connect support.',
+    });
+    return;
+  }
 
   try {
     const supabaseResponse = await fetch(

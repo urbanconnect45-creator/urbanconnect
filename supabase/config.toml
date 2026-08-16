@@ -413,29 +413,34 @@ enabled = true
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
-[functions.flutterwave-banks]
-enabled = true
-verify_jwt = false
-entrypoint = "./functions/flutterwave-banks/index.ts"
-
-[functions.verify-seller-payout-account]
-enabled = true
-verify_jwt = false
-entrypoint = "./functions/verify-seller-payout-account/index.ts"
-
 [functions.request-account-signup-otp]
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/request-account-signup-otp/index.ts"
+
+[functions.create-flutterwave-checkout]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/create-flutterwave-checkout/index.ts"
+
+[functions.flutterwave-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/flutterwave-webhook/index.ts"
 
 [functions.complete-account-signup]
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/complete-account-signup/index.ts"
 
-[functions.admin-create-dispatch-account]
+[functions.request-password-reset]
 enabled = true
 verify_jwt = false
+entrypoint = "./functions/request-password-reset/index.ts"
+
+[functions.admin-create-dispatch-account]
+enabled = true
+verify_jwt = true
 entrypoint = "./functions/admin-create-dispatch-account/index.ts"
 
 [functions.verify-seller-bank-account]
@@ -447,3 +452,28 @@ entrypoint = "./functions/verify-seller-bank-account/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/verify-business-cac/index.ts"
+
+[functions.create-flutterwave-virtual-account]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/create-flutterwave-virtual-account/index.ts"
+
+[functions.send-notification-email]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-notification-email/index.ts"
+
+[functions.send-termii-otp]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-termii-otp/index.ts"
+
+[functions.verify-termii-otp]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/verify-termii-otp/index.ts"
+
+[functions.google-maps-location]
+enabled = false
+verify_jwt = true
+entrypoint = "./functions/google-maps-location/index.ts"

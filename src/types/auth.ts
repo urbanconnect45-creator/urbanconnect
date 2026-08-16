@@ -6,7 +6,7 @@ export type UserRole = (typeof userRoles)[number];
 export const userStatuses = ['active', 'suspended'] as const;
 export type UserStatus = (typeof userStatuses)[number];
 
-export const adminRoles = ['owner', 'customerCare'] as const;
+export const adminRoles = ['owner', 'admin', 'customerCare'] as const;
 export type AdminRole = (typeof adminRoles)[number];
 
 export const adminPermissions = [

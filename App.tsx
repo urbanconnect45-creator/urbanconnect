@@ -1,14 +1,20 @@
 import { Platform, StatusBar, StyleSheet, View } from 'react-native';
 import { useEffect } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppBackdrop } from './src/components/AppBackdrop';
+import { AppErrorBoundary } from './src/components/AppErrorBoundary';
 import { AuthProvider } from './src/hooks/useAuth';
 import { BusinessDirectoryProvider } from './src/hooks/useBusinessDirectory';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
 import { colors } from './src/theme';
+
+if (Platform.OS !== 'web') {
+  void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+}
 
 function AppFrame() {
   const { colors: themeColors, isDarkMode } = useAppTheme();
@@ -34,6 +40,18 @@ function AppFrame() {
     }
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return undefined;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      void SplashScreen.hideAsync().catch(() => undefined);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <View style={[styles.root, { backgroundColor: themeColors.background }]}>
       {Platform.OS === 'web' ? <AppBackdrop /> : null}
@@ -51,13 +69,15 @@ function AppFrame() {
 
 export default function App() {
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <AppFrame />
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <AppErrorBoundary>
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <AppFrame />
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </AppErrorBoundary>
   );
 }
 

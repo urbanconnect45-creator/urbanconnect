@@ -66,7 +66,7 @@ function createInitialForm(
     x: savedProfile?.x ?? profile?.contact.x ?? '',
     tiktok: savedProfile?.tiktok ?? profile?.contact.tiktok ?? '',
     address: savedProfile?.address ?? profile?.address ?? '',
-    coverImage: savedProfile?.coverImage ?? profile?.imageUrl ?? '',
+    coverImage: savedProfile?.coverImage ?? '',
     galleryImages: savedProfile?.galleryImages ?? '',
     galleryVideos: savedProfile?.galleryVideos ?? '',
     services: '',
@@ -280,7 +280,7 @@ export function RegisterBusinessScreen({ navigation }: MainTabsScreenProps<'Regi
         savedOwnerProfile?.address ??
         ownerProfile?.address ??
         user.businessCluster ?? '',
-      coverImage: savedOwnerProfile?.coverImage ?? ownerProfile?.imageUrl ?? current.coverImage,
+      coverImage: savedOwnerProfile?.coverImage ?? current.coverImage,
       galleryImages: savedOwnerProfile?.galleryImages ?? current.galleryImages,
       galleryVideos: savedOwnerProfile?.galleryVideos ?? current.galleryVideos,
     }));

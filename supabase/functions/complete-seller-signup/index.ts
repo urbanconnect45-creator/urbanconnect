@@ -37,7 +37,8 @@ type AppUserRow = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -116,6 +117,25 @@ async function readJson(response: Response) {
   }
 }
 
+async function cleanupCreatedSeller(
+  supabaseUrl: string,
+  headers: Record<string, string>,
+  authUserId: string,
+) {
+  await fetch(
+    `${supabaseUrl}/rest/v1/owner_business_profiles?owner_user_id=eq.${encodeURIComponent(authUserId)}`,
+    { method: 'DELETE', headers },
+  ).catch(() => undefined);
+  await fetch(`${supabaseUrl}/rest/v1/app_users?id=eq.${encodeURIComponent(authUserId)}`, {
+    method: 'DELETE',
+    headers,
+  }).catch(() => undefined);
+  await fetch(`${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
+    method: 'DELETE',
+    headers,
+  }).catch(() => undefined);
+}
+
 serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -127,8 +147,9 @@ serve(async (request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  const otpHashSecret = Deno.env.get('ACCOUNT_SIGNUP_OTP_SECRET')?.trim();
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey || !otpHashSecret) {
     return jsonResponse({ error: 'Seller registration is not configured.' }, 500);
   }
 
@@ -198,7 +219,7 @@ serve(async (request) => {
     return jsonResponse({ error: 'Too many incorrect attempts. Request a new code.' }, 429);
   }
 
-  const expectedHash = await hashCode(email, code, serviceRoleKey);
+  const expectedHash = await hashCode(email, code, otpHashSecret);
 
   if (expectedHash !== verification.code_hash) {
     await fetch(
@@ -338,6 +359,7 @@ serve(async (request) => {
 
   if (!profileResponse.ok) {
     const profileError = await readJson(profileResponse);
+    await cleanupCreatedSeller(supabaseUrl, serviceHeaders, authUser.id);
     return jsonResponse(
       { error: String((profileError as { message?: string }).message || 'Unable to save the seller profile.') },
       502,
@@ -378,6 +400,7 @@ serve(async (request) => {
   );
 
   if (!ownerProfileResponse.ok) {
+    await cleanupCreatedSeller(supabaseUrl, serviceHeaders, authUser.id);
     return jsonResponse({ error: 'Unable to save the business profile.' }, 502);
   }
 
@@ -408,6 +431,7 @@ serve(async (request) => {
   });
 
   if (!applicationResponse.ok) {
+    await cleanupCreatedSeller(supabaseUrl, serviceHeaders, authUser.id);
     return jsonResponse({ error: 'Unable to save the seller application.' }, 502);
   }
 

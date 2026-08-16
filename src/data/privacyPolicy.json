@@ -1,0 +1,64 @@
+{
+  "title": "View2Connect Privacy Policy",
+  "effectiveDate": "August 8, 2026",
+  "companyName": "View2Connect",
+  "contactEmail": "support@view2connect.ng",
+  "sections": [
+    {
+      "title": "1. Overview",
+      "body": "View2Connect operates a marketplace for customers, store owners, dispatch riders, customer-care teams, and administrators. This Privacy Policy explains the information we collect, why we use it, when it is shared, how long it is retained, and the choices available to you when you use the View2Connect mobile app, website, seller portal, dispatch portal, or support services."
+    },
+    {
+      "title": "2. Account and profile information",
+      "body": "We collect information you provide when creating or managing an account, including your name, email address, phone number, account role, profile picture, biography, social-media handles, business name, business contact details, store opening information, and account verification status. Customer, store-owner, dispatch, and administrative roles are handled according to their separate permissions and purposes."
+    },
+    {
+      "title": "3. Authentication and account security",
+      "body": "We process authentication information needed to create an account, verify an email address or phone number, sign you in, reset a password, and maintain a secure session. Authentication may be provided by Supabase or an enabled third-party sign-in provider such as Google. We also keep security and audit records reasonably necessary to investigate unauthorized access, fraud, or misuse."
+    },
+    {
+      "title": "4. Listings, stores, and uploaded content",
+      "body": "Customers and store owners may provide listing titles, descriptions, categories, conditions, prices, inventory details, store information, and images, videos, or files selected for upload. Approved listing and store information may be displayed publicly in the marketplace. Profile pictures and listing images are stored and used as separate data."
+    },
+    {
+      "title": "5. Carts, orders, and delivery location",
+      "body": "To operate carts, checkout, order tracking, and delivery, we may process selected products, quantities, prices, order notes, delivery phone numbers, formatted delivery addresses, delivery instructions, latitude, and longitude. Location is collected only when you provide an address, select a map result, move a pin, or grant permission to use your current location. Saved delivery information may be synchronized to your account so it is available on your signed-in devices."
+    },
+    {
+      "title": "6. Messages, support, and notifications",
+      "body": "Messages and permitted attachments sent through View2Connect are stored so conversation history can be synchronized across signed-in devices. Authorized participants and support or administrative personnel may access messages when needed to deliver an order, resolve a dispute, respond to a support request, enforce marketplace rules, or protect users. We may send account, listing, payment, order, delivery, security, and support notifications."
+    },
+    {
+      "title": "7. Payments, payouts, and verification",
+      "body": "Payment and payout services may require transaction amounts, currency, provider references, payment status, bank-account details, verified account names, business registration information, or identity-verification information such as BVN or NIN where legally or operationally required. Card and bank checkout details are processed by the payment provider, such as Flutterwave; View2Connect records the references and statuses needed to reconcile payments, wallets, receipts, refunds, and payouts rather than storing complete card credentials."
+    },
+    {
+      "title": "8. Device permissions",
+      "body": "View2Connect may request photo or media access when you choose content to upload, location access when you request current-location features, and biometric access when you enable device-supported account unlocking. You can decline or later change device permissions in your operating-system settings. Biometric templates are managed by your device operating system and are not stored by View2Connect."
+    },
+    {
+      "title": "9. How we use information",
+      "body": "We use information to create and secure accounts; provide marketplace, store, cart, payment, messaging, delivery, and support features; review sellers and listings; route users to the correct role experience; prevent fraud and abuse; maintain transaction and audit records; comply with legal obligations; and improve the reliability and safety of View2Connect."
+    },
+    {
+      "title": "10. When information is shared",
+      "body": "We share information only as needed to operate the service. This may include sharing order and delivery details with the relevant buyer, seller, and dispatch rider; sharing data with infrastructure, authentication, storage, mapping, email, notification, and payment providers such as Supabase, HERE Technologies, Google sign-in, and Flutterwave; responding to lawful requests; protecting rights and safety; or completing a business transfer subject to applicable law. We do not sell personal information."
+    },
+    {
+      "title": "11. Public marketplace information",
+      "body": "Approved store profiles, advertiser profiles, profile pictures, biographies, social links, listing details, prices, and listing media may be visible to marketplace users or the public as part of the service. Private account credentials, private support information, payout details, and precise delivery coordinates are not intended for public display and are limited to authorized operational use."
+    },
+    {
+      "title": "12. Data retention and deletion",
+      "body": "We retain account and marketplace information while your account is active and for as long as reasonably necessary for orders, payments, payouts, fraud prevention, support, disputes, security, and legal or accounting obligations. You can request account deletion through the account settings available in the app or by emailing support@view2connect.ng. Some transaction, audit, or legal records may be retained after deletion where required or permitted by law, while data that is no longer required is deleted or de-identified."
+    },
+    {
+      "title": "13. Security",
+      "body": "We use reasonable technical and organizational safeguards, including authenticated access, role-based permissions, protected backend services, and restricted administrative access. No internet or storage system can be guaranteed completely secure, so users should protect their passwords, verification codes, and devices and report suspected unauthorized access promptly."
+    },
+    {
+      "title": "14. Policy updates and contact",
+      "body": "We may update this policy when View2Connect features, providers, or legal obligations change. The effective date on this page identifies the current version. For privacy questions, corrections, access requests, or deletion requests, contact View2Connect at support@view2connect.ng."
+    }
+  ]
+}

@@ -112,7 +112,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | undefined>();
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
   const [deliveryCluster, setDeliveryCluster] = useState(defaultCluster);
-  const [dispatchContactPhone, setDispatchContactPhone] = useState(user?.phoneNumber ?? '');
+  const [dispatchContactPhone, setDispatchContactPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('flutterwave');
   const [flutterwaveChannel, setFlutterwaveChannel] = useState<FlutterwaveChannelId>('card');
   const [note, setNote] = useState('');
@@ -135,9 +135,6 @@ export function CartScreen({ navigation }: CartScreenProps) {
     }
   }, [defaultCluster, deliveryCluster]);
 
-  useEffect(() => {
-    setDispatchContactPhone(user?.phoneNumber ?? '');
-  }, [user?.id, user?.phoneNumber]);
 
   useEffect(() => {
     void syncCustomerAccountData(user).catch(() => undefined);

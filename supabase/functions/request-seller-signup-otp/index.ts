@@ -6,7 +6,8 @@ type RequestPayload = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -34,6 +35,30 @@ async function hashCode(email: string, code: string, secret: string) {
     .join('');
 }
 
+async function rateKey(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function consumeRateLimit(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  key: string,
+) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_edge_rate_limit`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ p_rate_key: key, p_max_requests: 5, p_window_seconds: 3600 }),
+  });
+  return response.ok && (await response.json().catch(() => false)) === true;
+}
+
 function createOtp() {
   const random = new Uint32Array(1);
   crypto.getRandomValues(random);
@@ -52,8 +77,9 @@ serve(async (request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  const otpHashSecret = Deno.env.get('ACCOUNT_SIGNUP_OTP_SECRET')?.trim();
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey || !otpHashSecret) {
     return jsonResponse({ error: 'Seller verification is not configured.' }, 500);
   }
 
@@ -77,6 +103,17 @@ serve(async (request) => {
     Authorization: `Bearer ${serviceRoleKey}`,
     'Content-Type': 'application/json',
   };
+  const allowed = await consumeRateLimit(
+    supabaseUrl,
+    serviceRoleKey,
+    await rateKey(`seller-signup:${email}`),
+  );
+  if (!allowed) {
+    return jsonResponse(
+      { error: 'Too many verification requests. Try again later.' },
+      429,
+    );
+  }
   const profileResponse = await fetch(
     `${supabaseUrl}/rest/v1/app_users?select=id,email,role&email=eq.${encodeURIComponent(
       email,
@@ -105,15 +142,15 @@ serve(async (request) => {
     ? new Date(existingRows[0].requested_at).getTime()
     : 0;
 
-  if (lastRequestedAt && Date.now() - lastRequestedAt < 60000) {
+  if (lastRequestedAt && Date.now() - lastRequestedAt < 120000) {
     return jsonResponse(
-      { error: 'Wait one minute before requesting another verification code.' },
+      { error: 'Wait two minutes before requesting another verification code.' },
       429,
     );
   }
 
   const code = createOtp();
-  const codeHash = await hashCode(email, code, serviceRoleKey);
+  const codeHash = await hashCode(email, code, otpHashSecret);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const requestedAt = new Date().toISOString();
   const saveResponse = await fetch(

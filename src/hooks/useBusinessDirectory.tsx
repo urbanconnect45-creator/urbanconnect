@@ -8,6 +8,7 @@ import {
 } from 'react';
 
 import { estates } from '../data/estates';
+import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { mockBusinesses } from '../data/mockBusinesses';
 import {
   defaultSecuritySettings,
@@ -70,6 +71,7 @@ import { calculateProgressiveVat, calculateSellerPackingSupport } from '../utils
 import {
   createFlutterwaveVirtualAccount,
   createFlutterwaveCheckoutSession,
+  createServerMarketplaceOrder,
   createFlutterwaveDynamicDepositAccount,
   clearCustomerCartInSupabase,
   deleteBusinessFromSupabase,
@@ -801,75 +803,93 @@ function mergeRemoteOrdersWithRecentLocal(localOrders: Order[], remoteOrders: Or
 }
 
 export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
+  const persistenceOptions = { enabled: isUrbanConnectLocalTestMode };
   const [rawBusinesses, setBusinesses] = usePersistentState<Business[]>(
     'urbanconnect.businesses.v3',
-    mockBusinesses,
+    isUrbanConnectLocalTestMode ? mockBusinesses : [],
+    persistenceOptions,
   );
   const [deletedBusinessIds, setDeletedBusinessIds] = usePersistentState<string[]>(
     'urbanconnect.deletedBusinessIds.v1',
     [],
+    persistenceOptions,
   );
   const [cartItems, setCartItems] = usePersistentState<CartItem[]>(
     'urbanconnect.cart.v2',
     [],
+    persistenceOptions,
   );
   const [customerDeliveryLocations, setCustomerDeliveryLocations] = usePersistentState<
     DeliveryLocation[]
-  >('urbanconnect.customerDeliveryLocations.v1', []);
+  >('urbanconnect.customerDeliveryLocations.v1', [], persistenceOptions);
   const [chatThreads, setChatThreads] = usePersistentState<Record<string, ChatMessage[]>>(
     'urbanconnect.chats.v2',
     {},
+    persistenceOptions,
   );
   const [supportThreads, setSupportThreads] = usePersistentState<Record<string, SupportMessage[]>>(
     'urbanconnect.supportChats.v2',
     {},
+    persistenceOptions,
   );
   const [deletedSupportConversationIds, setDeletedSupportConversationIds] = usePersistentState<
     string[]
-  >('urbanconnect.deletedSupportConversationIds.v1', []);
+  >('urbanconnect.deletedSupportConversationIds.v1', [], persistenceOptions);
   const [notifications, setNotifications] = usePersistentState<AppNotification[]>(
     'urbanconnect.notifications.v2',
     [],
+    persistenceOptions,
   );
-  const [orders, setOrders] = usePersistentState<Order[]>('urbanconnect.orders.v3', seededOrders);
+  const [orders, setOrders] = usePersistentState<Order[]>(
+    'urbanconnect.orders.v3',
+    isUrbanConnectLocalTestMode ? seededOrders : [],
+    persistenceOptions,
+  );
   const [orderResetAt, setOrderResetAt] = usePersistentState<string>(
     'urbanconnect.orderResetAt.v1',
     '',
+    persistenceOptions,
   );
   const [orderProgressSettings, setOrderProgressSettings] =
-    usePersistentState<OrderProgressSettings>('urbanconnect.orderProgressCode.v1', {
-      code: '',
-      updatedAt: '',
-    });
+    usePersistentState<OrderProgressSettings>(
+      'urbanconnect.orderProgressCode.v1',
+      { code: '', updatedAt: '' },
+      persistenceOptions,
+    );
   const [paymentPlans, setPaymentPlans] = usePersistentState<PaymentPlan[]>(
     'urbanconnect.paymentPlans.v1',
     defaultPaymentPlans,
+    persistenceOptions,
   );
   const [ownerBusinessProfiles, setOwnerBusinessProfiles] = usePersistentState<
     OwnerBusinessProfile[]
-  >('urbanconnect.ownerBusinessProfiles.v2', []);
+  >('urbanconnect.ownerBusinessProfiles.v2', [], persistenceOptions);
   const [subscriptionPayments, setSubscriptionPayments] = usePersistentState<
     SubscriptionPayment[]
-  >('urbanconnect.subscriptionPayments.v1', []);
+  >('urbanconnect.subscriptionPayments.v1', [], persistenceOptions);
   const [withdrawalRequests, setWithdrawalRequests] = usePersistentState<WithdrawalRequest[]>(
     'urbanconnect.withdrawals.v2',
     [],
+    persistenceOptions,
   );
   const [virtualAccounts, setVirtualAccounts] = usePersistentState<VirtualAccount[]>(
     'urbanconnect.virtualAccounts.v1',
     [],
+    persistenceOptions,
   );
   const [dynamicDepositAccounts, setDynamicDepositAccounts] = usePersistentState<
     DynamicDepositAccount[]
-  >('urbanconnect.dynamicDepositAccounts.v1', []);
+  >('urbanconnect.dynamicDepositAccounts.v1', [], persistenceOptions);
   const [emailLogs, setEmailLogs] = usePersistentState<AutomatedEmailLog[]>(
     'urbanconnect.emailLogs.v2',
-    seededEmailLogs,
+    isUrbanConnectLocalTestMode ? seededEmailLogs : [],
+    persistenceOptions,
   );
   const emailDeliveryAttemptedAtRef = useRef<Record<string, number>>({});
   const [rawSecuritySettings, setSecuritySettings] = usePersistentState<SecuritySettings>(
     'urbanconnect.security.v1',
     defaultSecuritySettings,
+    persistenceOptions,
   );
   const securitySettings = useMemo<SecuritySettings>(
     () => ({
@@ -880,11 +900,13 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   );
   const [auditLogs, setAuditLogs] = usePersistentState<AuditLog[]>(
     'urbanconnect.audit.v2',
-    seededAuditLogs,
+    isUrbanConnectLocalTestMode ? seededAuditLogs : [],
+    persistenceOptions,
   );
   const [currentEstateId, setCurrentEstateId] = usePersistentState<string>(
     'urbanconnect.currentEstateId.v2',
     estates[0]?.id ?? 'river-park',
+    persistenceOptions,
   );
   const verifiedUserIdsFromNotifications = useMemo(
     () => getVerifiedUserIdsFromNotifications(notifications),
@@ -1058,7 +1080,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     };
 
     loadSnapshot();
-    const refreshInterval = setInterval(loadSnapshot, 1000);
+    const refreshInterval = setInterval(loadSnapshot, 30_000);
 
     return () => {
       isCancelled = true;
@@ -3719,7 +3741,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const roundedAmount = Math.max(0, Math.floor(amount));
 
-    if (roundedAmount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
+    if (MINIMUM_ADD_FUNDS_DEPOSIT > 0 && roundedAmount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
       throw new Error(
         `Add funds must be higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)}.`,
       );
@@ -3764,7 +3786,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const roundedAmount = Math.max(0, Math.floor(amount));
 
-    if (roundedAmount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
+    if (MINIMUM_ADD_FUNDS_DEPOSIT > 0 && roundedAmount <= MINIMUM_ADD_FUNDS_DEPOSIT) {
       throw new Error(
         `Add funds must be higher than ${formatCurrency(MINIMUM_ADD_FUNDS_DEPOSIT)}.`,
       );
@@ -4329,6 +4351,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       throw new Error('You need to sign in before placing an order.');
     }
 
+    if (isSupabaseConfigured) {
+      throw new Error(
+        'Portfolio checkout is temporarily unavailable while the secure wallet ledger is activated. Use Flutterwave checkout.',
+      );
+    }
+
     if (securitySettings.maintenanceMode) {
       throw new Error('Checkout is temporarily paused while the marketplace is in maintenance mode.');
     }
@@ -4484,57 +4512,21 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       );
     }
 
-    const createdAt = new Date().toISOString();
-    const subtotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0);
-    const sellerPackingSupport = calculateSellerPackingSupport(subtotal);
-    const serviceFee = calculateProgressiveVat(subtotal);
-    const deliveryFee = 0;
-    const totalAmount = subtotal + sellerPackingSupport + serviceFee + deliveryFee;
-    const orderId = `order-${Date.now()}`;
-    const order: Order = {
-      id: orderId,
-      userId: customer.id,
-      userEmail: customer.email,
-      userName: customer.fullName,
-      estateId: customer.estateId,
-      deliveryAddress: payload.deliveryAddress.trim(),
-      deliveryCluster: payload.deliveryCluster.trim(),
-      deliveryContactPhone: payload.deliveryContactPhone.trim(),
-      ...(payload.deliveryLocation ? { deliveryLocation: payload.deliveryLocation } : {}),
-      ...(payload.note?.trim() ? { note: payload.note.trim() } : {}),
+    const order = await createServerMarketplaceOrder({
       items: cartEntries.map((entry) => ({
         businessId: entry.business.id,
-        businessName: entry.business.name,
-        ownerName: entry.business.ownerName,
         quantity: entry.quantity,
-        unitPrice: entry.business.price,
-        lineTotal: entry.lineTotal,
-        ...(entry.business.ownerUserId ? { ownerUserId: entry.business.ownerUserId } : {}),
-        ...(entry.business.sku ? { sku: entry.business.sku } : {}),
       })),
-      subtotal,
-      sellerPackingSupport,
-      serviceFee,
-      deliveryFee,
-      totalAmount,
+      deliveryAddress: payload.deliveryAddress,
+      deliveryCluster: payload.deliveryCluster,
+      deliveryContactPhone: payload.deliveryContactPhone,
+      ...(payload.deliveryLocation ? { deliveryLocation: payload.deliveryLocation } : {}),
+      ...(payload.note ? { note: payload.note } : {}),
       paymentMethod: 'flutterwave',
-      paymentStatus: 'pending',
-      status: 'placed',
-      createdAt,
-      updatedAt: createdAt,
-      expectedDeliveryAt: new Date(Date.now() + 1000 * 60 * 60 * 6).toISOString(),
-      timeline: [
-        buildTimelineEvent(
-          orderId,
-          'placed',
-          createdAt,
-          `Flutterwave checkout opened for ${cartEntries.length} cart item${cartEntries.length > 1 ? 's' : ''}.`,
-        ),
-      ],
-    };
+    });
     const session = await createFlutterwaveCheckoutSession({
       reference: order.id,
-      amount: totalAmount,
+      amount: order.totalAmount,
       customerName: customer.fullName,
       customerEmail: customer.email,
       customerPhone: payload.deliveryContactPhone.trim() || customer.phoneNumber,
@@ -4547,8 +4539,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         userId: customer.id,
       },
     });
-    await saveOrderToSupabase(order);
-
     appendAuditLog(
       customer.fullName,
       'system',

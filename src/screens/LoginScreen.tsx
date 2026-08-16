@@ -16,6 +16,12 @@ import {
 import { AppButton } from '../components/AppButton';
 import { AuthPageBackground } from '../components/AuthPageBackground';
 import { AuthVisualPanel } from '../components/AuthVisualPanel';
+import {
+  CustomerMobileAuthShell,
+  CustomerMobileField,
+  CustomerMobilePhoneField,
+  CustomerMobileSegments,
+} from '../components/CustomerMobileAuth';
 import { FormField } from '../components/FormField';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
 import {
@@ -26,6 +32,7 @@ import {
 } from '../data/policies';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
+import { requestSupabasePasswordReset } from '../services/supabaseApi';
 import type { LoginScreenProps } from '../navigation/types';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
@@ -33,22 +40,6 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import type { UserRole } from '../types/auth';
 
 type LoginMode = 'email' | 'phone';
-type PasswordResetState = {
-  identifier: string;
-  recipientEmail: string;
-  accountType: 'user' | 'admin';
-  code: string;
-  expiresAt: number;
-};
-
-type PasswordResetAccount = {
-  identifier: string;
-  recipientEmail: string;
-  recipientName: string;
-  recipientType: 'buyer' | 'owner' | 'admin' | 'customerCare' | 'dispatch';
-  accountType: 'user' | 'admin';
-};
-
 const countryCodes = [
   { code: '+234', label: 'NG' },
   { code: '+233', label: 'GH' },
@@ -64,19 +55,9 @@ function looksLikePhone(value: string) {
   return value.replace(/[^\d]/g, '').length >= 10;
 }
 
-function normalizePhone(value: string) {
-  return value.replace(/[^\d+]/g, '');
-}
-
 function normalizeLocalPhoneDigits(value: string, countryCode: string) {
   const digits = value.replace(/\D/g, '').replace(/^0+/, '');
   return countryCode === '+234' ? digits.slice(0, 10) : digits.slice(0, 15);
-}
-
-const verificationCodeLength = 8;
-
-function generateVerificationCode() {
-  return String(Math.floor(10000000 + Math.random() * 90000000));
 }
 
 type RoleLoginScreenProps = LoginScreenProps & {
@@ -108,10 +89,10 @@ function accountCopy(role: Extract<UserRole, 'resident' | 'dispatch'>) {
 }
 
 export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginScreenProps) {
-  const { resetPassword, signIn, users } = useAuth();
-  const { appendEmailLog, securitySettings } = useBusinessDirectory();
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
+  const { signIn } = useAuth();
+  const { securitySettings } = useBusinessDirectory();
+  const { colors, isDarkMode } = useAppTheme();
+  const styles = createStyles(colors, isDarkMode);
   const { width } = useWindowDimensions();
   const isWideWeb = Platform.OS === 'web' && width >= 900;
   const isPublicStoreWeb =
@@ -126,13 +107,10 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [passwordReset, setPasswordReset] = useState<PasswordResetState | null>(null);
   const [resetIdentifier, setResetIdentifier] = useState('');
-  const [resetCodeDraft, setResetCodeDraft] = useState('');
-  const [resetPasswordDraft, setResetPasswordDraft] = useState('');
-  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [isResetLoading, setIsResetLoading] = useState(false);
   const [showAgreement, setShowAgreement] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -145,11 +123,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
 
   const closePasswordReset = () => {
     setShowPasswordReset(false);
-    setPasswordReset(null);
     setResetIdentifier('');
-    setResetCodeDraft('');
-    setResetPasswordDraft('');
-    setResetConfirmPassword('');
     setResetError(null);
   };
 
@@ -200,37 +174,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
     }
   };
 
-  const findPasswordResetAccount = (identifier: string): PasswordResetAccount | undefined => {
-    const normalizedIdentifier = identifier.trim();
-    const normalizedEmail = normalizedIdentifier.toLowerCase();
-    const normalizedPhone = normalizePhone(normalizedIdentifier);
-
-    const matchedUser = users.find(
-      (account) =>
-        account.role === accountRole &&
-        (account.email.trim().toLowerCase() === normalizedEmail ||
-          normalizePhone(account.phoneNumber) === normalizedPhone),
-    );
-
-    if (matchedUser) {
-        return {
-          identifier: matchedUser.email,
-          recipientEmail: matchedUser.email,
-          recipientName: matchedUser.fullName,
-          recipientType:
-            matchedUser.role === 'businessOwner'
-              ? 'owner'
-              : matchedUser.role === 'dispatch'
-                ? 'dispatch'
-                : 'buyer',
-          accountType: 'user',
-        };
-    }
-
-    return undefined;
-  };
-
-  const sendPasswordResetCode = () => {
+  const sendPasswordResetCode = async () => {
     const trimmedIdentifier = resetIdentifier.trim();
 
     if (!looksLikeEmail(trimmedIdentifier) && !looksLikePhone(trimmedIdentifier)) {
@@ -238,85 +182,177 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
       return;
     }
 
-    const matchedAccount = findPasswordResetAccount(trimmedIdentifier);
-
-    if (!matchedAccount) {
-      setResetError('No View2Connect account was found for that email or phone number.');
-      return;
-    }
-
-    const code = generateVerificationCode();
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-
-    setPasswordReset({
-      identifier: matchedAccount.identifier,
-      recipientEmail: matchedAccount.recipientEmail,
-      accountType: matchedAccount.accountType,
-      code,
-      expiresAt,
-    });
-    setResetCodeDraft('');
     setResetError(null);
-
-    appendEmailLog({
-      recipientType: matchedAccount.recipientType,
-      recipientName: matchedAccount.recipientName,
-      recipientEmail: matchedAccount.recipientEmail,
-      subject: 'View2Connect password reset code',
-      body: `Your View2Connect password reset code is ${code}. It expires in 10 minutes.`,
-    });
-
-    Alert.alert(
-      'Reset code sent',
-      `Enter the 8 digit code sent to ${matchedAccount.recipientEmail}. Testing code: ${code}`,
-    );
-  };
-
-  const handlePasswordReset = async () => {
-    if (!passwordReset) {
-      setResetError('Send a reset code first.');
-      return;
-    }
-
-    if (Date.now() > passwordReset.expiresAt) {
-      setResetError('Reset code expired. Send a new code to continue.');
-      setPasswordReset(null);
-      setResetCodeDraft('');
-      return;
-    }
-
-    if (resetCodeDraft.trim() !== passwordReset.code) {
-      setResetError('Enter the correct 8 digit reset code.');
-      return;
-    }
-
-    if (resetPasswordDraft.trim().length < 6) {
-      setResetError('New password must be at least 6 characters.');
-      return;
-    }
-
-    if (resetPasswordDraft !== resetConfirmPassword) {
-      setResetError('Passwords do not match.');
-      return;
-    }
+    setIsResetLoading(true);
 
     try {
-      await resetPassword(passwordReset.identifier, resetPasswordDraft);
-      const recipientEmail = passwordReset.recipientEmail;
-      const nextPassword = resetPasswordDraft;
+      await requestSupabasePasswordReset(trimmedIdentifier, accountRole);
       closePasswordReset();
-
-      setLoginMode('email');
-      setEmail(recipientEmail);
-      setPhoneNumber('');
-      setPassword(nextPassword);
-      Alert.alert('Password updated', 'Your new password is ready. Sign in with it now.');
-    } catch (resetFailure) {
-      const message =
-        resetFailure instanceof Error ? resetFailure.message : 'Unable to reset password right now.';
-      setResetError(message);
+      Alert.alert(
+        'Check your email',
+        'If that account exists, Supabase has sent a secure password recovery link.',
+      );
+    } catch (resetRequestError) {
+      setResetError(
+        resetRequestError instanceof Error
+          ? resetRequestError.message
+          : 'Password recovery could not be started.',
+      );
+    } finally {
+      setIsResetLoading(false);
     }
   };
+
+  if (!isWideWeb && accountRole === 'resident') {
+    return (
+      <>
+        <CustomerMobileAuthShell
+          footer={
+            <View style={styles.mobileFooterRow}>
+              <Text style={styles.mobileFooterText}>New to View2Connect?</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => navigation.navigate('Signup')}
+                style={({ pressed }) => pressed && styles.inlineLinkPressed}
+              >
+                <Text style={styles.mobileFooterLink}>Create account</Text>
+              </Pressable>
+            </View>
+          }
+          subtitle="Use your email or phone number to continue."
+          title="Welcome back"
+        >
+          {securitySettings.maintenanceMode ? (
+            <View style={styles.mobileNotice}>
+              <Ionicons color={colors.warning} name="construct-outline" size={18} />
+              <Text style={styles.mobileNoticeText}>{copy.maintenance}</Text>
+            </View>
+          ) : null}
+          <CustomerMobileSegments<LoginMode>
+            onChange={(mode) => {
+              setLoginMode(mode);
+              setError(null);
+              if (mode === 'email') setPhoneNumber('');
+              else setEmail('');
+            }}
+            options={[
+              { icon: 'mail-outline', label: 'Email', value: 'email' },
+              { icon: 'call-outline', label: 'Phone', value: 'phone' },
+            ]}
+            value={loginMode}
+          />
+          {loginMode === 'email' ? (
+            <CustomerMobileField
+              autoCapitalize="none"
+              icon="mail-outline"
+              keyboardType="email-address"
+              label="Email address"
+              onChangeText={setEmail}
+              placeholder="email@example.com"
+              value={email}
+            />
+          ) : (
+            <CustomerMobilePhoneField
+              countryCode={countryCode}
+              onChangeCountryCode={(code) => {
+                setCountryCode(code);
+                setPhoneNumber((current) => normalizeLocalPhoneDigits(current, code));
+                setError(null);
+              }}
+              onChangeText={(value) => setPhoneNumber(normalizeLocalPhoneDigits(value, countryCode))}
+              options={countryCodes}
+              value={phoneNumber}
+            />
+          )}
+          <CustomerMobileField
+            icon="lock-closed-outline"
+            label="Password"
+            onChangeText={setPassword}
+            placeholder="Enter your password"
+            rightAccessory={
+              <Pressable
+                accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+                accessibilityRole="button"
+                onPress={() => setPasswordVisible((current) => !current)}
+                style={({ pressed }) => [styles.mobileIconButton, pressed && styles.inlineLinkPressed]}
+              >
+                <Ionicons
+                  color={colors.primary}
+                  name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                />
+              </Pressable>
+            }
+            secureTextEntry={!passwordVisible}
+            value={password}
+          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setResetIdentifier(currentIdentifier);
+              setShowPasswordReset(true);
+              setResetError(null);
+            }}
+            style={({ pressed }) => [styles.mobileForgot, pressed && styles.inlineLinkPressed]}
+          >
+            <Text style={styles.mobileFooterLink}>Forgot password?</Text>
+          </Pressable>
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <AppButton
+            disabled={securitySettings.maintenanceMode}
+            label="Sign in"
+            loading={isLoading}
+            onPress={() => void handleLogin()}
+            style={styles.mobilePrimaryButton}
+          />
+          <SocialAuthButtons compact webRedirectPath="/auth/callback?oauthRole=resident" />
+          <Pressable onPress={() => setShowAgreement(true)}>
+            <Text style={styles.mobileAgreementText}>
+              By continuing, you agree to the user agreement and privacy policy.
+            </Text>
+          </Pressable>
+        </CustomerMobileAuthShell>
+
+        <Modal animationType="slide" transparent visible={showAgreement} onRequestClose={() => setShowAgreement(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.policyCard}>
+              <Text style={styles.sectionTitle}>{privacyPolicyTitle}</Text>
+              <Text style={styles.helperText}>{userAgreementTitle}</Text>
+              <ScrollView showsVerticalScrollIndicator>
+                {[...privacyPolicySections, ...userAgreementSections].map((section) => (
+                  <View key={section.title} style={styles.policySection}>
+                    <Text style={styles.noticeTitle}>{section.title}</Text>
+                    <Text style={styles.noticeText}>{section.body}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+              <AppButton label="Close" onPress={() => setShowAgreement(false)} />
+            </View>
+          </View>
+        </Modal>
+
+        <Modal animationType="slide" transparent visible={showPasswordReset} onRequestClose={closePasswordReset}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.policyCard}>
+              <Text style={styles.sectionTitle}>Reset password</Text>
+              <Text style={styles.helperText}>Enter the email or phone number on your customer account.</Text>
+              <FormField
+                autoCapitalize="none"
+                keyboardType="email-address"
+                label="Email or phone"
+                onChangeText={(value) => { setResetIdentifier(value); setResetError(null); }}
+                placeholder="email@example.com"
+                value={resetIdentifier}
+              />
+              {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
+              <AppButton label="Send secure reset link" loading={isResetLoading} onPress={() => void sendPasswordResetCode()} variant="secondary" />
+              <AppButton label="Close" onPress={closePasswordReset} variant="ghost" />
+            </View>
+          </View>
+        </Modal>
+      </>
+    );
+  }
 
   return (
     <AuthPageBackground
@@ -521,6 +557,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
             label="Login"
             loading={isLoading}
             onPress={() => void handleLogin()}
+            style={isDarkMode ? styles.authPrimaryButton : undefined}
           />
           <Pressable onPress={() => setShowAgreement(true)}>
             <Text style={styles.agreementText}>
@@ -597,8 +634,8 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
           <View style={styles.policyCard}>
             <Text style={styles.sectionTitle}>Reset password</Text>
             <Text style={styles.helperText}>
-              Enter your account email or phone number. We will send a reset code to the email on
-              that account.
+              Enter your account email or phone number. We will send a secure recovery link to the
+              email on that account.
             </Text>
             <FormField
               autoCapitalize="none"
@@ -606,56 +643,17 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
               label="Email or phone"
               onChangeText={(value) => {
                 setResetIdentifier(value);
-                setPasswordReset(null);
-                setResetCodeDraft('');
                 setResetError(null);
               }}
               placeholder="email@example.com"
               value={resetIdentifier}
             />
             <AppButton
-              label={passwordReset ? 'Resend reset code' : 'Send reset code'}
-              onPress={sendPasswordResetCode}
+              label="Send secure reset link"
+              loading={isResetLoading}
+              onPress={() => void sendPasswordResetCode()}
               variant="secondary"
             />
-            {passwordReset ? (
-              <View style={styles.resetCodeCard}>
-                <View style={styles.verificationHeader}>
-                  <Ionicons color={colors.primary} name="mail-open-outline" size={20} />
-                  <View style={styles.verificationCopy}>
-                    <Text style={styles.noticeTitle}>Code sent</Text>
-                    <Text style={styles.noticeText}>
-                      Check {passwordReset.recipientEmail}, then enter the code below.
-                    </Text>
-                  </View>
-                </View>
-                <FormField
-                  keyboardType="number-pad"
-                  label="Reset code"
-                  maxLength={verificationCodeLength}
-                  onChangeText={(value) =>
-                    setResetCodeDraft(value.replace(/\D/g, '').slice(0, verificationCodeLength))
-                  }
-                  placeholder="00000000"
-                  value={resetCodeDraft}
-                />
-                <FormField
-                  label="New password"
-                  onChangeText={setResetPasswordDraft}
-                  placeholder="Enter new password"
-                  secureTextEntry
-                  value={resetPasswordDraft}
-                />
-                <FormField
-                  label="Confirm password"
-                  onChangeText={setResetConfirmPassword}
-                  placeholder="Confirm new password"
-                  secureTextEntry
-                  value={resetConfirmPassword}
-                />
-                <AppButton label="Update password" onPress={() => void handlePasswordReset()} />
-              </View>
-            ) : null}
             {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
             <AppButton label="Close" onPress={closePasswordReset} variant="ghost" />
           </View>
@@ -666,7 +664,7 @@ export function LoginScreen({ navigation, accountRole = 'resident' }: RoleLoginS
   );
 }
 
-function createStyles(colors: AppColors) {
+function createStyles(colors: AppColors, isDarkMode: boolean) {
   return StyleSheet.create({
     container: {
       flexGrow: 1,
@@ -685,10 +683,10 @@ function createStyles(colors: AppColors) {
       gap: 0,
       minHeight: 700,
       marginVertical: spacing.xl,
-      borderRadius: 14,
-      borderWidth: 2,
-      borderColor: 'rgba(255,255,255,0.78)',
-      backgroundColor: colors.surface,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: isDarkMode ? '#463A55' : 'rgba(255,255,255,0.78)',
+      backgroundColor: isDarkMode ? '#17111F' : colors.surface,
       padding: 0,
       overflow: 'hidden',
       ...shadows.card,
@@ -698,19 +696,19 @@ function createStyles(colors: AppColors) {
       width: '100%',
       maxWidth: 540,
       alignSelf: 'center',
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: 'rgba(255,255,255,0.82)',
-      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: isDarkMode ? '#463A55' : 'rgba(255,255,255,0.82)',
+      backgroundColor: isDarkMode ? '#17111F' : 'rgba(255,255,255,0.97)',
       padding: spacing.md,
       ...shadows.card,
     },
     formColumnMobile: {
       maxWidth: 460,
       borderWidth: 1,
-      borderRadius: 24,
-      borderColor: 'rgba(91,43,203,0.13)',
-      backgroundColor: colors.white,
+      borderRadius: 8,
+      borderColor: isDarkMode ? '#3C3349' : 'rgba(91,43,203,0.13)',
+      backgroundColor: isDarkMode ? '#17111F' : colors.white,
       padding: spacing.lg,
       shadowColor: '#2F175F',
       shadowOffset: { width: 0, height: 10 },
@@ -727,7 +725,7 @@ function createStyles(colors: AppColors) {
       alignSelf: 'stretch',
       borderWidth: 0,
       borderRadius: 0,
-      backgroundColor: colors.surface,
+      backgroundColor: isDarkMode ? '#17111F' : colors.surface,
       padding: spacing.lg,
       shadowOpacity: 0,
       elevation: 0,
@@ -757,11 +755,13 @@ function createStyles(colors: AppColors) {
       width: '100%',
       maxWidth: 460,
       alignSelf: 'center',
-      minHeight: 184,
+      minHeight: isDarkMode ? 146 : 184,
       justifyContent: 'space-between',
       gap: spacing.sm,
-      borderRadius: 24,
-      backgroundColor: colors.primary,
+      borderRadius: 8,
+      borderWidth: isDarkMode ? 1 : 0,
+      borderColor: isDarkMode ? '#533E79' : 'transparent',
+      backgroundColor: isDarkMode ? '#2A1556' : colors.primary,
       padding: spacing.lg,
       overflow: 'hidden',
       shadowColor: '#321070',
@@ -897,10 +897,10 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
-      borderRadius: radii.lg,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: 'rgba(91,43,203,0.18)',
-      backgroundColor: '#FCFAFF',
+      borderColor: isDarkMode ? '#463A55' : 'rgba(91,43,203,0.18)',
+      backgroundColor: isDarkMode ? '#201A2A' : '#FCFAFF',
       paddingHorizontal: spacing.md,
       ...shadows.soft,
     },
@@ -913,10 +913,10 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
-      borderRadius: radii.lg,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: 'rgba(91,43,203,0.18)',
-      backgroundColor: '#FCFAFF',
+      borderColor: isDarkMode ? '#463A55' : 'rgba(91,43,203,0.18)',
+      backgroundColor: isDarkMode ? '#201A2A' : '#FCFAFF',
       paddingLeft: spacing.lg,
       paddingRight: spacing.xs,
       ...shadows.soft,
@@ -933,16 +933,16 @@ function createStyles(colors: AppColors) {
       justifyContent: 'center',
       height: 42,
       width: 42,
-      borderRadius: 21,
-      backgroundColor: colors.primarySoft,
+      borderRadius: 8,
+      backgroundColor: isDarkMode ? '#382B57' : colors.primarySoft,
     },
     switchShell: {
       flexDirection: 'row',
       gap: spacing.xs,
-      borderRadius: radii.pill,
-      backgroundColor: '#F5F1FC',
+      borderRadius: 8,
+      backgroundColor: isDarkMode ? '#110D18' : '#F5F1FC',
       borderWidth: 1,
-      borderColor: 'rgba(91,43,203,0.12)',
+      borderColor: isDarkMode ? '#463A55' : 'rgba(91,43,203,0.12)',
       padding: 4,
     },
     switchButton: {
@@ -952,11 +952,11 @@ function createStyles(colors: AppColors) {
       alignItems: 'center',
       justifyContent: 'center',
       gap: spacing.xs,
-      borderRadius: radii.pill,
+      borderRadius: 6,
       paddingHorizontal: spacing.md,
     },
     switchButtonActive: {
-      backgroundColor: colors.primary,
+      backgroundColor: isDarkMode ? '#7C4DFF' : colors.primary,
     },
     switchButtonPressed: {
       opacity: 0.9,
@@ -987,6 +987,15 @@ function createStyles(colors: AppColors) {
       color: colors.textMuted,
       textAlign: 'center',
     },
+    mobileFooterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+    mobileFooterText: { color: colors.textMuted, fontSize: 12, lineHeight: 17, fontWeight: '600' },
+    mobileFooterLink: { color: colors.primary, fontSize: 12, lineHeight: 17, fontWeight: '900' },
+    mobileNotice: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.card, paddingHorizontal: 10 },
+    mobileNoticeText: { flex: 1, color: colors.text, fontSize: 11, lineHeight: 15, fontWeight: '600' },
+    mobileIconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 },
+    mobileForgot: { minHeight: 24, alignSelf: 'flex-end', justifyContent: 'center' },
+    mobilePrimaryButton: { minHeight: 48, borderRadius: 8 },
+    mobileAgreementText: { color: colors.textMuted, fontSize: 10, lineHeight: 14, textAlign: 'center' },
     modalBackdrop: {
       flex: 1,
       alignItems: 'center',
@@ -1108,8 +1117,18 @@ function createStyles(colors: AppColors) {
     },
     footerMobile: {
       borderTopWidth: 1,
-      borderTopColor: 'rgba(91,43,203,0.1)',
+      borderTopColor: isDarkMode ? '#3C3349' : 'rgba(91,43,203,0.1)',
       paddingTop: spacing.md,
+    },
+    authPrimaryButton: {
+      borderRadius: 8,
+      borderColor: '#7C4DFF',
+      backgroundColor: '#7C4DFF',
+      shadowColor: '#7C4DFF',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.24,
+      shadowRadius: 14,
+      elevation: 5,
     },
     footerText: {
       ...typography.body,

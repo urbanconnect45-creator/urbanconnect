@@ -26,6 +26,18 @@ export function SellerPortalLoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const isMobileWeb = Platform.OS === 'web' && width < 900;
+  const isDesktopApplication =
+    Platform.OS === 'web' &&
+    (() => {
+      const browser = globalThis as {
+        location?: { search?: string };
+        navigator?: { userAgent?: string };
+      };
+      return (
+        new URLSearchParams(browser.location?.search ?? '').get('desktopApp') === '1' ||
+        /View2ConnectSellerDesktop/i.test(browser.navigator?.userAgent ?? '')
+      );
+    })();
 
   const handleLogin = async () => {
     if (!isValidEmail(email.trim())) {
@@ -81,28 +93,30 @@ export function SellerPortalLoginScreen() {
           <Text style={styles.subtitle}>
             Sign in with the store owner account approved by View2Connect operations.
           </Text>
-          <Pressable
-            onPress={() => {
-              const targetUrl = `${publicSiteUrl}/business-registration/`;
-              if (Platform.OS === 'web') {
-                const location = (globalThis as { location?: { href: string } }).location;
-                if (location) {
-                  location.href = '/business-registration/';
-                  return;
+          {!isDesktopApplication ? (
+            <Pressable
+              onPress={() => {
+                const targetUrl = `${publicSiteUrl}/business-registration/`;
+                if (Platform.OS === 'web') {
+                  const location = (globalThis as { location?: { href: string } }).location;
+                  if (location) {
+                    location.href = '/business-registration/';
+                    return;
+                  }
                 }
-              }
 
-              void Linking.openURL(targetUrl).catch(() => {
-                Alert.alert(
-                  'Open on the website',
-                  'Store owner registration is available from view2connect.ng.',
-                );
-              });
-            }}
-            style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}
-          >
-            <Text style={styles.inlineLinkText}>Apply for a store owner account</Text>
-          </Pressable>
+                void Linking.openURL(targetUrl).catch(() => {
+                  Alert.alert(
+                    'Open on the website',
+                    'Store owner registration is available from view2connect.ng.',
+                  );
+                });
+              }}
+              style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}
+            >
+              <Text style={styles.inlineLinkText}>Apply for a store owner account</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -177,6 +191,10 @@ function createStyles(colors: AppColors) {
       borderRadius: 8,
       backgroundColor: colors.secondary,
     },
+    subtitle: {
+      ...typography.body,
+      color: '#D6DFE2',
+    },
     eyebrow: {
       ...typography.eyebrow,
       color: colors.accent,
@@ -184,10 +202,6 @@ function createStyles(colors: AppColors) {
     title: {
       ...typography.title,
       color: colors.white,
-    },
-    subtitle: {
-      ...typography.body,
-      color: '#D6DFE2',
     },
     inlineLink: {
       alignSelf: 'flex-start',

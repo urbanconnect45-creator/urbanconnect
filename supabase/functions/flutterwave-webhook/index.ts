@@ -3,7 +3,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 type JsonRecord = Record<string, unknown>;
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers':
     'authorization, x-client-info, apikey, content-type, flutterwave-signature, verif-hash',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -189,6 +190,25 @@ async function insertRows(
   }
 }
 
+async function callRpc<T>(
+  supabaseUrl: string,
+  headers: SupabaseHeaders,
+  functionName: string,
+  body: Record<string, unknown>,
+) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${functionName}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase ${functionName} transaction failed with ${response.status}.`);
+  }
+
+  return (await response.json()) as T;
+}
+
 function hasMatchingAmount(
   receivedAmount: number,
   expectedAmount: number,
@@ -306,26 +326,27 @@ async function handleOrderCharge(
     };
   }
 
-  const now = new Date().toISOString();
-
-  await patchRows(
+  const stockFinalized = await callRpc<boolean>(
     supabaseUrl,
     headers,
-    `/rest/v1/orders?id=eq.${encodeURIComponent(reference)}`,
+    'finalize_paid_order',
     {
-      payment_status: 'paid',
-      updated_at: now,
+      p_order_id: reference,
+      p_provider_reference:
+        optionalString(data.flw_ref) ?? optionalString(data.id) ?? reference,
     },
   );
-  await insertRows(supabaseUrl, headers, '/rest/v1/order_timeline_events?on_conflict=id', {
-    id: `timeline-${reference}-flutterwave-paid`,
-    order_id: reference,
-    status: optionalString(order.status) ?? 'placed',
-    label: 'Payment confirmed',
-    note: 'Flutterwave confirmed the card or bank payment.',
-    created_at: now,
-  }).catch(() => undefined);
-  await reduceOrderStock(supabaseUrl, headers, reference).catch(() => undefined);
+
+  if (!stockFinalized) {
+    return {
+      body: {
+        status: 'refundPending',
+        reference,
+        target: 'order',
+        reason: 'Payment was verified, but stock became unavailable.',
+      },
+    };
+  }
 
   return { body: { status: 'paid', reference, target: 'order' } };
 }

@@ -16,7 +16,13 @@ import {
 import { AppButton } from '../components/AppButton';
 import { AuthPageBackground } from '../components/AuthPageBackground';
 import { AuthVisualPanel } from '../components/AuthVisualPanel';
+import {
+  CustomerMobileAuthShell,
+  CustomerMobileField,
+  CustomerMobilePhoneField,
+} from '../components/CustomerMobileAuth';
 import { FormField } from '../components/FormField';
+import { SocialAuthButtons } from '../components/SocialAuthButtons';
 import { estates } from '../data/estates';
 import {
   privacyPolicySections,
@@ -79,8 +85,8 @@ type SignupVerificationState = {
 export function SignupScreen({ navigation }: SignupScreenProps) {
   const { requestSignUpVerification, signUp } = useAuth();
   const { appendEmailLog, securitySettings } = useBusinessDirectory();
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
+  const { colors, isDarkMode } = useAppTheme();
+  const styles = createStyles(colors, isDarkMode);
   const { width } = useWindowDimensions();
   const isWideWeb = Platform.OS === 'web' && width >= 900;
   const isPublicStoreWeb =
@@ -249,6 +255,216 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
       ? verification
       : null;
 
+  if (!isWideWeb && signupStep === 'verification' && activeVerification) {
+    return (
+      <CustomerMobileAuthShell
+        footer={
+          <View style={styles.mobileFooterRow}>
+            <Text style={styles.mobileFooterText}>Already registered?</Text>
+            <Pressable onPress={() => navigation.goBack()}>
+              <Text style={styles.mobileFooterLink}>Sign in</Text>
+            </Pressable>
+          </View>
+        }
+        subtitle={`Enter the 8 digit code sent to ${activeVerification.email}.`}
+        title="Verify your email"
+      >
+        <View style={styles.mobileVerificationIcon}>
+          <Ionicons color={colors.primary} name="mail-unread-outline" size={30} />
+        </View>
+        <CustomerMobileField
+          autoFocus
+          icon="keypad-outline"
+          keyboardType="number-pad"
+          label="Verification code"
+          maxLength={verificationCodeLength}
+          onChangeText={(value) => setVerificationCodeDraft(value.replace(/\D/g, '').slice(0, verificationCodeLength))}
+          placeholder="00000000"
+          value={verificationCodeDraft}
+        />
+        <Text style={styles.mobileOtpHint}>The account is created only after this code is verified.</Text>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <AppButton
+          disabled={verificationCodeDraft.trim().length < verificationCodeLength}
+          label="Verify and create account"
+          loading={isLoading}
+          onPress={() => void handleSignup()}
+          style={styles.mobilePrimaryButton}
+        />
+        <View style={styles.mobileVerificationActions}>
+          <Pressable onPress={() => void handleRequestVerification()} style={styles.mobileActionButton}>
+            <Text style={styles.mobileFooterLink}>Resend code</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { setSignupStep('details'); setError(null); }}
+            style={styles.mobileActionButton}
+          >
+            <Text style={styles.mobileFooterLink}>Edit details</Text>
+          </Pressable>
+        </View>
+      </CustomerMobileAuthShell>
+    );
+  }
+
+  if (!isWideWeb) {
+    return (
+      <>
+        <CustomerMobileAuthShell
+          footer={
+            <View style={styles.mobileFooterRow}>
+              <Text style={styles.mobileFooterText}>Already have an account?</Text>
+              <Pressable onPress={() => navigation.goBack()}>
+                <Text style={styles.mobileFooterLink}>Sign in</Text>
+              </Pressable>
+            </View>
+          }
+          subtitle="Join the marketplace for local shopping, secure orders, and delivery updates."
+          title="Create your account"
+        >
+          {securitySettings.maintenanceMode || !signupsAllowedForRole ? (
+            <View style={styles.mobileNotice}>
+              <Ionicons color={colors.warning} name="construct-outline" size={18} />
+              <Text style={styles.mobileNoticeText}>
+                {securitySettings.maintenanceMode ? 'Signup is temporarily paused for maintenance.' : 'Customer signup is temporarily paused.'}
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.mobileFieldRow}>
+            <View style={styles.mobileFieldHalf}>
+              <CustomerMobileField
+                autoCapitalize="words"
+                icon="person-outline"
+                label="First name"
+                onChangeText={(value) => updateField('firstName', value)}
+                placeholder="First name"
+                value={form.firstName}
+              />
+            </View>
+            <View style={styles.mobileFieldHalf}>
+              <CustomerMobileField
+                autoCapitalize="words"
+                icon="person-outline"
+                label="Last name"
+                onChangeText={(value) => updateField('lastName', value)}
+                placeholder="Last name"
+                value={form.lastName}
+              />
+            </View>
+          </View>
+          <CustomerMobilePhoneField
+            countryCode={countryCode}
+            onChangeCountryCode={(code) => {
+              setCountryCode(code);
+              updateField('phoneNumber', normalizeLocalPhoneDigits(form.phoneNumber, code));
+            }}
+            onChangeText={(value) => updateField('phoneNumber', normalizeLocalPhoneDigits(value, countryCode))}
+            options={countryCodes}
+            value={form.phoneNumber}
+          />
+          <CustomerMobileField
+            autoCapitalize="none"
+            icon="mail-outline"
+            keyboardType="email-address"
+            label="Email address"
+            onChangeText={(value) => updateField('email', value)}
+            placeholder="email@example.com"
+            value={form.email}
+          />
+          <View style={[styles.mobileFieldRow, width < 350 && styles.mobileFieldStack]}>
+            <View style={styles.mobileFieldHalf}>
+              <CustomerMobileField
+                icon="lock-closed-outline"
+                label="Password"
+                onChangeText={(value) => updateField('password', value)}
+                placeholder="Password"
+                rightAccessory={
+                  <Pressable
+                    accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+                    accessibilityRole="button"
+                    onPress={() => setPasswordVisible((current) => !current)}
+                    style={styles.mobileIconButton}
+                  >
+                    <Ionicons color={colors.primary} name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={18} />
+                  </Pressable>
+                }
+                secureTextEntry={!passwordVisible}
+                value={form.password}
+              />
+            </View>
+            <View style={styles.mobileFieldHalf}>
+              <CustomerMobileField
+                icon="shield-checkmark-outline"
+                label="Confirm"
+                onChangeText={(value) => updateField('confirmPassword', value)}
+                placeholder="Repeat"
+                rightAccessory={
+                  <Pressable
+                    accessibilityLabel={confirmPasswordVisible ? 'Hide password confirmation' : 'Show password confirmation'}
+                    accessibilityRole="button"
+                    onPress={() => setConfirmPasswordVisible((current) => !current)}
+                    style={styles.mobileIconButton}
+                  >
+                    <Ionicons color={colors.primary} name={confirmPasswordVisible ? 'eye-off-outline' : 'eye-outline'} size={18} />
+                  </Pressable>
+                }
+                secureTextEntry={!confirmPasswordVisible}
+                value={form.confirmPassword}
+              />
+            </View>
+          </View>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: acceptedAgreement }}
+            onPress={() => { setAcceptedAgreement((current) => !current); setError(null); }}
+            style={({ pressed }) => [styles.mobileAgreementRow, pressed && styles.agreementRowPressed]}
+          >
+            <View style={[styles.checkbox, acceptedAgreement && styles.checkboxActive]}>
+              {acceptedAgreement ? <Ionicons color={colors.white} name="checkmark" size={16} /> : null}
+            </View>
+            <Text style={styles.mobileAgreementText}>I agree to the user agreement, privacy policy, and marketplace rules.</Text>
+          </Pressable>
+          <Pressable onPress={() => setShowAgreement(true)} style={styles.mobilePolicyLink}>
+            <Text style={styles.mobileFooterLink}>Read the policies</Text>
+          </Pressable>
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <AppButton
+            disabled={securitySettings.maintenanceMode || !signupsAllowedForRole || !acceptedAgreement}
+            label="Send verification code"
+            loading={isLoading}
+            onPress={() => void handleRequestVerification()}
+            style={styles.mobilePrimaryButton}
+          />
+          <SocialAuthButtons compact webRedirectPath="/auth/callback?oauthRole=resident" />
+        </CustomerMobileAuthShell>
+
+        <Modal animationType="slide" transparent visible={showAgreement} onRequestClose={() => setShowAgreement(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.policyCard}>
+              <View style={styles.policyHeader}>
+                <View style={styles.policyHeaderCopy}>
+                  <Text style={styles.sectionTitle}>{privacyPolicyTitle}</Text>
+                  <Text style={styles.noticeCopy}>{userAgreementTitle}</Text>
+                </View>
+                <Pressable onPress={() => setShowAgreement(false)} style={styles.closeButton}>
+                  <Ionicons color={colors.text} name="close" size={20} />
+                </Pressable>
+              </View>
+              <ScrollView showsVerticalScrollIndicator>
+                {[...privacyPolicySections, ...userAgreementSections].map((section) => (
+                  <View key={section.title} style={styles.policySection}>
+                    <Text style={styles.noticeTitle}>{section.title}</Text>
+                    <Text style={styles.noticeCopy}>{section.body}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+              <AppButton label="Close" onPress={() => setShowAgreement(false)} />
+            </View>
+          </View>
+        </Modal>
+      </>
+    );
+  }
+
   if (signupStep === 'verification' && activeVerification) {
     return (
       <AuthPageBackground
@@ -301,6 +517,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
               label="Create account"
               loading={isLoading}
               onPress={() => void handleSignup()}
+              style={isDarkMode ? styles.authPrimaryButton : undefined}
             />
 
             <View style={styles.verificationActionRow}>
@@ -586,6 +803,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
           label="Send verification code"
           loading={isLoading}
           onPress={() => void handleRequestVerification()}
+          style={isDarkMode ? styles.authPrimaryButton : undefined}
         />
         </View>
 
@@ -644,7 +862,7 @@ export function SignupScreen({ navigation }: SignupScreenProps) {
   );
 }
 
-function createStyles(colors: AppColors) {
+function createStyles(colors: AppColors, isDarkMode: boolean) {
   return StyleSheet.create({
     container: {
       flexGrow: 1,
@@ -663,10 +881,10 @@ function createStyles(colors: AppColors) {
       gap: 0,
       minHeight: 700,
       marginVertical: spacing.xl,
-      borderRadius: 14,
-      borderWidth: 2,
-      borderColor: 'rgba(255,255,255,0.78)',
-      backgroundColor: colors.surface,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: isDarkMode ? '#463A55' : 'rgba(255,255,255,0.78)',
+      backgroundColor: isDarkMode ? '#17111F' : colors.surface,
       padding: 0,
       overflow: 'hidden',
       ...shadows.card,
@@ -676,19 +894,19 @@ function createStyles(colors: AppColors) {
       maxWidth: 620,
       alignSelf: 'center',
       gap: spacing.md,
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: 'rgba(255,255,255,0.82)',
-      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: isDarkMode ? '#463A55' : 'rgba(255,255,255,0.82)',
+      backgroundColor: isDarkMode ? '#17111F' : 'rgba(255,255,255,0.97)',
       padding: spacing.md,
       ...shadows.card,
     },
     formColumnMobile: {
       maxWidth: 460,
       borderWidth: 1,
-      borderRadius: 24,
-      borderColor: 'rgba(91,43,203,0.13)',
-      backgroundColor: colors.white,
+      borderRadius: 8,
+      borderColor: isDarkMode ? '#3C3349' : 'rgba(91,43,203,0.13)',
+      backgroundColor: isDarkMode ? '#17111F' : colors.white,
       padding: spacing.lg,
       shadowColor: '#2F175F',
       shadowOffset: { width: 0, height: 10 },
@@ -705,7 +923,7 @@ function createStyles(colors: AppColors) {
       alignSelf: 'stretch',
       borderWidth: 0,
       borderRadius: 0,
-      backgroundColor: colors.surface,
+      backgroundColor: isDarkMode ? '#17111F' : colors.surface,
       padding: spacing.lg,
       shadowOpacity: 0,
       elevation: 0,
@@ -736,11 +954,13 @@ function createStyles(colors: AppColors) {
       width: '100%',
       maxWidth: 460,
       alignSelf: 'center',
-      minHeight: 184,
+      minHeight: isDarkMode ? 146 : 184,
       justifyContent: 'space-between',
       gap: spacing.sm,
-      borderRadius: 24,
-      backgroundColor: colors.primary,
+      borderRadius: 8,
+      borderWidth: isDarkMode ? 1 : 0,
+      borderColor: isDarkMode ? '#533E79' : 'transparent',
+      backgroundColor: isDarkMode ? '#2A1556' : colors.primary,
       padding: spacing.lg,
       overflow: 'hidden',
       shadowColor: '#321070',
@@ -910,10 +1130,10 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
-      borderRadius: radii.lg,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: 'rgba(91,43,203,0.18)',
-      backgroundColor: '#FCFAFF',
+      borderColor: isDarkMode ? '#463A55' : 'rgba(91,43,203,0.18)',
+      backgroundColor: isDarkMode ? '#201A2A' : '#FCFAFF',
       paddingHorizontal: spacing.md,
       ...shadows.soft,
     },
@@ -926,10 +1146,10 @@ function createStyles(colors: AppColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
-      borderRadius: radii.lg,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: 'rgba(91,43,203,0.18)',
-      backgroundColor: '#FCFAFF',
+      borderColor: isDarkMode ? '#463A55' : 'rgba(91,43,203,0.18)',
+      backgroundColor: isDarkMode ? '#201A2A' : '#FCFAFF',
       paddingLeft: spacing.lg,
       paddingRight: spacing.xs,
       ...shadows.soft,
@@ -946,8 +1166,8 @@ function createStyles(colors: AppColors) {
       justifyContent: 'center',
       height: 42,
       width: 42,
-      borderRadius: 21,
-      backgroundColor: colors.primarySoft,
+      borderRadius: 8,
+      backgroundColor: isDarkMode ? '#382B57' : colors.primarySoft,
     },
     randomFillRow: {
       flexDirection: 'row',
@@ -1017,6 +1237,23 @@ function createStyles(colors: AppColors) {
       justifyContent: 'space-between',
       gap: spacing.md,
     },
+    mobileFieldRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+    mobileFieldStack: { flexDirection: 'column' },
+    mobileFieldHalf: { flex: 1, minWidth: 0 },
+    mobileIconButton: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 },
+    mobileAgreementRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, paddingHorizontal: 10 },
+    mobileAgreementText: { flex: 1, color: colors.textMuted, fontSize: 10, lineHeight: 14, fontWeight: '600' },
+    mobilePolicyLink: { minHeight: 22, alignSelf: 'center', justifyContent: 'center' },
+    mobilePrimaryButton: { minHeight: 48, borderRadius: 8 },
+    mobileFooterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+    mobileFooterText: { color: colors.textMuted, fontSize: 12, lineHeight: 17, fontWeight: '600' },
+    mobileFooterLink: { color: colors.primary, fontSize: 12, lineHeight: 17, fontWeight: '900' },
+    mobileNotice: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.card, paddingHorizontal: 10 },
+    mobileNoticeText: { flex: 1, color: colors.text, fontSize: 11, lineHeight: 15, fontWeight: '600' },
+    mobileVerificationIcon: { width: 64, height: 64, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: colors.primarySoft },
+    mobileOtpHint: { color: colors.textMuted, fontSize: 11, lineHeight: 16, textAlign: 'center' },
+    mobileVerificationActions: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+    mobileActionButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 6 },
     errorText: {
       ...typography.caption,
       color: colors.danger,
@@ -1111,8 +1348,18 @@ function createStyles(colors: AppColors) {
     },
     footerMobile: {
       borderTopWidth: 1,
-      borderTopColor: 'rgba(91,43,203,0.1)',
+      borderTopColor: isDarkMode ? '#3C3349' : 'rgba(91,43,203,0.1)',
       paddingTop: spacing.md,
+    },
+    authPrimaryButton: {
+      borderRadius: 8,
+      borderColor: '#7C4DFF',
+      backgroundColor: '#7C4DFF',
+      shadowColor: '#7C4DFF',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.24,
+      shadowRadius: 14,
+      elevation: 5,
     },
     footerText: {
       ...typography.body,

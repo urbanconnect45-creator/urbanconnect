@@ -177,7 +177,7 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
         <Text style={styles.eyebrow}>Customer subscription</Text>
         <Text style={styles.title}>Unlock View2Connect benefits.</Text>
         <Text style={styles.subtitle}>
-          Plan names, prices, and benefit copy are controlled from the admin payment plan editor.
+          Choose a plan and duration to promote your approved customer advertisements.
         </Text>
         <Text style={styles.subtitle}>
           Active plans promote your approved customer adverts on Home and show a premium badge

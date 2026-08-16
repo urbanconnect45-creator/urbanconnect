@@ -4,7 +4,6 @@ import { Alert, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react
 
 import { AppButton } from '../components/AppButton';
 import { useAuth } from '../hooks/useAuth';
-import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import { googleMapsSearchUrl } from '../services/location';
 import {
   acceptDispatchDeliveryJob,
@@ -60,14 +59,7 @@ function fallbackDeliveryLocation(job: DispatchDeliveryJob): DeliveryLocation {
 export function DispatchDashboardScreen() {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { signOut, supabaseAccessToken, user } = useAuth();
-  const { getNotificationsForUser, markNotificationsRead } = useBusinessDirectory();
-  const dispatchNotifications = getNotificationsForUser(user).filter(
-    (notification) => notification.audience === 'dispatch' || notification.userId === user?.id,
-  );
-  const unreadDispatchNotificationCount = dispatchNotifications.filter(
-    (notification) => !notification.readAt,
-  ).length;
+  const { supabaseAccessToken, user } = useAuth();
   const [jobs, setJobs] = useState<DispatchDeliveryJob[]>([]);
   const [riderProfile, setRiderProfile] = useState<DispatchRiderProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -111,14 +103,6 @@ export function DispatchDashboardScreen() {
       return;
     }
 
-    if (action === 'accept' && riderProfile?.status !== 'active') {
-      const message =
-        'Finish dispatch KYC and wait for admin activation before accepting delivery jobs.';
-      setError(message);
-      Alert.alert('Dispatch KYC required', message);
-      return;
-    }
-
     try {
       setActionJobId(job.id);
       setError(null);
@@ -141,7 +125,7 @@ export function DispatchDashboardScreen() {
         actionError instanceof Error ? actionError.message : 'Unable to update the job.';
       setError(
         /active rider account required/i.test(message)
-          ? 'Finish dispatch KYC and wait for admin activation before accepting delivery jobs.'
+          ? 'Dispatch KYC is on hold for testing, but the live database function still requires a dispatch rider account. Apply the testing migration and try again.'
           : message,
       );
     } finally {
@@ -192,11 +176,6 @@ export function DispatchDashboardScreen() {
         </View>
       </View>
 
-      <View style={styles.toolbar}>
-        <AppButton label={isLoading ? 'Refreshing...' : 'Refresh queue'} loading={isLoading} onPress={() => void loadJobs()} />
-        <AppButton label="Sign out" onPress={signOut} variant="ghost" />
-      </View>
-
       <View style={[styles.readinessCard, riderReady && styles.readinessCardReady]}>
         <View
           style={[
@@ -212,12 +191,12 @@ export function DispatchDashboardScreen() {
         </View>
         <View style={styles.cardTitleCopy}>
           <Text style={styles.cardTitle}>
-            {riderReady ? 'Ready for delivery jobs' : 'Finish dispatch KYC'}
+            {riderReady ? 'Dispatch verification complete' : 'Finish dispatch verification'}
           </Text>
           <Text style={styles.cardBody}>
             {riderReady
               ? 'Your rider profile is active. You can accept available jobs and update delivery progress.'
-              : 'Complete rider KYC, vehicle details, and admin activation before accepting rides.'}
+              : 'Complete your rider details and wait for approval before accepting delivery jobs.'}
           </Text>
           <Text style={styles.cardMeta}>
             Status: {riderStatusLabel}
@@ -233,44 +212,6 @@ export function DispatchDashboardScreen() {
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : null}
-
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardTitleCopy}>
-            <Text style={styles.cardTitle}>Dispatch notifications</Text>
-            <Text style={styles.cardMeta}>
-              {unreadDispatchNotificationCount > 0
-                ? `${unreadDispatchNotificationCount} unread alert${unreadDispatchNotificationCount > 1 ? 's' : ''}`
-                : 'Delivery alerts and job updates appear here.'}
-            </Text>
-          </View>
-          {dispatchNotifications.length > 0 ? (
-            <AppButton
-              label="Mark read"
-              onPress={() => markNotificationsRead(user.id)}
-              variant="ghost"
-            />
-          ) : null}
-        </View>
-        {dispatchNotifications.length > 0 ? (
-          dispatchNotifications.slice(0, 3).map((notification) => (
-            <View key={notification.id} style={styles.notificationItem}>
-              <View style={styles.cardTitleCopy}>
-                <Text style={styles.cardTitle}>{notification.title}</Text>
-                <Text style={styles.cardBody}>{notification.body}</Text>
-                <Text style={styles.cardMeta}>{formatDateTime(notification.createdAt)}</Text>
-              </View>
-              {!notification.readAt ? (
-                <View style={styles.statusPill}>
-                  <Text style={styles.statusText}>New</Text>
-                </View>
-              ) : null}
-            </View>
-          ))
-        ) : (
-          <Text style={styles.body}>No dispatch notifications yet.</Text>
-        )}
-      </View>
 
       <View style={styles.list}>
         {activeDispatchJobs.length > 0 ? (
@@ -310,7 +251,6 @@ export function DispatchDashboardScreen() {
                 </View>
               </View>
 
-
               <Text style={styles.cardMeta}>Created {formatDateTime(job.createdAt)}</Text>
               <View style={styles.actionRow}>
                 <AppButton
@@ -327,7 +267,6 @@ export function DispatchDashboardScreen() {
                 ) : null}
                 {job.status === 'available' ? (
                   <AppButton
-                    disabled={!riderReady}
                     label={actionJobId === job.id ? 'Accepting...' : 'Accept job'}
                     loading={actionJobId === job.id}
                     onPress={() => void runJobAction(job, 'accept')}

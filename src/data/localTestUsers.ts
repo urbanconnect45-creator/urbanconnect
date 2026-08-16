@@ -1,4 +1,7 @@
 import type { StoredUser } from '../types/auth';
+import { readPublicEnv } from '../config/runtime';
+
+const localTestPassword = readPublicEnv('EXPO_PUBLIC_LOCAL_TEST_PASSWORD') ?? '';
 
 export const localTestUsers: StoredUser[] = [
   {
@@ -13,7 +16,7 @@ export const localTestUsers: StoredUser[] = [
     riverParkVerified: true,
     status: 'active',
     createdAt: '2026-06-22T00:00:00.000Z',
-    password: 'password123',
+    password: localTestPassword,
   },
   {
     id: 'local-test-seller',
@@ -29,7 +32,7 @@ export const localTestUsers: StoredUser[] = [
     riverParkVerified: true,
     status: 'active',
     createdAt: '2026-06-22T00:00:00.000Z',
-    password: 'password123',
+    password: localTestPassword,
   },
   {
     id: 'local-test-dispatch',
@@ -43,6 +46,6 @@ export const localTestUsers: StoredUser[] = [
     riverParkVerified: true,
     status: 'active',
     createdAt: '2026-06-22T00:00:00.000Z',
-    password: 'password123',
+    password: localTestPassword,
   },
 ];

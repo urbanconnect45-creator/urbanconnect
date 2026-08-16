@@ -27,7 +27,8 @@ type ProfileRow = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -126,8 +127,9 @@ serve(async (request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  const otpHashSecret = Deno.env.get('ACCOUNT_SIGNUP_OTP_SECRET')?.trim();
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey || !otpHashSecret) {
     return jsonResponse({ error: 'Account verification is not configured.' }, 500);
   }
 
@@ -175,7 +177,7 @@ serve(async (request) => {
     'Content-Type': 'application/json',
   };
   const verificationResponse = await fetch(
-    `${supabaseUrl}/rest/v1/account_signup_verifications?select=*&email=eq.${encodeURIComponent(email)}&limit=1`,
+    `${supabaseUrl}/rest/v1/account_signup_verifications?select=*&email=eq.${encodeURIComponent(email)}&role=eq.${encodeURIComponent(role)}&limit=1`,
     { headers: serviceHeaders },
   );
   const verificationRows = verificationResponse.ok
@@ -205,10 +207,10 @@ serve(async (request) => {
     return jsonResponse({ error: 'Too many incorrect attempts. Request a new code.' }, 429);
   }
 
-  const expectedHash = await hashCode(email, code, serviceRoleKey);
+  const expectedHash = await hashCode(email, code, otpHashSecret);
   if (expectedHash !== verification.code_hash) {
     await fetch(
-      `${supabaseUrl}/rest/v1/account_signup_verifications?email=eq.${encodeURIComponent(email)}`,
+      `${supabaseUrl}/rest/v1/account_signup_verifications?email=eq.${encodeURIComponent(email)}&role=eq.${encodeURIComponent(role)}`,
       {
         method: 'PATCH',
         headers: {
@@ -346,6 +348,10 @@ serve(async (request) => {
 
   if (!profileInsertResponse.ok) {
     const profileError = await readJson(profileInsertResponse);
+    await fetch(`${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(authUser.id)}`, {
+      method: 'DELETE',
+      headers: serviceHeaders,
+    }).catch(() => undefined);
     return jsonResponse(
       { error: String((profileError as { message?: string }).message || 'Unable to save the account profile.') },
       502,
@@ -353,7 +359,7 @@ serve(async (request) => {
   }
 
   if (role === 'dispatch') {
-    await fetch(`${supabaseUrl}/rest/v1/rider_profiles?on_conflict=auth_user_id`, {
+    const riderResponse = await fetch(`${supabaseUrl}/rest/v1/rider_profiles?on_conflict=auth_user_id`, {
       method: 'POST',
       headers: {
         ...serviceHeaders,
@@ -367,11 +373,23 @@ serve(async (request) => {
         status: 'active',
         updated_at: new Date().toISOString(),
       }),
-    }).catch(() => undefined);
+    });
+
+    if (!riderResponse.ok) {
+      await fetch(`${supabaseUrl}/rest/v1/app_users?id=eq.${encodeURIComponent(authUser.id)}`, {
+        method: 'DELETE',
+        headers: serviceHeaders,
+      }).catch(() => undefined);
+      await fetch(`${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(authUser.id)}`, {
+        method: 'DELETE',
+        headers: serviceHeaders,
+      }).catch(() => undefined);
+      return jsonResponse({ error: 'Unable to finish the dispatch rider profile.' }, 502);
+    }
   }
 
   await fetch(
-    `${supabaseUrl}/rest/v1/account_signup_verifications?email=eq.${encodeURIComponent(email)}`,
+    `${supabaseUrl}/rest/v1/account_signup_verifications?email=eq.${encodeURIComponent(email)}&role=eq.${encodeURIComponent(role)}`,
     { method: 'DELETE', headers: serviceHeaders },
   ).catch(() => undefined);
 

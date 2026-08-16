@@ -4,6 +4,7 @@ import {
   useContext,
   useMemo,
   useRef,
+  useState,
   type PropsWithChildren,
 } from 'react';
 import { Alert, Linking, Platform } from 'react-native';
@@ -12,7 +13,6 @@ import * as WebBrowser from 'expo-web-browser';
 import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { localTestUsers } from '../data/localTestUsers';
 import { seededAdminUsers } from '../data/mockAdmins';
-import { seededUsers } from '../data/mockUsers';
 import { useBusinessDirectory } from './useBusinessDirectory';
 import type {
   AdminPermission,
@@ -28,15 +28,18 @@ import type {
 } from '../types/auth';
 import { riverParkClusters } from '../types/business';
 import { canAdminEditSensitiveData, isUserActive } from '../utils/businessState';
-import { RANDOM_SIGNUP_PASSWORD } from '../utils/randomSignup';
 import { usePersistentState } from './usePersistentState';
+import { useSecureSupabaseSession } from './useSecureSupabaseSession';
 import {
   addOAuthContextToCallbackUrl,
   completeSupabaseOAuth,
   createDispatchAccountWithSupabase,
+  fetchMySupabaseAdmin,
   fetchSupabaseUserProfiles,
   isRecoverableSupabaseSetupError,
   isSupabaseConfigured,
+  refreshSupabaseSession,
+  setSupabaseAccessToken,
   setRiverParkVerificationInSupabase,
   sendSupabaseSignupVerificationCode,
   signInWithSupabase,
@@ -45,7 +48,6 @@ import {
   syncSupabaseSessionProfile,
   updateSupabaseAuthPassword,
   updateSupabaseUserProfile,
-  type SupabaseSession,
   verifySupabaseAdmin,
 } from '../services/supabaseApi';
 
@@ -53,10 +55,8 @@ type AuthContextValue = {
   user: AppUser | null;
   users: AppUser[];
   supabaseAccessToken?: string;
-  demoAccounts: AppUser[];
   adminUser: AdminUser | null;
   adminUsers: AdminUser[];
-  adminDemoAccounts: AdminUser[];
   signIn: (values: SignInFormValues) => Promise<void>;
   requestSignUpVerification: (values: SignUpFormValues) => Promise<void>;
   signUp: (values: SignUpFormValues, verificationCode: string) => Promise<void>;
@@ -67,6 +67,9 @@ type AuthContextValue = {
   userSecurityPreference: UserSecurityPreference;
   updateUserSecurityPreference: (patch: Partial<UserSecurityPreference>) => void;
   resetPassword: (identifier: string, nextPassword: string) => Promise<'user' | 'admin'>;
+  passwordRecoveryReady: boolean;
+  completePasswordRecovery: (nextPassword: string) => Promise<void>;
+  cancelPasswordRecovery: () => void;
   signOut: () => void;
   signInAdmin: (values: AdminSignInFormValues) => Promise<void>;
   signOutAdmin: () => void;
@@ -241,6 +244,12 @@ const ownerPermissions: AdminPermission[] = [
 ];
 
 const customerCarePermissions: AdminPermission[] = ['verifyListings'];
+const delegatedAdminPermissions: AdminPermission[] = [
+  'exportUsers',
+  'exportListings',
+  'verifyListings',
+  'deleteListings',
+];
 
 function getAdminPermissions(role: AdminUser['role'] | undefined) {
   if (role === 'owner') {
@@ -249,6 +258,10 @@ function getAdminPermissions(role: AdminUser['role'] | undefined) {
 
   if (role === 'customerCare') {
     return customerCarePermissions;
+  }
+
+  if (role === 'admin') {
+    return delegatedAdminPermissions;
   }
 
   return [];
@@ -263,31 +276,36 @@ export function AuthProvider({ children }: PropsWithChildren) {
   } = useBusinessDirectory();
   const [rawStoredUsers, setStoredUsers] = usePersistentState<StoredUser[]>(
     'urbanconnect.users.v2',
-    isUrbanConnectLocalTestMode ? localTestUsers : seededUsers,
+    isUrbanConnectLocalTestMode ? localTestUsers : [],
+    { enabled: isUrbanConnectLocalTestMode },
   );
   const [storedAdminUsers, setStoredAdminUsers] = usePersistentState<StoredAdminUser[]>(
     'urbanconnect.adminUsers.v1',
-    seededAdminUsers,
+    isUrbanConnectLocalTestMode ? seededAdminUsers : [],
+    { enabled: isUrbanConnectLocalTestMode },
   );
-  const [rawUser, setUser] = usePersistentState<AppUser | null>('urbanconnect.currentUser.v2', null);
+  const [rawUser, setUser] = usePersistentState<AppUser | null>(
+    'urbanconnect.currentUser.v2',
+    null,
+    { enabled: isUrbanConnectLocalTestMode },
+  );
   const [rawAdminUser, setAdminUser] = usePersistentState<AdminUser | null>(
     'urbanconnect.currentAdmin.v1',
     null,
+    { enabled: isUrbanConnectLocalTestMode },
   );
-  const [supabaseSession, setSupabaseSession] = usePersistentState<SupabaseSession | null>(
-    'urbanconnect.supabaseSession.v1',
-    null,
-  );
+  const [supabaseSession, setSupabaseSession, isSessionHydrated] = useSecureSupabaseSession();
   const oauthCallbackHandledRef = useRef(false);
+  const [passwordRecoveryReady, setPasswordRecoveryReady] = useState(false);
   const oauthCallbackUrlRef = useRef<string | null>(null);
   const pendingOAuthRedirectPathRef = useRef<string | undefined>(undefined);
   const syncedProfileSessionRef = useRef<string | null>(null);
   const [userProfileOverrides, setUserProfileOverrides] = usePersistentState<
     Record<string, UserProfileOverride>
-  >('urbanconnect.userProfileOverrides.v1', {});
+  >('urbanconnect.userProfileOverrides.v1', {}, { enabled: false });
   const [userSecurityPreferencesByUser, setUserSecurityPreferencesByUser] = usePersistentState<
     Record<string, UserSecurityPreference>
-  >('urbanconnect.userSecurityPreferences.v1', {});
+  >('urbanconnect.userSecurityPreferences.v1', {}, { enabled: false });
   const storedUsers = useMemo(() => rawStoredUsers.map(migrateStoredUser), [rawStoredUsers]);
   const user = useMemo(() => (rawUser ? migrateAppUser(rawUser) : null), [rawUser]);
   const userSecurityPreference = useMemo(
@@ -308,12 +326,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const matchedAdmin = storedAdminUsers.find((item) => item.id === rawAdminUser.id);
 
-    if (!matchedAdmin || !matchedAdmin.isActive) {
+    if (matchedAdmin && !matchedAdmin.isActive) {
       return null;
     }
 
-    return toAdminUser(matchedAdmin);
+    return matchedAdmin ? toAdminUser(matchedAdmin) : rawAdminUser;
   }, [rawAdminUser, storedAdminUsers]);
+
+  useEffect(() => {
+    setSupabaseAccessToken(supabaseSession?.accessToken);
+
+    return () => setSupabaseAccessToken(undefined);
+  }, [supabaseSession?.accessToken]);
 
   useEffect(() => {
     if (rawAdminUser && !adminUser) {
@@ -322,7 +346,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [adminUser, rawAdminUser, setAdminUser]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !adminUser || !supabaseSession?.accessToken) {
       return undefined;
     }
 
@@ -370,13 +394,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
 
     loadProfiles();
-    const refreshInterval = setInterval(loadProfiles, 1000);
+    const refreshInterval = setInterval(loadProfiles, 30_000);
 
     return () => {
       isCancelled = true;
       clearInterval(refreshInterval);
     };
-  }, [setStoredUsers, userProfileOverrides]);
+  }, [adminUser, setStoredUsers, supabaseSession?.accessToken, userProfileOverrides]);
 
   useEffect(() => {
     if (!rawUser) {
@@ -421,8 +445,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const existingUser = currentUsers.find(
         (storedUser) =>
           storedUser.id === nextUser.id ||
-          storedUser.email.trim().toLowerCase() === normalizedNextEmail ||
-          Boolean(normalizedNextPhone && normalizePhoneNumber(storedUser.phoneNumber) === normalizedNextPhone),
+          (storedUser.role === nextUser.role &&
+            (storedUser.email.trim().toLowerCase() === normalizedNextEmail ||
+              Boolean(
+                normalizedNextPhone &&
+                  normalizePhoneNumber(storedUser.phoneNumber) === normalizedNextPhone,
+              ))),
       );
       const userWithCachedPassword: StoredUser = {
         ...nextUser,
@@ -433,9 +461,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
         userWithCachedPassword,
         ...currentUsers.filter((storedUser) => {
           const sameId = storedUser.id === nextUser.id;
-          const sameEmail = storedUser.email.trim().toLowerCase() === normalizedNextEmail;
+          const sameRole = storedUser.role === nextUser.role;
+          const sameEmail =
+            sameRole && storedUser.email.trim().toLowerCase() === normalizedNextEmail;
           const samePhone = Boolean(
-            normalizedNextPhone && normalizePhoneNumber(storedUser.phoneNumber) === normalizedNextPhone,
+            sameRole &&
+              normalizedNextPhone &&
+              normalizePhoneNumber(storedUser.phoneNumber) === normalizedNextPhone,
           );
 
           return !sameId && !sameEmail && !samePhone;
@@ -443,6 +475,104 @@ export function AuthProvider({ children }: PropsWithChildren) {
       ];
     });
   };
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !isSessionHydrated || !supabaseSession) {
+      return undefined;
+    }
+
+    const needsAppRestore = (supabaseSession.portal ?? 'app') === 'app' && !rawUser;
+    const needsAdminRestore = supabaseSession.portal === 'admin' && !rawAdminUser;
+
+    if (!needsAppRestore && !needsAdminRestore) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+
+    const restoreSession = async () => {
+      let currentSession = supabaseSession;
+      if (
+        currentSession.refreshToken &&
+        (currentSession.expiresAt ?? 0) <= Math.floor(Date.now() / 1000) + 60
+      ) {
+        currentSession = {
+          ...(await refreshSupabaseSession(currentSession.refreshToken)),
+          portal: currentSession.portal ?? 'app',
+        };
+        if (!isCancelled) {
+          setSupabaseSession(currentSession);
+        }
+      }
+
+      if (currentSession.portal === 'admin') {
+        const restoredAdmin = await fetchMySupabaseAdmin(currentSession.accessToken);
+        if (!isCancelled) {
+          setAdminUser(restoredAdmin);
+        }
+        return;
+      }
+
+      const result = await syncSupabaseSessionProfile(currentSession.accessToken);
+      if (!isCancelled) {
+        cacheStoredUser(result.storedUser);
+        setUser(result.user);
+      }
+    };
+
+    restoreSession().catch(() => {
+      if (!isCancelled) {
+        setSupabaseSession(null);
+        setUser(null);
+        setAdminUser(null);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isSessionHydrated,
+    rawAdminUser,
+    rawUser,
+    setAdminUser,
+    setSupabaseSession,
+    setUser,
+    supabaseSession,
+  ]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !isSessionHydrated || !supabaseSession?.refreshToken) {
+      return undefined;
+    }
+
+    const refreshDelay = Math.max(
+      0,
+      (supabaseSession.expiresAt ?? 0) * 1000 - Date.now() - 60_000,
+    );
+    const timer = setTimeout(() => {
+      refreshSupabaseSession(supabaseSession.refreshToken as string)
+        .then((refreshedSession) => {
+          setSupabaseSession({
+            ...refreshedSession,
+            portal: supabaseSession.portal ?? 'app',
+          });
+        })
+        .catch(() => {
+          setSupabaseSession(null);
+          setUser(null);
+          setAdminUser(null);
+        });
+    }, refreshDelay);
+
+    return () => clearTimeout(timer);
+  }, [
+    isSessionHydrated,
+    setAdminUser,
+    setSupabaseSession,
+    setUser,
+    supabaseSession,
+  ]);
 
   useEffect(() => {
     const accessToken = supabaseSession?.accessToken;
@@ -473,6 +603,32 @@ export function AuthProvider({ children }: PropsWithChildren) {
     oauthCallbackUrlRef.current = null;
   };
 
+  const dismissNativeAuthBrowser = () => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    try {
+      // Android's auth-session polyfill dismisses its Custom Tab through this
+      // synchronous bridge. Do not chain `.catch()` because older standalone
+      // Android builds correctly return void here.
+      WebBrowser.dismissAuthSession();
+      return;
+    } catch {
+      // Fall back for native implementations that only expose dismissBrowser.
+    }
+
+    try {
+      const dismissal = WebBrowser.dismissBrowser();
+
+      if (dismissal && typeof dismissal.catch === 'function') {
+        void dismissal.catch(() => undefined);
+      }
+    } catch {
+      // The browser may already have closed after the deep-link callback.
+    }
+  };
+
   const completeSocialSignIn = async (callbackUrl: string | null) => {
     const contextualCallbackUrl = callbackUrl
       ? addOAuthContextToCallbackUrl(
@@ -481,6 +637,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
             (Platform.OS === 'web' ? undefined : '/auth/callback?oauthRole=resident'),
         )
       : null;
+    const isPasswordRecovery = /(?:[?#&])type=recovery(?:&|$)/i.test(
+      contextualCallbackUrl ?? '',
+    );
 
     if (
       !isSupabaseConfigured ||
@@ -493,11 +652,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (Platform.OS !== 'web') {
       // Close the in-app auth surface immediately. Profile syncing can finish
       // after the customer is already back inside View2Connect.
-      try {
-        WebBrowser.dismissAuthSession();
-      } catch {
-        void WebBrowser.dismissBrowser().catch(() => undefined);
-      }
+      dismissNativeAuthBrowser();
     }
 
     // Android can deliver the callback through Linking and then resolve the
@@ -521,13 +676,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       cacheStoredUser(result.storedUser);
       setSupabaseSession(result.session);
       setUser(result.user);
-      notifyUserLogin(result.user);
+      setPasswordRecoveryReady(isPasswordRecovery);
+      if (!isPasswordRecovery) {
+        notifyUserLogin(result.user);
+      }
       pendingOAuthRedirectPathRef.current = undefined;
 
       if (Platform.OS !== 'web') {
         // A deep link opens the app but does not automatically close Android's
         // Chrome Custom Tab. Dismiss it after the session has been persisted.
-        void WebBrowser.dismissBrowser().catch(() => undefined);
+        dismissNativeAuthBrowser();
       }
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -656,6 +814,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     }
 
+    if (!isUrbanConnectLocalTestMode) {
+      if (remoteLoginError) {
+        throw remoteLoginError instanceof Error
+          ? remoteLoginError
+          : new Error('Unable to sign in with Supabase right now.');
+      }
+
+      throw new Error('Authentication is not configured. Contact View2Connect support.');
+    }
+
     const matchedUser = storedUsers.find((item) => {
       const normalizedEmail = item.email.trim().toLowerCase();
       const normalizedPhone = normalizePhoneNumber(item.phoneNumber);
@@ -730,6 +898,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
 
     const normalizedEmail = normalizeAdminEmail(identifier);
+    if (!isUrbanConnectLocalTestMode) {
+      throw new Error('Password recovery must be completed through the secure reset link.');
+    }
+
     const matchedAdmin = storedAdminUsers.find(
       (admin) => normalizeAdminEmail(admin.email) === normalizedEmail,
     );
@@ -822,6 +994,35 @@ export function AuthProvider({ children }: PropsWithChildren) {
     });
   };
 
+  const completePasswordRecovery = async (nextPassword: string) => {
+    const accessToken = supabaseSession?.accessToken;
+    const normalizedPassword = nextPassword.trim();
+
+    if (!passwordRecoveryReady || !accessToken) {
+      throw new Error('The password recovery link is missing or has expired.');
+    }
+
+    if (normalizedPassword.length < 8) {
+      throw new Error('New password must be at least 8 characters.');
+    }
+
+    await updateSupabaseAuthPassword(accessToken, normalizedPassword);
+    await signOutSupabase(accessToken).catch(() => undefined);
+    setPasswordRecoveryReady(false);
+    setSupabaseSession(null);
+    setUser(null);
+  };
+
+  const cancelPasswordRecovery = () => {
+    const accessToken = supabaseSession?.accessToken;
+    if (accessToken) {
+      void signOutSupabase(accessToken).catch(() => undefined);
+    }
+    setPasswordRecoveryReady(false);
+    setSupabaseSession(null);
+    setUser(null);
+  };
+
   const updateUserSecurityPreference = (patch: Partial<UserSecurityPreference>) => {
     if (!user) {
       return;
@@ -849,13 +1050,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     if (isSupabaseConfigured) {
       try {
-        const remoteAdmin = await verifySupabaseAdmin(normalizedEmail, values.password);
+        const remoteLogin = await verifySupabaseAdmin(normalizedEmail, values.password);
+        const remoteAdmin = remoteLogin.admin;
 
         if (remoteAdmin) {
           if (!remoteAdmin.isActive) {
             throw new Error('This customer care account is currently deactivated by the owner.');
           }
 
+          setUser(null);
+          setSupabaseSession(remoteLogin.session);
           setAdminUser(remoteAdmin);
           return;
         }
@@ -868,12 +1072,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     }
 
+    if (!isUrbanConnectLocalTestMode) {
+      throw new Error('Admin authentication is unavailable. Contact the View2Connect owner.');
+    }
+
     const matchedAdmin = storedAdminUsers.find(
       (item) => normalizeAdminEmail(item.email) === normalizedEmail && item.password === values.password,
     );
 
     if (!matchedAdmin) {
-      throw new Error('Incorrect admin email or password. Try one of the admin demo accounts below.');
+      throw new Error('Incorrect admin email or password.');
     }
 
     if (!matchedAdmin.isActive) {
@@ -936,13 +1144,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     if (isSupabaseConfigured) {
       const remoteSignup = await signUpWithSupabase(values, verificationCode);
-      const storedSignupUser: StoredUser = {
-        ...remoteSignup.storedUser,
-        password:
-          values.password === RANDOM_SIGNUP_PASSWORD
-            ? RANDOM_SIGNUP_PASSWORD
-            : remoteSignup.storedUser.password,
-      };
+      const storedSignupUser: StoredUser = { ...remoteSignup.storedUser, password: '' };
 
       cacheStoredUser(storedSignupUser);
       setSupabaseSession(remoteSignup.session);
@@ -1010,6 +1212,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const signOutAdmin = () => {
+    const accessToken = supabaseSession?.accessToken;
+
+    if (isSupabaseConfigured && accessToken) {
+      void signOutSupabase(accessToken).catch(() => undefined);
+    }
+
+    setSupabaseSession(null);
     setAdminUser(null);
   };
 
@@ -1160,16 +1369,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
 
     if (isSupabaseConfigured) {
-      const adminEmail = values.adminEmail?.trim().toLowerCase() ?? '';
-      const adminPassword = values.adminPassword?.trim() ?? '';
-
-      if (!adminEmail || !adminPassword) {
-        throw new Error('Enter your owner admin password before creating a dispatch account.');
-      }
-
       const remoteDispatch = await createDispatchAccountWithSupabase({
-        adminEmail,
-        adminPassword,
         fullName,
         email,
         phoneNumber,
@@ -1392,13 +1592,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       ...(supabaseSession?.accessToken
         ? { supabaseAccessToken: supabaseSession.accessToken }
         : {}),
-      demoAccounts: storedUsers
-        .filter((storedUser) => storedUser.password === RANDOM_SIGNUP_PASSWORD)
-        .slice(0, 6)
-        .map(toAppUser),
       adminUser,
       adminUsers,
-      adminDemoAccounts: adminUsers,
       signIn,
       requestSignUpVerification,
       signUp,
@@ -1409,6 +1604,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       userSecurityPreference,
       updateUserSecurityPreference,
       resetPassword,
+      passwordRecoveryReady,
+      completePasswordRecovery,
+      cancelPasswordRecovery,
       signOut,
       signInAdmin,
       signOutAdmin,
@@ -1425,6 +1623,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       adminUser,
       adminUsers,
       securitySettings,
+      passwordRecoveryReady,
       storedUsers,
       supabaseSession?.accessToken,
       user,

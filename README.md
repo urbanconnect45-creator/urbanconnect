@@ -12,11 +12,6 @@ UrbanConnect is an Expo + React Native + TypeScript app for large estates. Resid
 - Secure web-only admin control center
 - Account screen with logout
 
-## Demo accounts
-
-- Resident: `resident@urbanconnect.com` / `password123`
-- Business owner: `owner@urbanconnect.com` / `password123`
-
 ## Tech stack
 
 - Expo
@@ -58,10 +53,14 @@ npm run start:local
 
 Local test mode disables Supabase reads/writes and keeps test accounts, listings, orders, wallet state, and admin changes under separate local storage keys. Use external image URLs while testing media-heavy listings so Supabase Storage space is not used.
 
-Local test accounts:
+Set a local-only password before starting test mode. Never set this variable in production builds:
 
-- Buyer: `buyer@test.urbanconnect.local` / `password123`
-- Seller: `seller@test.urbanconnect.local` / `password123`
+```powershell
+$env:EXPO_PUBLIC_LOCAL_TEST_PASSWORD='choose-a-local-password'
+npm run start:local
+```
+
+The local fixture emails are defined in `src/data/localTestUsers.ts`. No fixed test password is committed.
 
 Seller portal product import test file:
 
@@ -81,17 +80,7 @@ npm run web:local
 
 ## Secure admin panel
 
-Set an admin token before sharing the web build:
-
-```bash
-EXPO_PUBLIC_ADMIN_ACCESS_TOKEN=replace-with-a-long-random-token
-```
-
-Then open the web app with:
-
-```text
-/?admin=1&token=replace-with-a-long-random-token
-```
+Admin access uses Supabase Auth plus an active, linked `admin_users` record. Public environment variables are never used as admin credentials.
 
 The admin panel includes:
 

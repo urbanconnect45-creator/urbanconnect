@@ -1,8 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 
 type CreateDispatchPayload = {
-  adminEmail?: string;
-  adminPassword?: string;
   fullName?: string;
   email?: string;
   phoneNumber?: string;
@@ -26,7 +24,8 @@ type AdminRow = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -119,8 +118,9 @@ serve(async (request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey || !anonKey) {
     return jsonResponse({ error: 'Dispatch account creation is not configured.' }, 500);
   }
 
@@ -132,8 +132,6 @@ serve(async (request) => {
     return jsonResponse({ error: 'Invalid request.' }, 400);
   }
 
-  const adminEmail = payload.adminEmail?.trim().toLowerCase() ?? '';
-  const adminPassword = payload.adminPassword ?? '';
   const fullName = payload.fullName?.trim() ?? '';
   const email = payload.email?.trim().toLowerCase() ?? '';
   const phoneNumber = payload.phoneNumber?.trim() ?? '';
@@ -142,15 +140,13 @@ serve(async (request) => {
   const businessCluster = payload.businessCluster?.trim() || null;
 
   if (
-    !isValidEmail(adminEmail) ||
-    adminPassword.length < 6 ||
     !fullName ||
     !isValidEmail(email) ||
     phoneNumber.replace(/\D/g, '').length < 10 ||
-    password.length < 6
+    password.length < 8
   ) {
     return jsonResponse(
-      { error: 'Enter owner admin password and complete the dispatch account fields.' },
+      { error: 'Complete the dispatch account fields and use a password of at least 8 characters.' },
       400,
     );
   }
@@ -161,15 +157,18 @@ serve(async (request) => {
     'Content-Type': 'application/json',
   };
 
-  const adminResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/verify_admin_login`, {
-    method: 'POST',
-    headers: serviceHeaders,
-    body: JSON.stringify({
-      admin_email: adminEmail,
-      admin_password: adminPassword,
-    }),
+  const authorization = request.headers.get('Authorization')?.trim() ?? '';
+  const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
   });
-  const adminRows = adminResponse.ok ? ((await adminResponse.json()) as AdminRow[]) : [];
+  const authUser = authResponse.ok ? ((await authResponse.json()) as { id?: string }) : {};
+  const adminResponse = authUser.id
+    ? await fetch(
+        `${supabaseUrl}/rest/v1/admin_users?select=id,full_name,email,role,is_active&auth_user_id=eq.${encodeURIComponent(authUser.id)}&limit=1`,
+        { headers: serviceHeaders },
+      )
+    : undefined;
+  const adminRows = adminResponse?.ok ? ((await adminResponse.json()) as AdminRow[]) : [];
   const admin = adminRows[0];
 
   if (!admin || admin.role !== 'owner' || !admin.is_active) {

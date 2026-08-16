@@ -438,6 +438,7 @@ function buildFooter() {
     </div>
     <div class="footer-links">
       <a href="mailto:${supportEmail}">${supportEmail}</a>
+      <a href="/privacy-policy/">Privacy Policy</a>
       <a href="/contact/">Contact</a>
       <a href="/about/">About</a>
     </div>
@@ -892,6 +893,55 @@ function buildStyles() {
         font-size: 14px;
         line-height: 23px;
         font-weight: 700;
+      }
+      .policy-layout {
+        display: grid;
+        grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+        gap: 36px;
+        align-items: start;
+      }
+      .policy-summary {
+        position: sticky;
+        top: 96px;
+        display: grid;
+        gap: 12px;
+        border-left: 4px solid var(--primary);
+        padding: 6px 0 6px 18px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 24px;
+        font-weight: 700;
+      }
+      .policy-summary strong {
+        color: var(--ink);
+        font-size: 20px;
+      }
+      .policy-summary a {
+        color: var(--primary);
+        overflow-wrap: anywhere;
+      }
+      .policy-sections {
+        display: grid;
+      }
+      .policy-section {
+        border-bottom: 1px solid var(--line);
+        padding: 0 0 26px;
+        margin: 0 0 26px;
+      }
+      .policy-section:last-child {
+        margin-bottom: 0;
+      }
+      .policy-section h2 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 30px;
+      }
+      .policy-section p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 28px;
+        font-weight: 650;
       }
       .screen-grid {
         display: grid;
@@ -1435,8 +1485,12 @@ function buildStyles() {
         .screen-grid,
         .contact-grid,
         .application-grid,
+        .policy-layout,
         .footer {
           grid-template-columns: 1fr;
+        }
+        .policy-summary {
+          position: static;
         }
         .application-grid > .application-panel:first-child {
           order: 2;
@@ -2187,6 +2241,44 @@ function buildContactHtml() {
   });
 }
 
+function buildPrivacyPolicyHtml(policy) {
+  const body = `<section class="page-hero">
+      <div class="shell">
+        <p class="section-kicker">Legal</p>
+        <h1>${escapeHtml(policy.title)}</h1>
+        <p class="hero-lead">Effective date: ${escapeHtml(policy.effectiveDate)}</p>
+      </div>
+    </section>
+    <section class="section tight">
+      <div class="shell policy-layout">
+        <div class="policy-summary">
+          <strong>${escapeHtml(policy.companyName)}</strong>
+          <span>This policy applies to the View2Connect app, website, seller portal, dispatch portal, and support services.</span>
+          <a href="mailto:${escapeHtml(policy.contactEmail)}">${escapeHtml(policy.contactEmail)}</a>
+        </div>
+        <div class="policy-sections">
+          ${policy.sections
+            .map(
+              (section) => `<section class="policy-section">
+            <h2>${escapeHtml(section.title)}</h2>
+            <p>${escapeHtml(section.body)}</p>
+          </section>`,
+            )
+            .join('')}
+        </div>
+      </div>
+    </section>`;
+
+  return buildDocument({
+    activePath: '/privacy-policy/',
+    body,
+    canonicalPath: '/privacy-policy/',
+    description:
+      'View2Connect Privacy Policy covering accounts, marketplace listings, payments, delivery, location, messages, data retention, and account deletion.',
+    title: `${policy.title} | View2Connect`,
+  });
+}
+
 function buildFlutterwaveReturnHtml(kind) {
   const isCancel = kind === 'cancel';
   const title = isCancel ? 'Payment cancelled' : 'Returning to View2Connect';
@@ -2257,6 +2349,9 @@ export async function prepareWebOutput(rootDir) {
     process.env.VIEW2CONNECT_SELLER_DESKTOP_DOWNLOAD_URL?.trim() ||
     defaultSellerDesktopDownloadUrl;
   const distDir = path.join(rootDir, 'dist');
+  const privacyPolicyDocument = JSON.parse(
+    await fs.readFile(path.join(rootDir, 'src', 'data', 'privacyPolicy.json'), 'utf8'),
+  );
   const indexPath = path.join(distDir, 'index.html');
   const expoIndex = await fs.readFile(indexPath, 'utf8');
   const brandedExpoIndex = expoIndex
@@ -2308,6 +2403,7 @@ export async function prepareWebOutput(rootDir) {
     '/seller-desktop/',
     '/about/',
     '/contact/',
+    '/privacy-policy/',
   ];
   const lastmod = new Date().toISOString().slice(0, 10);
   const robotsTxt = `User-agent: *
@@ -2419,6 +2515,11 @@ ${routes
   );
   await writePage(distDir, '/about/', buildAboutHtml());
   await writePage(distDir, '/contact/', buildContactHtml());
+  await writePage(
+    distDir,
+    '/privacy-policy/',
+    buildPrivacyPolicyHtml(privacyPolicyDocument),
+  );
   await writePage(distDir, '/payments/flutterwave/return/', buildFlutterwaveReturnHtml('return'));
   await writePage(distDir, '/payments/flutterwave/cancel/', buildFlutterwaveReturnHtml('cancel'));
 }

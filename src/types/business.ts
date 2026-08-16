@@ -286,6 +286,7 @@ export type SupportSenderRole =
   | 'resident'
   | 'businessOwner'
   | 'dispatch'
+  | 'admin'
   | 'customerCare'
   | 'owner'
   | 'system';
@@ -402,7 +403,14 @@ export const orderStatuses = [
 ] as const;
 export type OrderStatus = (typeof orderStatuses)[number];
 
-export const paymentStatuses = ['pending', 'paid', 'refunded'] as const;
+export const paymentStatuses = [
+  'pending',
+  'paid',
+  'failed',
+  'refundPending',
+  'refunded',
+  'reversed',
+] as const;
 export type PaymentStatus = (typeof paymentStatuses)[number];
 
 export const paymentMethods = ['walletAccount', 'flutterwave', 'bankTransfer', 'cashOnDelivery'] as const;
@@ -487,6 +495,23 @@ export type DispatchDeliveryJob = {
   updatedAt: string;
 };
 
+export type OrderDeliveryUpdate = {
+  id: string;
+  orderId: string;
+  sellerName: string;
+  deliveryAddress: string;
+  deliveryContactPhone?: string | null;
+  status: DispatchDeliveryJobStatus;
+  riderUserId?: string | null;
+  riderFullName?: string | null;
+  riderPhoneNumber?: string | null;
+  acceptedAt?: string | null;
+  pickedUpAt?: string | null;
+  riderConfirmedAt?: string | null;
+  buyerConfirmedAt?: string | null;
+  completedAt?: string | null;
+  updatedAt: string;
+};
 export type DispatchRiderProfile = {
   authUserId: string;
   fullName: string;
@@ -537,7 +562,14 @@ export type SecuritySettings = {
   subscriptionExemptAccountEmail: string;
 };
 
-export type AuditActorRole = 'system' | 'owner' | 'customerCare' | 'businessOwner';
+export type AuditActorRole =
+  | 'system'
+  | 'owner'
+  | 'admin'
+  | 'customerCare'
+  | 'resident'
+  | 'businessOwner'
+  | 'dispatch';
 
 export type AutomatedEmailRecipient = 'buyer' | 'owner' | 'dispatch' | 'admin' | 'customerCare';
 export type AutomatedEmailStatus = 'queued' | 'sent';

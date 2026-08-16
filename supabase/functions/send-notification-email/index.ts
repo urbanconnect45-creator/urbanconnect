@@ -9,10 +9,64 @@ type EmailPayload = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+
+async function authorizeEmailRequest(request: Request, recipientEmail: string) {
+  const authorization = request.headers.get('Authorization')?.trim();
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+
+  if (!authorization || !supabaseUrl || !anonKey || !serviceRoleKey) {
+    return false;
+  }
+
+  if (authorization === `Bearer ${serviceRoleKey}`) {
+    return true;
+  }
+
+  const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
+  });
+
+  if (!userResponse.ok) {
+    return false;
+  }
+
+  const user = (await userResponse.json()) as { id?: string };
+
+  if (!user.id) {
+    return false;
+  }
+
+  const serviceHeaders = {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+  };
+  const adminResponse = await fetch(
+    `${supabaseUrl}/rest/v1/admin_users?select=id&auth_user_id=eq.${encodeURIComponent(user.id)}&is_active=eq.true&limit=1`,
+    { headers: serviceHeaders },
+  );
+  const admins = adminResponse.ok ? ((await adminResponse.json()) as unknown[]) : [];
+
+  if (admins.length > 0) {
+    return true;
+  }
+
+  const profileResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=email&id=eq.${encodeURIComponent(user.id)}&status=eq.active&limit=1`,
+    { headers: serviceHeaders },
+  );
+  const profiles = profileResponse.ok
+    ? ((await profileResponse.json()) as Array<{ email?: string }>)
+    : [];
+
+  return profiles[0]?.email?.trim().toLowerCase() === recipientEmail.trim().toLowerCase();
+}
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -51,6 +105,35 @@ function extractEmailAddress(value?: string) {
   const bracketMatch = trimmedValue.match(/<([^<>]+)>/);
 
   return (bracketMatch?.[1] ?? trimmedValue).trim();
+}
+
+async function rateKey(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function consumeEmailRateLimit(recipientEmail: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return false;
+  }
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_edge_rate_limit`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_rate_key: await rateKey(`email:${recipientEmail.trim().toLowerCase()}`),
+      p_max_requests: 20,
+      p_window_seconds: 3600,
+    }),
+  });
+  return response.ok && (await response.json().catch(() => false)) === true;
 }
 
 serve(async (request) => {
@@ -109,8 +192,16 @@ serve(async (request) => {
   const subject = payload.subject?.trim();
   const body = payload.body?.trim();
 
-  if (!subject || !body) {
+  if (!subject || !body || subject.length > 160 || body.length > 10000) {
     return jsonResponse({ error: 'Email subject and body are required.' }, 400);
+  }
+
+  if (!(await authorizeEmailRequest(request, payload.recipientEmail!))) {
+    return jsonResponse({ error: 'You are not authorized to send this email.' }, 403);
+  }
+
+  if (!(await consumeEmailRateLimit(payload.recipientEmail!))) {
+    return jsonResponse({ error: 'Email rate limit reached. Try again later.' }, 429);
   }
 
   const safeRecipientName = escapeHtml(payload.recipientName?.trim() || 'View2Connect user');

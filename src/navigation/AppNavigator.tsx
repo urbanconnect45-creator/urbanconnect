@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import { AppButton } from '../components/AppButton';
+import { MarketplaceJourneyAnimation } from '../components/MarketplaceJourneyAnimation';
+import { MobileCustomerJourney } from '../components/MobileCustomerJourney';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
 import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import { AccountScreen } from '../screens/AccountScreen';
@@ -36,6 +38,7 @@ import { DispatchLoginScreen } from '../screens/DispatchLoginScreen';
 import { FoodScreen } from '../screens/FoodScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OrderDetailsScreen } from '../screens/OrderDetailsScreen';
+import { PasswordRecoveryScreen } from '../screens/PasswordRecoveryScreen';
 import { ProfessionsScreen } from '../screens/ProfessionsScreen';
 import { ProfileEditScreen } from '../screens/ProfileEditScreen';
 import { RegisterBusinessScreen } from '../screens/RegisterBusinessScreen';
@@ -51,12 +54,18 @@ import { WithdrawalScreen } from '../screens/WithdrawalScreen';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import type { UserRole } from '../types/auth';
 import { getOrderStatusLabel } from '../utils/order';
 import type { AppNavigation, MainTabParamList } from './types';
 
 type AuthRoute = 'Login' | 'Signup' | 'DispatchLogin' | 'AdminLogin';
 type MainRoute = keyof MainTabParamList;
 type IconName = keyof typeof Ionicons.glyphMap;
+type JourneyOverlay = {
+  firstName?: string;
+  key: number;
+  mode: 'opening' | UserRole;
+};
 
 const publicSiteUrl = 'https://www.view2connect.ng';
 const socialShareLinks: Array<{
@@ -289,6 +298,22 @@ function isSellerWebEntrypoint() {
   return pathname.replace(/\/+$/, '') === '/seller-portal';
 }
 
+function isSellerDesktopRuntime() {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+
+  const browser = globalThis as {
+    location?: { search?: string };
+    navigator?: { userAgent?: string };
+  };
+
+  return (
+    new URLSearchParams(browser.location?.search ?? '').get('desktopApp') === '1' ||
+    /View2ConnectSellerDesktop/i.test(browser.navigator?.userAgent ?? '')
+  );
+}
+
 function isDispatchWebEntrypoint() {
   if (Platform.OS !== 'web') {
     return false;
@@ -338,6 +363,7 @@ export function AppNavigator() {
     updateUserSecurityPreference,
     user,
     userSecurityPreference,
+    passwordRecoveryReady,
   } = useAuth();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -355,9 +381,16 @@ export function AppNavigator() {
   const adminWebEntrypoint = useMemo(() => isAdminWebEntrypoint(), []);
   const catalogAdminWebEntrypoint = useMemo(() => isCatalogAdminWebEntrypoint(), []);
   const sellerWebEntrypoint = useMemo(() => isSellerWebEntrypoint(), []);
+  const sellerDesktopRuntime = useMemo(() => isSellerDesktopRuntime(), []);
   const dispatchWebEntrypoint = useMemo(() => isDispatchWebEntrypoint(), []);
   const publicStoreWebEntrypoint = useMemo(() => isPublicStoreWebEntrypoint(), []);
   const operaMiniBrowser = useMemo(() => isOperaMiniWebBrowser(), []);
+  const [journeyOverlay, setJourneyOverlay] = useState<JourneyOverlay | null>(() =>
+    (Platform.OS !== 'web' || isUrbanConnectLocalTestMode || sellerDesktopRuntime) &&
+    !adminWebEntrypoint
+      ? { key: Date.now(), mode: 'opening' }
+      : null,
+  );
   const [authRoute, setAuthRoute] = useState<AuthRoute>(() =>
     adminWebEntrypoint ? 'AdminLogin' : dispatchWebEntrypoint ? 'DispatchLogin' : 'Login',
   );
@@ -389,6 +422,31 @@ export function AppNavigator() {
   const passcodePreferenceSignature = useRef<string | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const routeHistoryRef = useRef<MainRoute[]>([]);
+  const journeyOverlayVisibleRef = useRef(Boolean(journeyOverlay));
+  const previousJourneyUserIdRef = useRef<string | null>(user?.id ?? null);
+
+  useEffect(() => {
+    journeyOverlayVisibleRef.current = Boolean(journeyOverlay);
+  }, [journeyOverlay]);
+
+  useEffect(() => {
+    const previousUserId = previousJourneyUserIdRef.current;
+    const currentUserId = user?.id ?? null;
+
+    previousJourneyUserIdRef.current = currentUserId;
+
+    if (currentUserId && !previousUserId && !journeyOverlayVisibleRef.current && user) {
+      setJourneyOverlay({
+        firstName: user.firstName,
+        key: Date.now(),
+        mode: user.role,
+      });
+    }
+  }, [user]);
+
+  const completeJourneyAnimation = useCallback(() => {
+    setJourneyOverlay(null);
+  }, []);
 
   const requestGuestAuthentication = useCallback(() => {
     setShowGuestAuthPrompt(true);
@@ -510,6 +568,8 @@ export function AppNavigator() {
     if (
       user.role === 'dispatch' &&
       mainRoute !== 'DispatchMode' &&
+      mainRoute !== 'Account' &&
+      mainRoute !== 'ProfileEdit' &&
       mainRoute !== 'Settings'
     ) {
       setMainRoute('DispatchMode');
@@ -1207,7 +1267,9 @@ export function AppNavigator() {
       : 'Profession profile'
     : activeSeller
       ? `${activeSeller.firstName}'s approved business profile.`
-      : routeMeta[mainRoute].subtitle;
+      : isDispatchUser && mainRoute === 'Account'
+        ? 'Manage dispatch profile details and account settings.'
+        : routeMeta[mainRoute].subtitle;
 
   const runMenuAction = (action: () => void) => {
     setShowMenuSheet(false);
@@ -1423,19 +1485,21 @@ export function AppNavigator() {
               </Text>
             </View>
             <View style={styles.topBarActions}>
-              <Pressable
-                accessibilityLabel="Post advertisement"
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={() => navigation.navigate('RegisterBusiness')}
-                style={({ pressed }) => [
-                  styles.topActionButton,
-                  styles.sellActionButton,
-                  pressed && styles.topActionButtonPressed,
-                ]}
-              >
-                <Ionicons color={colors.white} name="pricetag-outline" size={20} />
-              </Pressable>
+              {!isDispatchUser ? (
+                <Pressable
+                  accessibilityLabel="Post advertisement"
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => navigation.navigate('RegisterBusiness')}
+                  style={({ pressed }) => [
+                    styles.topActionButton,
+                    styles.sellActionButton,
+                    pressed && styles.topActionButtonPressed,
+                  ]}
+                >
+                  <Ionicons color={colors.white} name="pricetag-outline" size={20} />
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 hitSlop={8}
@@ -1452,22 +1516,24 @@ export function AppNavigator() {
                   </View>
                 ) : null}
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={() => navigation.navigate('Cart')}
-                style={({ pressed }) => [
-                  styles.topActionButton,
-                  pressed && styles.topActionButtonPressed,
-                ]}
-              >
-                <Ionicons color={colors.primary} name="cart-outline" size={20} />
-                {cartCount > 0 ? (
-                  <View style={styles.cartBadge}>
-                    <Text style={styles.cartBadgeText}>{cartCount}</Text>
-                  </View>
-                ) : null}
-              </Pressable>
+              {!isDispatchUser ? (
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => navigation.navigate('Cart')}
+                  style={({ pressed }) => [
+                    styles.topActionButton,
+                    pressed && styles.topActionButtonPressed,
+                  ]}
+                >
+                  <Ionicons color={colors.primary} name="cart-outline" size={20} />
+                  {cartCount > 0 ? (
+                    <View style={styles.cartBadge}>
+                      <Text style={styles.cartBadgeText}>{cartCount}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 hitSlop={8}
@@ -1495,10 +1561,10 @@ export function AppNavigator() {
                   placement="bottom"
                 />
                 <NavButton
-                  active={mainRoute === 'Settings'}
-                  icon={routeMeta.Settings.icon}
-                  label={routeMeta.Settings.label}
-                  onPress={() => navigation.navigate('Settings')}
+                  active={mainRoute === 'Account'}
+                  icon={routeMeta.Account.icon}
+                  label={routeMeta.Account.label}
+                  onPress={() => navigation.navigate('Account')}
                   placement="bottom"
                 />
               </>
@@ -1563,11 +1629,11 @@ export function AppNavigator() {
                       placement="sidebar"
                     />
                     <NavButton
-                      active={mainRoute === 'Settings'}
+                      active={mainRoute === 'Account'}
                       compact={compactSidebar}
-                      icon={routeMeta.Settings.icon}
-                      label={routeMeta.Settings.label}
-                      onPress={() => navigation.navigate('Settings')}
+                      icon={routeMeta.Account.icon}
+                      label={routeMeta.Account.label}
+                      onPress={() => navigation.navigate('Account')}
                       placement="sidebar"
                     />
                   </>
@@ -1672,23 +1738,25 @@ export function AppNavigator() {
                     </View>
                   ) : null}
                 </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => navigation.navigate('Cart')}
-                  style={({ pressed }) => [
-                    styles.topActionButton,
-                    pressed && styles.topActionButtonPressed,
-                  ]}
-                >
-                  <Ionicons color={colors.primary} name="cart-outline" size={20} />
-                  <Text style={styles.topActionText}>Cart</Text>
-                  {cartCount > 0 ? (
-                    <View style={styles.cartBadge}>
-                      <Text style={styles.cartBadgeText}>{cartCount}</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
+                {!isDispatchUser ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={() => navigation.navigate('Cart')}
+                    style={({ pressed }) => [
+                      styles.topActionButton,
+                      pressed && styles.topActionButtonPressed,
+                    ]}
+                  >
+                    <Ionicons color={colors.primary} name="cart-outline" size={20} />
+                    <Text style={styles.topActionText}>Cart</Text>
+                    {cartCount > 0 ? (
+                      <View style={styles.cartBadge}>
+                        <Text style={styles.cartBadgeText}>{cartCount}</Text>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                ) : null}
                 <Pressable
                   accessibilityRole="button"
                   hitSlop={8}
@@ -1711,6 +1779,10 @@ export function AppNavigator() {
     ) : (
       <View style={styles.fullContent}>{framedContent}</View>
     );
+
+  if (passwordRecoveryReady) {
+    return <PasswordRecoveryScreen />;
+  }
 
   return (
     <View
@@ -1932,7 +2004,7 @@ export function AppNavigator() {
       <Modal
         animationType="fade"
         transparent
-        visible={showPasscodeGate && Boolean(user) && !adminUser}
+        visible={showPasscodeGate && Boolean(user) && !adminUser && !journeyOverlay}
         onRequestClose={() => undefined}
       >
         <ScrollView
@@ -2012,7 +2084,13 @@ export function AppNavigator() {
       <Modal
         animationType="fade"
         transparent
-        visible={showNotifications && Boolean(user) && !adminUser && !showPasscodeGate}
+        visible={
+          showNotifications &&
+          Boolean(user) &&
+          !adminUser &&
+          !showPasscodeGate &&
+          !journeyOverlay
+        }
         onRequestClose={() => setShowNotifications(false)}
       >
         <View style={styles.modalBackdrop}>
@@ -2060,7 +2138,13 @@ export function AppNavigator() {
       <Modal
         animationType="fade"
         transparent
-        visible={showLoginAnnouncement && Boolean(user) && !adminUser && !showPasscodeGate}
+        visible={
+          showLoginAnnouncement &&
+          Boolean(user) &&
+          !adminUser &&
+          !showPasscodeGate &&
+          !journeyOverlay
+        }
         onRequestClose={() => setShowLoginAnnouncement(false)}
       >
         <View style={styles.modalBackdrop}>
@@ -2091,7 +2175,7 @@ export function AppNavigator() {
       <Modal
         animationType="fade"
         transparent
-        visible={showMenuSheet && !adminUser && !showPasscodeGate}
+        visible={showMenuSheet && !adminUser && !showPasscodeGate && !journeyOverlay}
         onRequestClose={() => setShowMenuSheet(false)}
       >
         <View style={styles.modalBackdrop}>
@@ -2129,6 +2213,19 @@ export function AppNavigator() {
                   </Pressable>
 
                   <Pressable
+                    onPress={() => runMenuAction(() => navigation.navigate('Account'))}
+                    style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                  >
+                    <View style={styles.menuIconShell}>
+                      <Ionicons color={colors.primary} name="person-circle-outline" size={18} />
+                    </View>
+                    <View style={styles.menuCopy}>
+                      <Text style={styles.menuTitle}>Profile</Text>
+                      <Text style={styles.menuMeta}>Open dispatch profile and account details.</Text>
+                    </View>
+                  </Pressable>
+
+                  <Pressable
                     onPress={() => runMenuAction(() => navigation.navigate('Settings'))}
                     style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
                   >
@@ -2137,7 +2234,7 @@ export function AppNavigator() {
                     </View>
                     <View style={styles.menuCopy}>
                       <Text style={styles.menuTitle}>Settings</Text>
-                      <Text style={styles.menuMeta}>Notification, policy, and agreement settings.</Text>
+                      <Text style={styles.menuMeta}>Theme, policy, agreement, and notification settings.</Text>
                     </View>
                   </Pressable>
                 </>
@@ -2297,6 +2394,24 @@ export function AppNavigator() {
           </View>
         </View>
       </Modal>
+
+      {journeyOverlay ? (
+        width < 800 && (journeyOverlay.mode === 'opening' || journeyOverlay.mode === 'resident') ? (
+          <MobileCustomerJourney
+            {...(journeyOverlay.firstName ? { firstName: journeyOverlay.firstName } : {})}
+            key={journeyOverlay.key}
+            mode={journeyOverlay.mode}
+            onComplete={completeJourneyAnimation}
+          />
+        ) : (
+          <MarketplaceJourneyAnimation
+            {...(journeyOverlay.firstName ? { firstName: journeyOverlay.firstName } : {})}
+            key={journeyOverlay.key}
+            mode={journeyOverlay.mode}
+            onComplete={completeJourneyAnimation}
+          />
+        )
+      ) : null}
     </View>
   );
 }

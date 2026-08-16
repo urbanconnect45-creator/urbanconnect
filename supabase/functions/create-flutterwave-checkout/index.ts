@@ -30,7 +30,8 @@ const defaultSiteUrl = 'https://www.view2connect.ng';
 const flutterwaveCheckoutReturnPath = '/payments/flutterwave/return';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -245,6 +246,53 @@ function findProviderString(value: unknown, fieldNames: string[]): string | unde
   return undefined;
 }
 
+async function authenticatedUserId(request: Request) {
+  const authorization = request.headers.get('Authorization')?.trim();
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+
+  if (!authorization || !supabaseUrl || !anonKey) {
+    return undefined;
+  }
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
+  });
+  const user = response.ok ? ((await response.json()) as { id?: string }) : {};
+  return user.id;
+}
+
+async function loadPendingOrder(orderId: string, userId: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return undefined;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/orders?select=id,user_id,user_name,user_email,delivery_contact_phone,total_amount,payment_status&id=eq.${encodeURIComponent(orderId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+    },
+  );
+  const rows = response.ok
+    ? ((await response.json()) as Array<{
+        id: string;
+        user_id: string;
+        user_name: string;
+        user_email?: string;
+        delivery_contact_phone?: string;
+        total_amount: number | string;
+        payment_status: string;
+      }>)
+    : [];
+  return rows[0];
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -260,6 +308,12 @@ Deno.serve(async (request: Request) => {
     payload = await request.json();
   } catch {
     return jsonResponse({ error: 'Invalid JSON payload.' }, 400);
+  }
+
+  const authenticatedUser = await authenticatedUserId(request);
+
+  if (!authenticatedUser) {
+    return jsonResponse({ error: 'Sign in again before starting checkout.' }, 401);
   }
 
   const credentialCheck = getFlutterwaveCredentialCheck();
@@ -284,21 +338,46 @@ Deno.serve(async (request: Request) => {
 
   const flutterwaveSecretKey = credentialCheck.secretKey;
 
-  const amount = Math.max(0, Math.floor(Number(payload.amount ?? 0)));
-  const currency = payload.currency?.trim().toUpperCase() || 'NGN';
-  const customerName = payload.customerName?.trim();
-  const customerEmail = payload.customerEmail?.trim().toLowerCase();
-  const customerPhone = cleanPhone(payload.customerPhone);
-  const reference =
+  let amount = Math.max(0, Math.floor(Number(payload.amount ?? 0)));
+  let currency = payload.currency?.trim().toUpperCase() || 'NGN';
+  let customerName = payload.customerName?.trim();
+  let customerEmail = payload.customerEmail?.trim().toLowerCase();
+  let customerPhone = cleanPhone(payload.customerPhone);
+  let reference =
     payload.reference?.trim() ||
     `UC-FLW-${payload.purpose ?? 'payment'}-${Date.now()}`;
   const redirectUrl =
-    payload.redirectUrl?.trim() ||
     Deno.env.get('FLUTTERWAVE_REDIRECT_URL')?.trim() ||
     getDefaultFlutterwaveRedirectUrl();
-  const paymentOptions =
-    payload.paymentOptions?.map((option) => option.trim()).filter(Boolean) ??
-    defaultPaymentOptions;
+  const allowedPaymentOptions = new Set(defaultPaymentOptions);
+  const requestedPaymentOptions = payload.paymentOptions
+    ?.map((option) => option.trim())
+    .filter((option) => allowedPaymentOptions.has(option));
+  const paymentOptions = requestedPaymentOptions?.length
+    ? requestedPaymentOptions
+    : defaultPaymentOptions;
+
+  if (payload.purpose === 'cart') {
+    const orderId = optionalString(payload.meta?.orderId) ?? reference;
+    const order = await loadPendingOrder(orderId, authenticatedUser);
+
+    if (!order || order.payment_status !== 'pending') {
+      return jsonResponse({ error: 'A payable order was not found for this account.' }, 403);
+    }
+
+    reference = order.id;
+    amount = Math.floor(Number(order.total_amount));
+    currency = 'NGN';
+    customerName = order.user_name;
+    customerEmail = order.user_email?.trim().toLowerCase();
+    customerPhone = cleanPhone(order.delivery_contact_phone);
+  } else {
+    const claimedUserId = optionalString(payload.meta?.userId ?? payload.meta?.ownerUserId);
+
+    if (claimedUserId && claimedUserId !== authenticatedUser) {
+      return jsonResponse({ error: 'You can only start payments for your own account.' }, 403);
+    }
+  }
 
   if (amount <= 0) {
     return jsonResponse({ error: 'A valid amount is required.' }, 400);
@@ -325,9 +404,10 @@ Deno.serve(async (request: Request) => {
         payload.description?.trim() || 'Complete your View2Connect payment with Flutterwave.',
     },
     meta: {
-      source: 'urbanconnect',
+      source: 'view2connect',
       purpose: payload.purpose ?? 'cart',
-      ...(payload.meta ?? {}),
+      userId: authenticatedUser,
+      ...(payload.purpose === 'cart' ? { orderId: reference } : {}),
     },
   };
 

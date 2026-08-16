@@ -1,63 +1,9 @@
-export const privacyPolicyTitle = 'View2Connect Privacy Policy';
+import privacyPolicyDocument from './privacyPolicy.json';
+
+export const privacyPolicyTitle = privacyPolicyDocument.title;
 export const userAgreementTitle = 'View2Connect User Agreement';
 
-export const privacyPolicySections = [
-  {
-    title: '1. Overview',
-    body:
-      'View2Connect is a marketplace for customers, business owners, support teams, and administrators. This Privacy Policy explains how View2Connect collects, uses, stores, shares, and protects information when people create accounts, list businesses, make payments, place orders, upload media, contact support, or use administrative tools.',
-  },
-  {
-    title: '2. Information We Collect',
-    body:
-      'We collect account details such as name, email address, phone number, role, estate, cluster, business name, and signup date. Business owners may provide business contact details, addresses, product or service descriptions, prices, inventory details, gallery images, videos, payment references, subscription details, and payout KYC details such as BVN or NIN when required for withdrawal. Residents may provide delivery details, order notes, payment status information, and support messages.',
-  },
-  {
-    title: '3. Seller Verification',
-    body:
-      'Business owner accounts may be reviewed by customer care or an owner administrator to confirm the identity, location, and operating readiness of the seller. Verification decisions may use account information, contact details, inspection notes, support conversations, and listing information.',
-  },
-  {
-    title: '4. Payments',
-    body:
-      'Subscription payments are handled through the View2Connect account balance or another approved payment alternative. View2Connect may store payment references, amount, currency, plan cycle, paid date, payout KYC reference, and confirmation details.',
-  },
-  {
-    title: '5. Media And Uploaded Content',
-    body:
-      'When a business owner grants gallery permission, View2Connect may let the owner select images or videos for listings and business profiles. Uploaded or selected media should be accurate, lawful, safe for public viewing, and related to the listed product, service, or business.',
-  },
-  {
-    title: '6. Support, Notifications, And Emails',
-    body:
-      'Support requests may be visible to authorized admin users for safety, order coordination, payment resolution, and account review. View2Connect may create in-app notifications and email logs for signup notices, payment updates, order updates, and listing status.',
-  },
-  {
-    title: '7. How Information Is Used',
-    body:
-      'Information is used to create and secure accounts, operate the marketplace, verify sellers, display approved listings, process subscriptions, coordinate orders, provide customer care, send operational notices, monitor misuse, maintain audit logs, and improve marketplace reliability.',
-  },
-  {
-    title: '8. Sharing And Access',
-    body:
-      'Residents can see public listing information for approved businesses. Business owners can see their own listings, orders, subscription status, notifications, and support history. Admin users can access operational information according to their role. Payment providers receive the information required to process or verify payments, wallet accounts, and seller withdrawals.',
-  },
-  {
-    title: '9. Data Security',
-    body:
-      'View2Connect should be configured to keep payment secret keys and webhook verification on secure backend services, not in the mobile or web client. Administrators should use strong credentials, restrict access to trusted staff, and review audit logs for sensitive actions.',
-  },
-  {
-    title: '10. Retention And Corrections',
-    body:
-      'View2Connect may retain account, order, support, email, notification, audit, and payment records for operational, legal, security, and dispute-resolution purposes. Users may contact support to request correction of inaccurate profile, listing, or contact information.',
-  },
-  {
-    title: '11. Legal Review',
-    body:
-      'This policy is a professional product template for the View2Connect app and should be reviewed by qualified legal counsel before production launch or public distribution.',
-  },
-];
+export const privacyPolicySections = privacyPolicyDocument.sections;
 
 export const userAgreementSections = [
   {

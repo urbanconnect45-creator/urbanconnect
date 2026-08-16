@@ -24,7 +24,8 @@ type FlutterwaveBank = {
 
 const flutterwaveApiUrl = 'https://api.flutterwave.com/v3';
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('VIEW2CONNECT_WEB_ORIGIN')?.trim() || 'https://www.view2connect.ng',
+  Vary: 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -87,6 +88,47 @@ async function authenticatedUserId(request: Request) {
 
   const payload = (await response.json()) as { id?: string };
   return payload.id;
+}
+
+async function isActiveStoreOwner(userId: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return false;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=id&id=eq.${encodeURIComponent(userId)}&role=eq.businessOwner&status=eq.active&limit=1`,
+    {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+    },
+  );
+  const rows = response.ok ? ((await response.json()) as unknown[]) : [];
+  return rows.length === 1;
+}
+
+async function fetchNigerianBanks(secretKey: string) {
+  const response = await fetch(`${flutterwaveApiUrl}/banks/NG?include_provider_type=1`, {
+    headers: { Authorization: `Bearer ${secretKey}` },
+  });
+  const providerPayload = await parseJson(response);
+  const data = Array.isArray(providerPayload.data)
+    ? (providerPayload.data as FlutterwaveBank[])
+    : [];
+  const banks = data
+    .filter((bank) => bank.code && bank.name && bank.type !== 'MOBILEMONEY')
+    .map((bank) => ({ code: String(bank.code), name: String(bank.name) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  if (!response.ok || banks.length === 0) {
+    throw new Error(payloadMessage(providerPayload, 'Unable to load Nigerian banks.'));
+  }
+
+  return banks;
 }
 
 async function saveVerifiedAccount(
@@ -214,6 +256,10 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ error: 'Sign in again before verifying a bank account.' }, 401);
   }
 
+  if (!(await isActiveStoreOwner(userId))) {
+    return jsonResponse({ error: 'This account is not registered as an active store owner.' }, 403);
+  }
+
   let payload: RequestPayload;
 
   try {
@@ -232,45 +278,45 @@ Deno.serve(async (request: Request) => {
   }
 
   if (payload.action === 'banks') {
-    const response = await fetch(`${flutterwaveApiUrl}/banks/NG?include_provider_type=1`, {
-      headers: { Authorization: `Bearer ${secretKey}` },
-    });
-    const providerPayload = await parseJson(response);
-    const data = Array.isArray(providerPayload.data)
-      ? (providerPayload.data as FlutterwaveBank[])
-      : [];
-    const banks = data
-      .filter((bank) => bank.code && bank.name && bank.type !== 'MOBILEMONEY')
-      .map((bank) => ({
-        code: String(bank.code),
-        name: String(bank.name),
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name));
-
-    if (!response.ok || banks.length === 0) {
+    try {
+      return jsonResponse({ banks: await fetchNigerianBanks(secretKey) });
+    } catch (error) {
       return jsonResponse(
-        { error: payloadMessage(providerPayload, 'Unable to load Nigerian banks.') },
-        response.status >= 400 ? response.status : 502,
+        { error: error instanceof Error ? error.message : 'Unable to load Nigerian banks.' },
+        502,
       );
     }
-
-    return jsonResponse({ banks });
   }
 
   const ownerUserId = payload.ownerUserId?.trim();
   const bankCode = payload.bankCode?.replace(/\D/g, '') ?? '';
-  const bankName = payload.bankName?.trim() ?? '';
   const accountNumber = payload.accountNumber?.replace(/\D/g, '') ?? '';
 
   if (!ownerUserId || ownerUserId !== userId) {
     return jsonResponse({ error: 'You can only verify your own payout account.' }, 403);
   }
 
-  if (!bankCode || !bankName || accountNumber.length !== 10) {
+  if (!bankCode || accountNumber.length !== 10) {
     return jsonResponse(
       { error: 'Choose a bank and enter a valid 10-digit account number.' },
       400,
     );
+  }
+
+  let canonicalBankName = '';
+
+  try {
+    const banks = await fetchNigerianBanks(secretKey);
+    canonicalBankName = banks.find((bank) => bank.code === bankCode)?.name ?? '';
+  } catch (error) {
+    return jsonResponse(
+      { error: error instanceof Error ? error.message : 'Unable to validate the selected bank.' },
+      502,
+    );
+  }
+
+  if (!canonicalBankName) {
+    return jsonResponse({ error: 'Choose a valid bank from the Flutterwave bank list.' }, 400);
   }
 
   const providerResponse = await fetch(`${flutterwaveApiUrl}/accounts/resolve`, {
@@ -308,7 +354,7 @@ Deno.serve(async (request: Request) => {
 
   const verifiedAccount = {
     bankCode,
-    bankName,
+    bankName: canonicalBankName,
     accountNumber,
     accountName,
     verifiedAt: new Date().toISOString(),

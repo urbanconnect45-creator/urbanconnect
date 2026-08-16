@@ -9,6 +9,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import type { AppColors } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
+
 const marketplaceBackground = require('../../assets/seller-registration-marketplace.png');
 
 type AuthPageBackgroundProps = {
@@ -22,6 +25,9 @@ export function AuthPageBackground({
   contentContainerStyle,
   minimalMobile = false,
 }: AuthPageBackgroundProps) {
+  const { colors, isDarkMode } = useAppTheme();
+  const styles = createStyles(colors, isDarkMode);
+
   if (minimalMobile) {
     return (
       <View style={styles.minimalBackground}>
@@ -56,23 +62,25 @@ export function AuthPageBackground({
   );
 }
 
-const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-    width: '100%',
-    height: Platform.OS === 'web' ? ('100vh' as never) : undefined,
-    minHeight: Platform.OS === 'web' ? ('100vh' as never) : undefined,
-    backgroundColor: '#160F25',
-  },
-  minimalBackground: {
-    flex: 1,
-    backgroundColor: '#F7F5FC',
-  },
-  dim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(20, 12, 37, 0.76)',
-  },
-  scroll: {
-    flex: 1,
-  },
-});
+function createStyles(colors: AppColors, isDarkMode: boolean) {
+  return StyleSheet.create({
+    background: {
+      flex: 1,
+      width: '100%',
+      height: Platform.OS === 'web' ? ('100vh' as never) : undefined,
+      minHeight: Platform.OS === 'web' ? ('100vh' as never) : undefined,
+      backgroundColor: isDarkMode ? '#100B19' : '#160F25',
+    },
+    minimalBackground: {
+      flex: 1,
+      backgroundColor: isDarkMode ? '#100B19' : colors.background,
+    },
+    dim: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: isDarkMode ? 'rgba(10, 6, 18, 0.86)' : 'rgba(20, 12, 37, 0.76)',
+    },
+    scroll: {
+      flex: 1,
+    },
+  });
+}

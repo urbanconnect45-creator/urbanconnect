@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
+import { useEffect } from 'react';
 import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { isUrbanConnectLocalTestMode } from '../config/runtime';
@@ -10,12 +11,13 @@ import {
   isSupabaseConfigured,
 } from '../services/supabaseApi';
 import type { AppColors } from '../theme';
-import { radii, spacing, typography } from '../theme';
+import { spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 type SocialProvider = 'google' | 'apple';
 
 type SocialAuthButtonsProps = {
+  compact?: boolean;
   webRedirectPath?: string;
 };
 
@@ -30,10 +32,25 @@ const providers: {
 
 WebBrowser.maybeCompleteAuthSession();
 
-export function SocialAuthButtons({ webRedirectPath }: SocialAuthButtonsProps = {}) {
+export function SocialAuthButtons({ compact = false, webRedirectPath }: SocialAuthButtonsProps = {}) {
   const { beginSocialSignIn, completeSocialSignIn } = useAuth();
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
+  const { colors, isDarkMode } = useAppTheme();
+  const styles = createStyles(colors, isDarkMode, compact);
+  const visibleProviders = compact && Platform.OS !== 'ios'
+    ? providers.filter((provider) => provider.id !== 'apple')
+    : providers;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return undefined;
+    }
+
+    void WebBrowser.warmUpAsync().catch(() => undefined);
+
+    return () => {
+      void WebBrowser.coolDownAsync().catch(() => undefined);
+    };
+  }, []);
 
   const openProvider = async (provider: SocialProvider) => {
     if (provider === 'apple') {
@@ -107,14 +124,14 @@ export function SocialAuthButtons({ webRedirectPath }: SocialAuthButtonsProps = 
         <View style={styles.divider} />
       </View>
       <View style={styles.buttonRow}>
-        {providers.map((provider) => (
+        {visibleProviders.map((provider) => (
           <Pressable
             accessibilityRole="button"
             key={provider.id}
             onPress={() => void openProvider(provider.id)}
             style={({ pressed }) => [styles.socialButton, pressed && styles.socialButtonPressed]}
           >
-            <Ionicons color={colors.text} name={provider.icon} size={20} />
+            <Ionicons color={isDarkMode ? '#211B2E' : colors.text} name={provider.icon} size={20} />
             <Text style={styles.socialButtonText}>{provider.label}</Text>
           </Pressable>
         ))}
@@ -123,10 +140,10 @@ export function SocialAuthButtons({ webRedirectPath }: SocialAuthButtonsProps = 
   );
 }
 
-function createStyles(colors: AppColors) {
+function createStyles(colors: AppColors, isDarkMode: boolean, compact: boolean) {
   return StyleSheet.create({
     wrapper: {
-      gap: spacing.md,
+      gap: compact ? spacing.sm : spacing.md,
     },
     dividerRow: {
       alignItems: 'center',
@@ -152,13 +169,13 @@ function createStyles(colors: AppColors) {
       justifyContent: 'center',
       flex: 1,
       minWidth: 132,
-      minHeight: 52,
+      minHeight: compact ? 46 : 52,
       flexDirection: 'row',
       gap: spacing.sm,
-      borderRadius: radii.lg,
+      borderRadius: 8,
       borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
+      borderColor: isDarkMode ? '#D8D2E1' : colors.border,
+      backgroundColor: isDarkMode ? '#FAF8FD' : colors.surface,
       paddingHorizontal: spacing.md,
     },
     socialButtonPressed: {
@@ -167,7 +184,7 @@ function createStyles(colors: AppColors) {
     },
     socialButtonText: {
       ...typography.bodyStrong,
-      color: colors.text,
+      color: isDarkMode ? '#211B2E' : colors.text,
     },
   });
 }

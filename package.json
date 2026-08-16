@@ -14,6 +14,8 @@
     "web:local": "set EXPO_PUBLIC_URBANCONNECT_LOCAL_TEST_MODE=true&& expo start --web",
     "export:web": "node scripts/export-web.mjs",
     "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test tests/*.test.mts",
+    "test": "npm run typecheck && npm run test:unit",
     "desktop:prepare": "npm install --prefix electron --ignore-scripts --no-audit --no-fund",
     "desktop:build:win": "npm run desktop:prepare && npm run export:web && electron-builder --win nsis --publish never",
     "desktop:dir": "npm run desktop:prepare && npm run export:web && electron-builder --win --dir"
@@ -26,9 +28,8 @@
     "@react-navigation/native": "^7.1.33",
     "@react-navigation/native-stack": "^7.8.1",
     "@supabase/supabase-js": "^2.105.4",
-    "eas": "^0.1.0",
-    "eas-cli": "^21.4.0",
-    "expo": "~54.0.35",
+    "expo": "~54.0.36",
+    "expo-asset": "~12.0.13",
     "expo-clipboard": "~8.0.8",
     "expo-dev-client": "~6.0.21",
     "expo-document-picker": "~14.0.8",
@@ -37,6 +38,8 @@
     "expo-image-picker": "~17.0.11",
     "expo-local-authentication": "~17.0.8",
     "expo-location": "~19.0.8",
+    "expo-secure-store": "~15.0.8",
+    "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.11",
     "naija-state-local-government": "^1.0.3",
@@ -67,6 +70,15 @@
       "main.cjs",
       "package.json",
       "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "electronDist": "node_modules/electron/dist",
     "npmRebuild": false,

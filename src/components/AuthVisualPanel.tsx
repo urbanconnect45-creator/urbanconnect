@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { ImageBackground, StyleSheet, Text, View } from 'react-native';
 
 import type { AppColors } from '../theme';
@@ -6,20 +5,22 @@ import { spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { UrbanConnectLogo } from './UrbanConnectLogo';
 
-const marketplaceImage = require('../../assets/seller-registration-marketplace.png');
+const marketplaceImage = require('../../assets/journey/auth-customer.png');
 
 type AuthVisualPanelProps = {
+  roleLabel?: string;
   title: string;
   subtitle: string;
   wide: boolean;
 };
 
-export function AuthVisualPanel({ title, subtitle, wide }: AuthVisualPanelProps) {
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
+export function AuthVisualPanel({ roleLabel = 'Customer', title, subtitle, wide }: AuthVisualPanelProps) {
+  const { colors, isDarkMode } = useAppTheme();
+  const styles = createStyles(colors, isDarkMode);
 
   return (
     <ImageBackground
+      accessibilityLabel={`${title}. ${subtitle}`}
       imageStyle={styles.panelImage}
       resizeMode="cover"
       source={marketplaceImage}
@@ -28,21 +29,15 @@ export function AuthVisualPanel({ title, subtitle, wide }: AuthVisualPanelProps)
       <View style={styles.overlay} />
       <View style={styles.brandRow}>
         <UrbanConnectLogo inverted />
-        <View style={styles.cacBadge}>
-          <Ionicons color={colors.white} name="shield-checkmark-outline" size={17} />
-          <Text style={styles.cacText}>CAC registered</Text>
-        </View>
+        <View style={styles.roleDivider} />
+        <Text style={styles.roleText}>{roleLabel}</Text>
       </View>
-      <View style={styles.copy}>
-        <Text style={styles.eyebrow}>Buy. Sell. Connect.</Text>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
-      </View>
+      <View style={styles.copy}><Text style={styles.subtitle}>Buy. Sell. Deliver. Connect locally.</Text></View>
     </ImageBackground>
   );
 }
 
-function createStyles(colors: AppColors) {
+function createStyles(colors: AppColors, isDarkMode: boolean) {
   return StyleSheet.create({
     panel: {
       minHeight: 280,
@@ -64,50 +59,32 @@ function createStyles(colors: AppColors) {
     },
     overlay: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(30, 15, 61, 0.72)',
+      backgroundColor: isDarkMode ? 'rgba(12, 5, 25, 0.12)' : 'rgba(23, 8, 47, 0.18)',
     },
     brandRow: {
       position: 'relative',
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'flex-start',
       gap: spacing.md,
     },
-    cacBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-      borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.35)',
-      borderRadius: 8,
-      backgroundColor: 'rgba(20,12,37,0.56)',
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
+    roleDivider: {
+      width: 1,
+      height: 28,
+      backgroundColor: 'rgba(255,255,255,0.42)',
     },
-    cacText: {
-      ...typography.caption,
+    roleText: {
+      ...typography.body,
       color: colors.white,
-      fontWeight: '800',
     },
     copy: {
       position: 'relative',
-      maxWidth: 650,
-      gap: spacing.sm,
-    },
-    eyebrow: {
-      ...typography.eyebrow,
-      color: '#F2C45A',
-    },
-    title: {
-      ...typography.title,
-      color: colors.white,
-      fontSize: 36,
-      lineHeight: 43,
+      maxWidth: 420,
     },
     subtitle: {
       ...typography.body,
       color: '#F1ECFA',
-      maxWidth: 580,
+      fontWeight: '700',
     },
   });
 }

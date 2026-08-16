@@ -370,8 +370,8 @@ function verificationLabel(value: boolean) {
   return value ? 'Verified' : 'Unverified';
 }
 
-function adminRoleLabel(role: 'owner' | 'customerCare') {
-  return role === 'owner' ? 'Owner' : 'Customer care';
+function adminRoleLabel(role: 'owner' | 'admin' | 'customerCare') {
+  return role === 'owner' ? 'Owner' : role === 'admin' ? 'Admin' : 'Customer care';
 }
 
 function paymentCycleLabel(cycle: PaymentPlanCycle) {
@@ -634,7 +634,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
   const isWideLayout = width >= 900;
   const isOwnerAdmin = adminUser.role === 'owner';
-  const canReviewListings = isOwnerAdmin || adminUser.role === 'customerCare';
+  const canReviewListings =
+    isOwnerAdmin || adminUser.role === 'admin' || adminUser.role === 'customerCare';
   const normalizedSearch = searchValue.trim().toLowerCase();
   const conversations = getSupportConversations();
   const visibleSections = isOwnerAdmin
