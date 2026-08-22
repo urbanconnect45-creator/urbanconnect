@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Alert, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
 import { useAuth } from '../hooks/useAuth';
@@ -79,7 +79,7 @@ export function DispatchDashboardScreen() {
       setError(null);
       const [nextJobs, nextRiderProfile] = await Promise.all([
         fetchDispatchDeliveryJobs(supabaseAccessToken),
-        fetchDispatchRiderProfile(supabaseAccessToken).catch(() => null),
+        fetchDispatchRiderProfile(supabaseAccessToken),
       ]);
       setJobs(nextJobs);
       setRiderProfile(nextRiderProfile);
@@ -92,6 +92,17 @@ export function DispatchDashboardScreen() {
 
   useEffect(() => {
     void loadJobs();
+    const refreshInterval = setInterval(() => void loadJobs(), 15_000);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void loadJobs();
+      }
+    });
+
+    return () => {
+      clearInterval(refreshInterval);
+      appStateSubscription.remove();
+    };
   }, [supabaseAccessToken]);
 
   const runJobAction = async (
@@ -123,11 +134,7 @@ export function DispatchDashboardScreen() {
     } catch (actionError) {
       const message =
         actionError instanceof Error ? actionError.message : 'Unable to update the job.';
-      setError(
-        /active rider account required/i.test(message)
-          ? 'Dispatch KYC is on hold for testing, but the live database function still requires a dispatch rider account. Apply the testing migration and try again.'
-          : message,
-      );
+      setError(message);
     } finally {
       setActionJobId(null);
     }

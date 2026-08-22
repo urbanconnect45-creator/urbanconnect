@@ -8,10 +8,21 @@ import { MediaPickerField } from '../components/MediaPickerField';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import type { MainTabsScreenProps } from '../navigation/types';
+import {
+  fetchDispatchRiderProfile,
+  isSupabaseConfigured,
+  updateDispatchRiderProfile,
+  uploadMediaUriToSupabaseStorage,
+} from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import type { Business, OwnerBusinessProfile, OwnerBusinessProfileValues } from '../types/business';
+import type {
+  Business,
+  DispatchRiderProfile,
+  OwnerBusinessProfile,
+  OwnerBusinessProfileValues,
+} from '../types/business';
 
 const openDayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -51,7 +62,7 @@ function createProfileForm(
 }
 
 export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEdit'>) {
-  const { user } = useAuth();
+  const { supabaseAccessToken, user } = useAuth();
   const {
     businesses,
     getOwnerBusinessProfile,
@@ -64,7 +75,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
     [businesses, user?.id],
   );
   const savedOwnerProfile = useMemo(
-    () => getOwnerBusinessProfile(user),
+    () => (user?.role === 'dispatch' ? null : getOwnerBusinessProfile(user)),
     [getOwnerBusinessProfile, user],
   );
   const defaultProfileAddress = user?.businessCluster ?? '';
@@ -78,9 +89,73 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
       savedOwnerProfile,
     ),
   );
+  const [isSaving, setIsSaving] = useState(false);
+  const [dispatchProfile, setDispatchProfile] = useState<DispatchRiderProfile | null>(null);
+  const [dispatchProfileError, setDispatchProfileError] = useState<string | null>(null);
+  const [isLoadingDispatchProfile, setIsLoadingDispatchProfile] = useState(false);
+
+  useEffect(() => {
+    if (user?.role !== 'dispatch') {
+      setDispatchProfile(null);
+      setDispatchProfileError(null);
+      return;
+    }
+    if (!isSupabaseConfigured || !supabaseAccessToken) {
+      return;
+    }
+
+    let isCurrent = true;
+    setIsLoadingDispatchProfile(true);
+    setDispatchProfileError(null);
+    void fetchDispatchRiderProfile(supabaseAccessToken)
+      .then((profile) => {
+        if (isCurrent) {
+          setDispatchProfile(profile);
+          if (!profile) {
+            setDispatchProfileError('Your dispatch rider profile could not be found.');
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) {
+          setDispatchProfileError(
+            error instanceof Error ? error.message : 'Unable to load your dispatch profile.',
+          );
+        }
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsLoadingDispatchProfile(false);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [supabaseAccessToken, user?.id, user?.role]);
 
   useEffect(() => {
     if (!user) {
+      return;
+    }
+
+    if (user.role === 'dispatch') {
+      setProfileForm((current) => ({
+        ...current,
+        ownerName: dispatchProfile?.fullName ?? user.fullName,
+        bio: dispatchProfile?.bio ?? '',
+        profileImage: dispatchProfile?.profileImage ?? '',
+        phone: dispatchProfile?.phoneNumber ?? user.phoneNumber,
+        whatsapp: dispatchProfile?.whatsapp ?? '',
+        email: dispatchProfile?.email ?? user.email,
+        address: dispatchProfile?.address ?? user.businessCluster ?? '',
+        website: '',
+        instagram: '',
+        facebook: '',
+        x: '',
+        tiktok: '',
+        coverImage: '',
+      }));
       return;
     }
 
@@ -95,6 +170,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
       ),
     );
   }, [
+    dispatchProfile?.updatedAt,
     ownerListing?.id,
     savedOwnerProfile?.updatedAt,
     user?.businessCluster,
@@ -113,6 +189,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
   }
 
   const isBusinessOwner = user.role === 'businessOwner';
+  const isDispatchUser = user.role === 'dispatch';
 
   const updateProfileField = <K extends keyof OwnerBusinessProfileValues>(
     key: K,
@@ -144,7 +221,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
     if (!permission.granted) {
       Alert.alert(
         'Permission needed',
-        'Allow gallery access in your device settings so you can update business profile photos.',
+        'Allow gallery access in your device settings so you can update your profile picture.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -173,16 +250,72 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
     updateProfileField(field, result.assets[0]?.uri ?? '');
   };
 
-  const saveBusinessProfile = () => {
-    updateOwnerBusinessProfile(
-      user,
-      profileForm,
-      user.fullName,
-      isBusinessOwner ? 'businessOwner' : 'system',
+  const persistProfileImage = async (uri: string, label: string) => {
+    const trimmedUri = uri.trim();
+    if (!trimmedUri || !isSupabaseConfigured || /^https?:\/\//i.test(trimmedUri)) {
+      return trimmedUri;
+    }
+
+    return uploadMediaUriToSupabaseStorage(
+      trimmedUri,
+      ['profile-media', user.id, `${label}-${Date.now()}`].join('/'),
+      'image',
     );
-    Alert.alert('Profile updated', 'Profile contact details and social links have been saved.', [
-      { text: 'View profile', onPress: () => navigation.navigate('Account') },
-    ]);
+  };
+
+  const saveProfile = async () => {
+    if (isSaving) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const savedForm: OwnerBusinessProfileValues = {
+        ...profileForm,
+        profileImage: await persistProfileImage(profileForm.profileImage, 'avatar'),
+        coverImage: isBusinessOwner
+          ? await persistProfileImage(profileForm.coverImage, 'cover')
+          : '',
+      };
+      if (isDispatchUser) {
+        if (!supabaseAccessToken) {
+          throw new Error('Your dispatch session has expired. Sign in again and retry.');
+        }
+        const savedDispatchProfile = await updateDispatchRiderProfile(supabaseAccessToken, {
+          fullName: savedForm.ownerName,
+          email: savedForm.email,
+          phoneNumber: savedForm.phone,
+          whatsapp: savedForm.whatsapp,
+          address: savedForm.address,
+          profileImage: savedForm.profileImage,
+          bio: savedForm.bio,
+        });
+        setDispatchProfile(savedDispatchProfile);
+        setDispatchProfileError(null);
+        setProfileForm(savedForm);
+        Alert.alert('Profile updated', 'Your dispatch profile has been saved.', [
+          { text: 'View profile', onPress: () => navigation.navigate('Account') },
+        ]);
+        return;
+      }
+      await updateOwnerBusinessProfile(
+        user,
+        savedForm,
+        user.fullName,
+        isBusinessOwner ? 'businessOwner' : 'system',
+      );
+      setProfileForm(savedForm);
+      Alert.alert('Profile updated', 'Profile contact details and social links have been saved.', [
+        { text: 'View profile', onPress: () => navigation.navigate('Account') },
+      ]);
+    } catch (error) {
+      Alert.alert(
+        'Profile not saved',
+        error instanceof Error ? error.message : 'Unable to save your profile right now.',
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -190,14 +323,24 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Edit profile</Text>
         <Text style={styles.title}>
-          {isBusinessOwner ? 'Update your store profile.' : 'Update your profile contact.'}
+          {isBusinessOwner
+            ? 'Update your store profile.'
+            : isDispatchUser
+              ? 'Update your dispatch profile.'
+              : 'Update your profile contact.'}
         </Text>
         <Text style={styles.subtitle}>
-          Phone, WhatsApp, and social links saved here are used when buyers tap Contact.
+          {isDispatchUser
+            ? 'Keep your delivery contact details accurate for active orders.'
+            : 'Phone, WhatsApp, and social links saved here are used when buyers tap Contact.'}
         </Text>
       </View>
 
       <View style={styles.card}>
+        {isLoadingDispatchProfile ? (
+          <Text style={styles.bodyText}>Loading dispatch profile...</Text>
+        ) : null}
+        {dispatchProfileError ? <Text style={styles.errorText}>{dispatchProfileError}</Text> : null}
         <FormField
           label={isBusinessOwner ? 'Business contact name' : 'Profile contact name'}
           onChangeText={(value) => updateProfileField('ownerName', value)}
@@ -300,7 +443,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
             </View>
           </>
         ) : null}
-        <FormField
+        {!isDispatchUser ? <><FormField
           autoCapitalize="none"
           keyboardType="url"
           label="Website"
@@ -343,7 +486,7 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
               value={profileForm.tiktok}
             />
           </View>
-        </View>
+        </View></> : null}
         {isBusinessOwner ? (
           <MediaPickerField
             assets={coverAssets}
@@ -357,7 +500,12 @@ export function ProfileEditScreen({ navigation }: MainTabsScreenProps<'ProfileEd
             }}
           />
         ) : null}
-        <AppButton label="Save profile" onPress={saveBusinessProfile} />
+        <AppButton
+          disabled={isLoadingDispatchProfile}
+          label="Save profile"
+          loading={isSaving}
+          onPress={() => void saveProfile()}
+        />
         <AppButton
           label="Back to profile"
           onPress={() => navigation.navigate('Account')}
@@ -455,6 +603,10 @@ function createStyles(colors: AppColors) {
     bodyText: {
       ...typography.body,
       color: colors.textMuted,
+    },
+    errorText: {
+      ...typography.body,
+      color: colors.danger,
     },
   });
 }

@@ -1,47 +1,78 @@
-import type { CartEntry } from '../types/business';
+import type { CartEntry, SecuritySettings } from '../types/business';
 
 export const INDIVIDUAL_SELLER_MINIMUM_SUBTOTAL = 3000;
 
-export function calculateProgressiveVat(subtotal: number) {
+type CheckoutFeeSettings = Pick<
+  SecuritySettings,
+  | 'vatTierOneAmount'
+  | 'vatTierTwoBaseAmount'
+  | 'vatAdditionalBandAmount'
+  | 'packingTierOneAmount'
+  | 'packingTierTwoAmount'
+  | 'packingTierThreeAmount'
+  | 'packingTierFourAmount'
+  | 'packingTierFiveAmount'
+  | 'packingTierSixAmount'
+>;
+
+const defaultCheckoutFeeSettings: CheckoutFeeSettings = {
+  vatTierOneAmount: 500,
+  vatTierTwoBaseAmount: 1500,
+  vatAdditionalBandAmount: 1000,
+  packingTierOneAmount: 50,
+  packingTierTwoAmount: 100,
+  packingTierThreeAmount: 200,
+  packingTierFourAmount: 300,
+  packingTierFiveAmount: 500,
+  packingTierSixAmount: 800,
+};
+
+export function calculateProgressiveVat(
+  subtotal: number,
+  settings: CheckoutFeeSettings = defaultCheckoutFeeSettings,
+) {
   if (!Number.isFinite(subtotal) || subtotal < 3000) {
     return 0;
   }
 
   if (subtotal < 10000) {
-    return 500;
+    return settings.vatTierOneAmount;
   }
 
   const higherBandIndex = Math.floor((subtotal - 10000) / 10000);
 
-  return 1500 + higherBandIndex * 1000;
+  return settings.vatTierTwoBaseAmount + higherBandIndex * settings.vatAdditionalBandAmount;
 }
 
-export function calculateSellerPackingSupport(subtotal: number) {
+export function calculateSellerPackingSupport(
+  subtotal: number,
+  settings: CheckoutFeeSettings = defaultCheckoutFeeSettings,
+) {
   if (!Number.isFinite(subtotal) || subtotal < 100) {
     return 0;
   }
 
   if (subtotal < 1000) {
-    return 50;
+    return settings.packingTierOneAmount;
   }
 
   if (subtotal < 5000) {
-    return 100;
+    return settings.packingTierTwoAmount;
   }
 
   if (subtotal < 10000) {
-    return 200;
+    return settings.packingTierThreeAmount;
   }
 
   if (subtotal < 20000) {
-    return 300;
+    return settings.packingTierFourAmount;
   }
 
   if (subtotal < 50000) {
-    return 500;
+    return settings.packingTierFiveAmount;
   }
 
-  return 800;
+  return settings.packingTierSixAmount;
 }
 
 export type IndividualSellerMinimumIssue = {

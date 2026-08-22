@@ -78,6 +78,19 @@ export function getPaidWithdrawalTotal(
     .reduce((total, withdrawal) => total + withdrawal.amount, 0);
 }
 
+export function getCommittedWithdrawalTotal(
+  withdrawals: WithdrawalRequest[] = [],
+  user?: AppUser | null,
+) {
+  return withdrawals
+    .filter(
+      (withdrawal) =>
+        ['pending', 'processing', 'paid'].includes(withdrawal.status) &&
+        (!user || withdrawal.ownerUserId === user.id),
+    )
+    .reduce((total, withdrawal) => total + withdrawal.amount, 0);
+}
+
 export function getBuyerWalletBalance(
   orders: Order[],
   subscriptionPayments: SubscriptionPayment[] = [],

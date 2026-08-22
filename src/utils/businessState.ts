@@ -43,9 +43,18 @@ export function isPublicBusiness(
 }
 
 export function getBusinessPriorityScore(
-  business: Pick<Business, 'subscriptionStatus' | 'subscriptionCycle' | 'verifiedAmount' | 'createdAt'>,
+  business: Pick<
+    Business,
+    'subscriptionStatus' | 'subscriptionCycle' | 'subscriptionNextBillingAt' | 'verifiedAmount' | 'createdAt'
+  >,
 ) {
-  const hasPaidPlacement = (business.verifiedAmount ?? 0) > 0;
+  const promotionEnd = business.subscriptionNextBillingAt
+    ? new Date(business.subscriptionNextBillingAt).getTime()
+    : 0;
+  const hasPaidPlacement =
+    (business.verifiedAmount ?? 0) > 0 &&
+    Number.isFinite(promotionEnd) &&
+    promotionEnd > Date.now();
   const paidScore =
     business.subscriptionStatus === 'paid'
       ? 1000

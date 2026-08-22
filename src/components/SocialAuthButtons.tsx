@@ -14,7 +14,7 @@ import type { AppColors } from '../theme';
 import { spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
-type SocialProvider = 'google' | 'apple';
+type SocialProvider = 'google';
 
 type SocialAuthButtonsProps = {
   compact?: boolean;
@@ -27,7 +27,6 @@ const providers: {
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
   { id: 'google', label: 'Google', icon: 'logo-google' },
-  { id: 'apple', label: 'Apple', icon: 'logo-apple' },
 ];
 
 WebBrowser.maybeCompleteAuthSession();
@@ -36,9 +35,6 @@ export function SocialAuthButtons({ compact = false, webRedirectPath }: SocialAu
   const { beginSocialSignIn, completeSocialSignIn } = useAuth();
   const { colors, isDarkMode } = useAppTheme();
   const styles = createStyles(colors, isDarkMode, compact);
-  const visibleProviders = compact && Platform.OS !== 'ios'
-    ? providers.filter((provider) => provider.id !== 'apple')
-    : providers;
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
@@ -53,11 +49,6 @@ export function SocialAuthButtons({ compact = false, webRedirectPath }: SocialAu
   }, []);
 
   const openProvider = async (provider: SocialProvider) => {
-    if (provider === 'apple') {
-      Alert.alert('Coming soon', 'Apple sign-in is not connected yet.');
-      return;
-    }
-
     if (isUrbanConnectLocalTestMode) {
       Alert.alert(
         'Local test mode',
@@ -124,7 +115,7 @@ export function SocialAuthButtons({ compact = false, webRedirectPath }: SocialAu
         <View style={styles.divider} />
       </View>
       <View style={styles.buttonRow}>
-        {visibleProviders.map((provider) => (
+        {providers.map((provider) => (
           <Pressable
             accessibilityRole="button"
             key={provider.id}

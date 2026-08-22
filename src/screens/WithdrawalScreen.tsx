@@ -39,6 +39,7 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
   const [idDocumentName, setIdDocumentName] = useState('');
   const [isReplacingKyc, setIsReplacingKyc] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isSubmittingWithdrawal, setIsSubmittingWithdrawal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const withdrawals = useMemo(
     () => (user ? getWithdrawalsForOwner(user.id) : []),
@@ -145,7 +146,7 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
     }
   };
 
-  const submitWithdrawal = () => {
+  const submitWithdrawal = async () => {
     if (!withdrawalAccountVerified) {
       setError('Verify your BVN or NIN with Flutterwave before withdrawal.');
       return;
@@ -169,7 +170,8 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
     }
 
     try {
-      const withdrawal = requestWithdrawal(user, {
+      setIsSubmittingWithdrawal(true);
+      const withdrawal = await requestWithdrawal(user, {
         amount: parsedAmount,
         bankName,
         accountNumber,
@@ -182,11 +184,16 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
       setAccountName('');
       setKycNumber('');
       setError(null);
-      Alert.alert('Withdrawal paid', `${formatCurrency(withdrawal.amount)} was withdrawn.`);
+      Alert.alert(
+        'Withdrawal submitted',
+        `${formatCurrency(withdrawal.amount)} is pending payout processing.`,
+      );
     } catch (withdrawalError) {
       setError(
         withdrawalError instanceof Error ? withdrawalError.message : 'Unable to withdraw right now.',
       );
+    } finally {
+      setIsSubmittingWithdrawal(false);
     }
   };
 
@@ -377,7 +384,12 @@ export function WithdrawalScreen({ navigation }: WithdrawalScreenProps) {
                 payout accounts are blocked.
               </Text>
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
-              <AppButton disabled={available <= 0} label="Withdraw now" onPress={submitWithdrawal} />
+              <AppButton
+                disabled={available <= 0 || isSubmittingWithdrawal}
+                label="Request withdrawal"
+                loading={isSubmittingWithdrawal}
+                onPress={() => void submitWithdrawal()}
+              />
             </View>
           ) : null}
 

@@ -626,8 +626,10 @@ export function StoreOwnerDashboardScreen() {
     isBusinessOwnedByUser,
     isSubscriptionExemptForUser,
     markNotificationsRead,
+    markSellerOrderReady,
     registerBusiness,
     requestWithdrawal,
+    securitySettings,
     setVerifiedSellerPayoutAccount,
     setCatalogManagementAccess,
     updateBusinessListing,
@@ -698,6 +700,8 @@ export function StoreOwnerDashboardScreen() {
   const [draftImageError, setDraftImageError] = useState<string | null>(null);
   const [isVerifyingKyc, setIsVerifyingKyc] = useState(false);
   const [withdrawalAmount, setWithdrawalAmount] = useState('');
+  const [isSubmittingWithdrawal, setIsSubmittingWithdrawal] = useState(false);
+  const [preparingOrderId, setPreparingOrderId] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -709,6 +713,7 @@ export function StoreOwnerDashboardScreen() {
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isUpdatingCatalogAccess, setIsUpdatingCatalogAccess] = useState(false);
 
   useEffect(() => {
     if (!showSellerWelcome || Platform.OS !== 'web') {
@@ -1132,7 +1137,7 @@ export function StoreOwnerDashboardScreen() {
       return { listing, status: 'created' };
     }
 
-    const listing = updateBusinessListing(
+    const listing = await updateBusinessListing(
       existingListing.id,
       {
         name: values.businessName,
@@ -1396,13 +1401,13 @@ export function StoreOwnerDashboardScreen() {
     setEditMessage(null);
   };
 
-  const saveListingEdit = () => {
+  const saveListingEdit = async () => {
     if (!activeEditListing || !editDraft || !user) {
       return;
     }
 
     try {
-      updateBusinessListing(
+      await updateBusinessListing(
         activeEditListing.id,
         {
           name: editDraft.name,
@@ -1484,9 +1489,9 @@ export function StoreOwnerDashboardScreen() {
     setEditMessage(null);
   };
 
-  const deleteListingNow = (listing: Business) => {
+  const deleteListingNow = async (listing: Business) => {
     try {
-      deleteOwnedBusinessListing(listing.id, user);
+      await deleteOwnedBusinessListing(listing.id, user);
       if (editingListingId === listing.id) {
         closeItemEditor();
       }
@@ -1530,11 +1535,10 @@ export function StoreOwnerDashboardScreen() {
     try {
       setIsVerifyingKyc(true);
       setPaymentError(null);
-      const uploadedDocumentUri = await persistPickedMediaUri(idDocumentUri, 'identity', idDocumentName || 'id-document');
       await verifyOwnerVirtualAccount(user, {
         kycType,
         kycNumber,
-        idDocumentUri: uploadedDocumentUri,
+        idDocumentUri,
         idDocumentName,
       });
       setKycNumber('');
@@ -1628,12 +1632,13 @@ export function StoreOwnerDashboardScreen() {
     }
   };
 
-  const submitWithdrawal = () => {
+  const submitWithdrawal = async () => {
     if (!user) {
       return;
     }
 
     try {
+      setIsSubmittingWithdrawal(true);
       if (
         !ownerProfile?.payoutBankName ||
         !ownerProfile.payoutAccountNumber ||
@@ -1642,7 +1647,7 @@ export function StoreOwnerDashboardScreen() {
         throw new Error('Verify and save a payout bank account first.');
       }
 
-      const withdrawal = requestWithdrawal(user, {
+      const withdrawal = await requestWithdrawal(user, {
         amount: Number(withdrawalAmount.replace(/,/g, '')),
         bankName: ownerProfile.payoutBankName,
         accountNumber: ownerProfile.payoutAccountNumber,
@@ -1650,9 +1655,14 @@ export function StoreOwnerDashboardScreen() {
       });
       setWithdrawalAmount('');
       setPaymentError(null);
-      Alert.alert('Withdrawal paid', `${formatCurrency(withdrawal.amount)} was withdrawn.`);
+      Alert.alert(
+        'Withdrawal submitted',
+        `${formatCurrency(withdrawal.amount)} is pending payout processing.`,
+      );
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : 'Unable to withdraw right now.');
+    } finally {
+      setIsSubmittingWithdrawal(false);
     }
   };
 
@@ -2052,6 +2062,30 @@ export function StoreOwnerDashboardScreen() {
   const renderOrderCard = (order: Order) => {
     const ownedItems = getOwnedOrderItems(order, ownerKeys);
 
+    const prepareOrder = async () => {
+      if (!user || preparingOrderId) {
+        return;
+      }
+
+      try {
+        setPreparingOrderId(order.id);
+        const allSellersReady = await markSellerOrderReady(order.id, user);
+        Alert.alert(
+          'Items ready',
+          allSellersReady
+            ? 'The order is ready and dispatch riders can now accept the delivery.'
+            : 'Your items are ready. Dispatch will be notified while the remaining seller prepares their items.',
+        );
+      } catch (error) {
+        Alert.alert(
+          'Unable to mark ready',
+          error instanceof Error ? error.message : 'Try again in a moment.',
+        );
+      } finally {
+        setPreparingOrderId(null);
+      }
+    };
+
     return (
       <View key={order.id} style={styles.listCard}>
         <View style={styles.listHeader}>
@@ -2085,6 +2119,13 @@ export function StoreOwnerDashboardScreen() {
           style={styles.receiptButton}
           variant="ghost"
         />
+        {order.paymentStatus === 'paid' && order.status === 'placed' ? (
+          <AppButton
+            label="Items ready for dispatch"
+            loading={preparingOrderId === order.id}
+            onPress={() => void prepareOrder()}
+          />
+        ) : null}
       </View>
     );
   };
@@ -2103,7 +2144,7 @@ export function StoreOwnerDashboardScreen() {
         {sellerNotifications.length > 0 ? (
           <AppButton
             label="Mark read"
-            onPress={() => markNotificationsRead(user.id)}
+            onPress={() => void markNotificationsRead(user.id).catch(() => undefined)}
             variant="ghost"
           />
         ) : null}
@@ -3100,6 +3141,10 @@ export function StoreOwnerDashboardScreen() {
           <Text style={styles.mutedText}>Delivered earnings only</Text>
         </View>
         <FormField keyboardType="numeric" label="Amount" onChangeText={(value) => setWithdrawalAmount(value.replace(/[^\d.]/g, ''))} placeholder="5000" value={withdrawalAmount} />
+        <Text style={styles.mutedText}>
+          Allowed amount: {formatCurrency(securitySettings.minimumWithdrawalAmount)} to{' '}
+          {formatCurrency(securitySettings.maximumWithdrawalAmount)}.
+        </Text>
         <View style={styles.infoBox}>
           <Text style={styles.rowTitle}>
             {ownerProfile?.payoutAccountName ?? 'No verified payout account'}
@@ -3111,7 +3156,12 @@ export function StoreOwnerDashboardScreen() {
               : ''}
           </Text>
         </View>
-        <AppButton disabled={!withdrawalVerified || !payoutAccountVerified} label="Withdraw earnings" onPress={submitWithdrawal} />
+        <AppButton
+          disabled={!withdrawalVerified || !payoutAccountVerified || isSubmittingWithdrawal}
+          label="Request withdrawal"
+          loading={isSubmittingWithdrawal}
+          onPress={() => void submitWithdrawal()}
+        />
         <View style={styles.itemList}>
           {withdrawals.length > 0 ? (
             withdrawals.slice(0, 6).map((withdrawal) => (
@@ -3413,20 +3463,48 @@ export function StoreOwnerDashboardScreen() {
         </View>
         <View style={styles.buttonRow}>
           <AppButton
-            disabled={catalogAccessGranted}
+            disabled={catalogAccessGranted || isUpdatingCatalogAccess}
             label="Allow catalog access"
+            loading={isUpdatingCatalogAccess && !catalogAccessGranted}
             onPress={() => {
-              setCatalogManagementAccess(user, true);
-              setProfileMessage('View2Connect Admin can now manage this store catalog.');
+              setIsUpdatingCatalogAccess(true);
+              setProfileError(null);
+              setProfileMessage(null);
+              void setCatalogManagementAccess(user, true)
+                .then(() => {
+                  setProfileMessage('View2Connect Admin can now manage this store catalog.');
+                })
+                .catch((accessError) => {
+                  setProfileError(
+                    accessError instanceof Error
+                      ? accessError.message
+                      : 'Unable to allow catalog access.',
+                  );
+                })
+                .finally(() => setIsUpdatingCatalogAccess(false));
             }}
             style={styles.flexButton}
           />
           <AppButton
-            disabled={!catalogAccessGranted}
+            disabled={!catalogAccessGranted || isUpdatingCatalogAccess}
             label="Revoke access"
+            loading={isUpdatingCatalogAccess && catalogAccessGranted}
             onPress={() => {
-              setCatalogManagementAccess(user, false);
-              setProfileMessage('Admin catalog access was revoked.');
+              setIsUpdatingCatalogAccess(true);
+              setProfileError(null);
+              setProfileMessage(null);
+              void setCatalogManagementAccess(user, false)
+                .then(() => {
+                  setProfileMessage('Admin catalog access was revoked.');
+                })
+                .catch((accessError) => {
+                  setProfileError(
+                    accessError instanceof Error
+                      ? accessError.message
+                      : 'Unable to revoke catalog access.',
+                  );
+                })
+                .finally(() => setIsUpdatingCatalogAccess(false));
             }}
             style={styles.flexButton}
             variant="ghost"

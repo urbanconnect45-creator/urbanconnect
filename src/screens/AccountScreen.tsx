@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
-import { useMemo, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -17,15 +19,22 @@ import {
 import { AppButton } from '../components/AppButton';
 import { FlutterwaveCheckoutModal } from '../components/FlutterwaveCheckoutModal';
 import { FormField } from '../components/FormField';
+import { MediaPickerField } from '../components/MediaPickerField';
 import { estates } from '../data/estates';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import type { MainTabsScreenProps } from '../navigation/types';
+import {
+  fetchDispatchRiderProfile,
+  isSupabaseConfigured,
+  uploadMediaUriToSupabaseStorage,
+} from '../services/supabaseApi';
 import type { AppColors } from '../theme';
 import { radii, shadows, spacing, typography } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type {
   Business,
+  DispatchRiderProfile,
   Order,
 } from '../types/business';
 import { getBusinessStatusLabel, isPublicBusiness } from '../utils/businessState';
@@ -114,7 +123,7 @@ function createListingEditForm(business: Business): ListingEditForm {
 }
 
 export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
-  const { signOut, user } = useAuth();
+  const { signOut, supabaseAccessToken, user } = useAuth();
   const {
     businesses,
     cartCount,
@@ -138,6 +147,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
   const { width } = useWindowDimensions();
   const portfolioInkColor = isDarkMode ? '#092E23' : colors.white;
   const estate = estates.find((item) => item.id === user?.estateId);
+  const isDispatchUser = user?.role === 'dispatch';
   const [listingView, setListingView] = useState<ListingView>('product');
   const [editingListing, setEditingListing] = useState<Business | null>(null);
   const [listingEditForm, setListingEditForm] = useState<ListingEditForm | null>(null);
@@ -154,6 +164,42 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
   const [isCreatingDepositAccount, setIsCreatingDepositAccount] = useState(false);
   const [activeFlutterwaveCheckout, setActiveFlutterwaveCheckout] =
     useState<ActiveFlutterwaveCheckout | null>(null);
+  const [dispatchProfile, setDispatchProfile] = useState<DispatchRiderProfile | null>(null);
+  const [dispatchProfileError, setDispatchProfileError] = useState<string | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    if (!isDispatchUser) {
+      setDispatchProfile(null);
+      setDispatchProfileError(null);
+      return;
+    }
+    if (!isSupabaseConfigured || !supabaseAccessToken) {
+      return;
+    }
+
+    let isCurrent = true;
+    setDispatchProfileError(null);
+    void fetchDispatchRiderProfile(supabaseAccessToken)
+      .then((profile) => {
+        if (isCurrent) {
+          setDispatchProfile(profile);
+          if (!profile) {
+            setDispatchProfileError('Your dispatch rider profile could not be found.');
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) {
+          setDispatchProfileError(
+            error instanceof Error ? error.message : 'Unable to load your dispatch profile.',
+          );
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [isDispatchUser, supabaseAccessToken, user?.id]));
   const profileCarouselCardWidth = Math.min(Math.max(width - spacing.lg * 2, 300), 720);
   const selectedDepositPaymentChannel =
     depositFlutterwaveChannels.find((channel) => channel.id === depositPaymentChannel) ??
@@ -510,7 +556,7 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     );
   };
 
-  const handleSaveListing = () => {
+  const handleSaveListing = async () => {
     if (!editingListing || !listingEditForm || !user || isSavingListing) {
       return;
     }
@@ -562,13 +608,22 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
 
     try {
       setIsSavingListing(true);
-      updateBusinessListing(
+      const currentImageUrl = listingEditForm.imageUrl.trim();
+      const savedImageUrl =
+        currentImageUrl && isSupabaseConfigured && !/^https?:\/\//i.test(currentImageUrl)
+          ? await uploadMediaUriToSupabaseStorage(
+              currentImageUrl,
+              ['businesses', user.id, editingListing.id, `cover-image-${Date.now()}`].join('/'),
+              'image',
+            )
+          : currentImageUrl;
+      await updateBusinessListing(
         editingListing.id,
         {
           name: listingEditForm.name,
           category: listingEditForm.category,
           address: listingEditForm.address,
-          imageUrl: listingEditForm.imageUrl,
+          imageUrl: savedImageUrl,
           sku: listingEditForm.sku,
           services: listingEditForm.services
             .split(',')
@@ -597,9 +652,28 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
     }
   };
 
+  const pickListingCoverImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow gallery access to change the listing cover image.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: false,
+      allowsMultipleSelection: false,
+      mediaTypes: ['images'],
+      quality: 0.9,
+      selectionLimit: 1,
+    });
+    const selectedUri = result.canceled ? undefined : result.assets[0]?.uri;
+    if (selectedUri) {
+      updateListingEditField('imageUrl', selectedUri);
+    }
+  };
+
   const riverParkVerified = isRiverParkVerifiedForUser(user);
   const isBusinessOwner = user?.role === 'businessOwner';
-  const isDispatchUser = user?.role === 'dispatch';
   const selectedOwnerListings = visibleOwnerListings.filter((business) =>
     (listingView === 'product'
       ? business.listingType === 'product'
@@ -612,11 +686,13 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
   }
 
   if (isDispatchUser) {
-    const dispatchProfileName = savedOwnerProfile?.ownerName || user.fullName;
-    const dispatchProfileEmail = savedOwnerProfile?.email || user.email;
-    const dispatchProfilePhone = savedOwnerProfile?.phone || user.phoneNumber;
-    const dispatchProfileWhatsApp = savedOwnerProfile?.whatsapp || '';
-    const dispatchProfileAddress = savedOwnerProfile?.address || user.businessCluster || estate?.name || 'View2Connect';
+    const dispatchProfileName = dispatchProfile?.fullName || user.fullName;
+    const dispatchProfileEmail = dispatchProfile?.email || user.email;
+    const dispatchProfilePhone = dispatchProfile?.phoneNumber || user.phoneNumber;
+    const dispatchProfileWhatsApp = dispatchProfile?.whatsapp || '';
+    const dispatchProfileAddress =
+      dispatchProfile?.address || user.businessCluster || estate?.name || 'View2Connect';
+    const dispatchProfileStatus = dispatchProfile?.status ?? 'pending';
 
     return (
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -629,6 +705,9 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
           >
             <Ionicons color={colors.white} name="settings-outline" size={22} />
           </Pressable>
+          {dispatchProfile?.profileImage ? (
+            <Image source={{ uri: dispatchProfile.profileImage }} style={styles.dispatchAvatar} />
+          ) : null}
           <Text style={styles.eyebrow}>Dispatch account</Text>
           <Text style={styles.title}>{dispatchProfileName}</Text>
           <Text style={styles.subtitle}>
@@ -667,13 +746,20 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
             <Text style={styles.summaryLabel}>Phone</Text>
           </View>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>Active</Text>
+            <Text style={styles.summaryValue}>
+              {dispatchProfileStatus === 'active'
+                ? 'Active'
+                : dispatchProfileStatus === 'suspended'
+                  ? 'Suspended'
+                  : 'Pending'}
+            </Text>
             <Text style={styles.summaryLabel}>Access</Text>
           </View>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Dispatch profile</Text>
+          {dispatchProfileError ? <Text style={styles.errorText}>{dispatchProfileError}</Text> : null}
           <Text style={styles.bodyText}>
             Update your dispatch name, phone number, WhatsApp number, email, and address from Edit profile.
           </Text>
@@ -1232,11 +1318,17 @@ export function AccountScreen({ navigation }: MainTabsScreenProps<'Account'>) {
                   placeholder="Saved pickup or meeting location"
                   value={listingEditForm.address}
                 />
-                <FormField
+                <MediaPickerField
+                  assets={
+                    listingEditForm.imageUrl
+                      ? [{ label: 'Listing cover', uri: listingEditForm.imageUrl }]
+                      : []
+                  }
+                  buttonLabel="Choose cover image"
+                  helper="Select a real image from your gallery. It uploads when you save."
+                  kind="image"
                   label="Cover image"
-                  onChangeText={(value) => updateListingEditField('imageUrl', value)}
-                  placeholder="Saved image path or URL"
-                  value={listingEditForm.imageUrl}
+                  onPick={() => void pickListingCoverImage()}
                 />
 
                 {editingListing?.listingType === 'product' ? (
@@ -1753,6 +1845,14 @@ function createStyles(colors: AppColors) {
       backgroundColor: colors.overlayMuted,
       borderWidth: 1,
       borderColor: colors.overlayMuted,
+    },
+    dispatchAvatar: {
+      height: 72,
+      width: 72,
+      borderRadius: 36,
+      borderWidth: 2,
+      borderColor: colors.white,
+      backgroundColor: colors.surfaceMuted,
     },
     heroGlowOne: {
       position: 'absolute',

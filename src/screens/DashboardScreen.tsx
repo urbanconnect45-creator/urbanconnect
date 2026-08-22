@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   FlatList,
   ScrollView,
   StyleSheet,
@@ -100,7 +101,7 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
     return matchesCategory && matchesSearch;
   });
   const columnCount = 2;
-  const messageAdvertiser = (advertisement: Business) => {
+  const messageAdvertiser = async (advertisement: Business) => {
     if (!user) {
       navigation.navigate('AuthPrompt');
       return;
@@ -110,12 +111,19 @@ export function DashboardScreen({ navigation }: MainTabsScreenProps<'Dashboard'>
       return;
     }
 
-    void sendChatMessage(
-      advertisement.id,
-      user,
-      `Hi ${advertisement.ownerName}, I am interested in your advertisement: ${advertisement.name}.`,
-    ).catch(() => undefined);
-    navigation.navigate('Chats');
+    try {
+      await sendChatMessage(
+        advertisement.id,
+        user,
+        `Hi ${advertisement.ownerName}, I am interested in your advertisement: ${advertisement.name}.`,
+      );
+      navigation.navigate('Chats');
+    } catch (error) {
+      Alert.alert(
+        'Message not sent',
+        error instanceof Error ? error.message : 'Please check your connection and try again.',
+      );
+    }
   };
   const contactAdvertiser = (advertisement: Business) => {
     showProfileContact(

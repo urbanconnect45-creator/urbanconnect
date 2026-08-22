@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Pressable,
   ScrollView,
@@ -43,6 +44,14 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
   } = useBusinessDirectory();
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
+  const runCartAction = (action: () => Promise<void>) => {
+    void action().catch((error) => {
+      Alert.alert(
+        'Cart not updated',
+        error instanceof Error ? error.message : 'Please check your connection and try again.',
+      );
+    });
+  };
   const { width } = useWindowDimensions();
   const [selectedFilter, setSelectedFilter] = useState<FoodFilterId>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -202,16 +211,18 @@ export function FoodScreen({ navigation }: MainTabsScreenProps<'Food'>) {
                   return;
                 }
 
-                addToCart(item.id, user);
+                runCartAction(() => addToCart(item.id, user));
               }}
-              onDecreaseQuantity={() => updateCartQuantity(item.id, cartQuantity - 1, user)}
+              onDecreaseQuantity={() =>
+                runCartAction(() => updateCartQuantity(item.id, cartQuantity - 1, user))
+              }
               onIncreaseQuantity={() => {
                 if (!user) {
                   navigation.navigate('AuthPrompt');
                   return;
                 }
 
-                addToCart(item.id, user);
+                runCartAction(() => addToCart(item.id, user));
               }}
               onPress={() => navigation.navigate('BusinessDetails', { businessId: item.id })}
               onProfilePress={() => {

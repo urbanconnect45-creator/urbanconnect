@@ -21,6 +21,17 @@ export const defaultSecuritySettings: SecuritySettings = {
   loginAnnouncementBody:
     'Marketplace updates, verification notices, and customer care messages will appear in your notifications.',
   subscriptionExemptAccountEmail: 'owner.admin@urbanconnect.com',
+  minimumWithdrawalAmount: 1000,
+  maximumWithdrawalAmount: 1000000,
+  vatTierOneAmount: 500,
+  vatTierTwoBaseAmount: 1500,
+  vatAdditionalBandAmount: 1000,
+  packingTierOneAmount: 50,
+  packingTierTwoAmount: 100,
+  packingTierThreeAmount: 200,
+  packingTierFourAmount: 300,
+  packingTierFiveAmount: 500,
+  packingTierSixAmount: 800,
 };
 
 export const defaultPaymentPlans: PaymentPlan[] = [

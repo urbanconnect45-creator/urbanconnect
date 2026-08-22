@@ -1,6 +1,6 @@
 {
   "name": "urbanconnect",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -17,8 +17,9 @@
     "test:unit": "node --experimental-strip-types --test tests/*.test.mts",
     "test": "npm run typecheck && npm run test:unit",
     "desktop:prepare": "npm install --prefix electron --ignore-scripts --no-audit --no-fund",
-    "desktop:build:win": "npm run desktop:prepare && npm run export:web && electron-builder --win nsis --publish never",
-    "desktop:dir": "npm run desktop:prepare && npm run export:web && electron-builder --win --dir"
+    "desktop:icon": "node scripts/build-windows-icon.mjs",
+    "desktop:build:win": "npm run desktop:prepare && npm run desktop:icon && npm run export:web && electron-builder --win nsis --publish never",
+    "desktop:dir": "npm run desktop:prepare && npm run desktop:icon && npm run export:web && electron-builder --win --dir"
   },
   "dependencies": {
     "@expo/env": "~2.0.8",
@@ -86,7 +87,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "dist/favicon.ico"
+      "icon": "assets/app-icon.ico"
     },
     "nsis": {
       "oneClick": false,

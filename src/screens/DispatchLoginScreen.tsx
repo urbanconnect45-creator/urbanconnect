@@ -43,6 +43,7 @@ export function DispatchLoginScreen() {
   const isWideLayout = width >= 980;
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
@@ -61,6 +62,8 @@ export function DispatchLoginScreen() {
   const [signupCode, setSignupCode] = useState('');
   const [signupError, setSignupError] = useState<string | null>(null);
   const [isSignupLoading, setIsSignupLoading] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState(false);
   const dispatchStats = [
     { label: 'Queue', value: 'Live' },
     { label: 'Updates', value: 'Fast' },
@@ -334,7 +337,21 @@ export function DispatchLoginScreen() {
                     setError(null);
                   }}
                   placeholder="Enter password"
-                  secureTextEntry
+                  rightAccessory={
+                    <Pressable
+                      accessibilityLabel={showLoginPassword ? 'Hide password' : 'Show password'}
+                      accessibilityRole="button"
+                      hitSlop={10}
+                      onPress={() => setShowLoginPassword((current) => !current)}
+                    >
+                      <Ionicons
+                        color={colors.textMuted}
+                        name={showLoginPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={21}
+                      />
+                    </Pressable>
+                  }
+                  secureTextEntry={!showLoginPassword}
                   value={password}
                 />
 
@@ -409,14 +426,44 @@ export function DispatchLoginScreen() {
                   label="Password"
                   onChangeText={(value) => updateSignupDraft('password', value)}
                   placeholder="At least 8 characters"
-                  secureTextEntry
+                  rightAccessory={
+                    <Pressable
+                      accessibilityLabel={showSignupPassword ? 'Hide password' : 'Show password'}
+                      accessibilityRole="button"
+                      hitSlop={10}
+                      onPress={() => setShowSignupPassword((current) => !current)}
+                    >
+                      <Ionicons
+                        color={colors.textMuted}
+                        name={showSignupPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={21}
+                      />
+                    </Pressable>
+                  }
+                  secureTextEntry={!showSignupPassword}
                   value={signupDraft.password}
                 />
                 <FormField
                   label="Confirm password"
                   onChangeText={(value) => updateSignupDraft('confirmPassword', value)}
                   placeholder="Repeat password"
-                  secureTextEntry
+                  rightAccessory={
+                    <Pressable
+                      accessibilityLabel={
+                        showSignupConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'
+                      }
+                      accessibilityRole="button"
+                      hitSlop={10}
+                      onPress={() => setShowSignupConfirmPassword((current) => !current)}
+                    >
+                      <Ionicons
+                        color={colors.textMuted}
+                        name={showSignupConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={21}
+                      />
+                    </Pressable>
+                  }
+                  secureTextEntry={!showSignupConfirmPassword}
                   value={signupDraft.confirmPassword}
                 />
 

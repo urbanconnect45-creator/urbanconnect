@@ -39,6 +39,19 @@ export function hasActiveCustomerAdvertPromotion(
   payments: SubscriptionPayment[],
   now = Date.now(),
 ) {
+  const serverPromotionEnd = advert.subscriptionNextBillingAt
+    ? new Date(advert.subscriptionNextBillingAt).getTime()
+    : 0;
+  const hasServerPromotion =
+    (advert.subscriptionStatus === 'paid' || advert.subscriptionStatus === 'active') &&
+    (advert.verifiedAmount ?? 0) > 0 &&
+    Number.isFinite(serverPromotionEnd) &&
+    serverPromotionEnd > now;
+
+  if (hasServerPromotion) {
+    return true;
+  }
+
   return payments.some((payment) => {
     if (!isCustomerBenefitPaymentActive(payment, now)) {
       return false;

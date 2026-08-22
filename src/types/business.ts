@@ -517,6 +517,10 @@ export type DispatchRiderProfile = {
   fullName: string;
   email: string;
   phoneNumber: string;
+  whatsapp?: string | null;
+  address?: string | null;
+  profileImage?: string | null;
+  bio?: string | null;
   vehicleType?: string | null;
   plateNumber?: string | null;
   status: 'pending' | 'active' | 'suspended';
@@ -560,6 +564,17 @@ export type SecuritySettings = {
   loginAnnouncementTitle: string;
   loginAnnouncementBody: string;
   subscriptionExemptAccountEmail: string;
+  minimumWithdrawalAmount: number;
+  maximumWithdrawalAmount: number;
+  vatTierOneAmount: number;
+  vatTierTwoBaseAmount: number;
+  vatAdditionalBandAmount: number;
+  packingTierOneAmount: number;
+  packingTierTwoAmount: number;
+  packingTierThreeAmount: number;
+  packingTierFourAmount: number;
+  packingTierFiveAmount: number;
+  packingTierSixAmount: number;
 };
 
 export type AuditActorRole =
@@ -588,7 +603,7 @@ export type AutomatedEmailLog = {
   sentAt?: string;
 };
 
-export type WithdrawalStatus = 'paid';
+export type WithdrawalStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'reversed';
 export type WithdrawalKycType = 'bvn' | 'nin';
 
 export type VirtualAccountProvider = 'flutterwave';
@@ -656,6 +671,9 @@ export type WithdrawalRequest = {
   amount: number;
   status: WithdrawalStatus;
   createdAt: string;
+  updatedAt?: string;
+  providerReference?: string;
+  failureReason?: string;
 };
 
 export type AuditLog = {

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
+import { FlutterwaveCheckoutModal } from '../components/FlutterwaveCheckoutModal';
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import type { MainTabsScreenProps } from '../navigation/types';
@@ -72,9 +73,8 @@ function benefitsFromDescription(description: string) {
 export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'CustomerBenefits'>) {
   const { user } = useAuth();
   const {
-    getAvailableAccountBalanceForUser,
     paymentPlans,
-    payCustomerBenefitSubscriptionWithAccount,
+    startCustomerBenefitFlutterwaveCheckout,
     subscriptionPayments,
   } = useBusinessDirectory();
   const { colors } = useAppTheme();
@@ -82,6 +82,11 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
   const [selectedCycle, setSelectedCycle] = useState<PaymentPlanCycle>('monthly');
   const [selectedDurationId, setSelectedDurationId] = useState('1-month');
   const [isPaying, setIsPaying] = useState(false);
+  const [activeCheckout, setActiveCheckout] = useState<{
+    checkoutUrl: string;
+    reference: string;
+    amount: number;
+  } | null>(null);
   const selectedPlan =
     paymentPlans.find((plan) => plan.cycle === selectedCycle) ??
     paymentPlans.find((plan) => plan.cycle === 'monthly') ??
@@ -123,16 +128,14 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
 
     return Number.isFinite(endTime) && endTime > Date.now();
   });
-  const accountBalance = user ? getAvailableAccountBalanceForUser(user) : 0;
-
-  const paySubscription = () => {
+  const paySubscription = async () => {
     if (!user || !selectedPlan) {
       return;
     }
 
     try {
       setIsPaying(true);
-      const payment = payCustomerBenefitSubscriptionWithAccount(
+      const checkout = await startCustomerBenefitFlutterwaveCheckout(
         user,
         selectedPlan.cycle,
         durationMonths,
@@ -140,14 +143,11 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
         amountDue,
         discountAmount,
       );
-      const payload = parseCustomerSubscriptionPayload(payment);
-
-      Alert.alert(
-        'Subscription active',
-        `${selectedPlan.title} is active until ${
-          payload?.nextBillingAt ? formatDateTime(payload.nextBillingAt) : 'the next billing date'
-        }.`,
-      );
+      setActiveCheckout({
+        checkoutUrl: checkout.checkoutUrl,
+        reference: checkout.reference,
+        amount: checkout.amount,
+      });
     } catch (error) {
       Alert.alert(
         'Payment failed',
@@ -172,6 +172,7 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
   }
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Customer subscription</Text>
@@ -196,9 +197,9 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
           <Text style={styles.statusLabel}>Benefits status</Text>
         </View>
         <View style={styles.statusCard}>
-          <Ionicons color={colors.primary} name="wallet-outline" size={22} />
-          <Text style={styles.statusValue}>{formatCurrency(accountBalance)}</Text>
-          <Text style={styles.statusLabel}>Account balance</Text>
+          <Ionicons color={colors.primary} name="card-outline" size={22} />
+          <Text style={styles.statusValue}>Flutterwave</Text>
+          <Text style={styles.statusLabel}>Secure payment</Text>
         </View>
       </View>
 
@@ -309,18 +310,11 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
           </Text>
         </View>
         <AppButton
-          disabled={!selectedPlan || amountDue > accountBalance}
-          label={isPaying ? 'Paying...' : 'Pay from account balance'}
+          disabled={!selectedPlan}
+          label={isPaying ? 'Opening checkout...' : 'Pay with Flutterwave'}
           loading={isPaying}
-          onPress={paySubscription}
+          onPress={() => void paySubscription()}
         />
-        {selectedPlan && amountDue > accountBalance ? (
-          <AppButton
-            label="Open wallet"
-            onPress={() => navigation.navigate('Transactions')}
-            variant="secondary"
-          />
-        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -359,6 +353,17 @@ export function CustomerBenefitsScreen({ navigation }: MainTabsScreenProps<'Cust
         )}
       </View>
     </ScrollView>
+    {activeCheckout ? (
+      <FlutterwaveCheckoutModal
+        checkoutUrl={activeCheckout.checkoutUrl}
+        onClose={() => setActiveCheckout(null)}
+        reference={activeCheckout.reference}
+        subtitle={`Pay ${formatCurrency(activeCheckout.amount)} to activate advert priority after Flutterwave confirms payment.`}
+        title="Customer advert promotion"
+        visible
+      />
+    ) : null}
+    </>
   );
 }
 

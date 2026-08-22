@@ -283,6 +283,9 @@ type SupabaseWithdrawalRow = {
   amount: number | string;
   status: WithdrawalRequest['status'];
   created_at: string;
+  updated_at?: string | null;
+  provider_reference?: string | null;
+  failure_reason?: string | null;
 };
 
 type SupabaseVirtualAccountRow = {
@@ -298,6 +301,8 @@ type SupabaseVirtualAccountRow = {
   kyc_type?: VirtualAccount['kycType'] | null;
   kyc_last4?: string | null;
   kyc_reference?: string | null;
+  id_document_path?: string | null;
+  id_document_name?: string | null;
   status: VirtualAccount['status'];
   created_at: string;
   updated_at: string;
@@ -367,6 +372,17 @@ type SupabaseSecurityRow = {
   login_announcement_title?: string | null;
   login_announcement_body?: string | null;
   subscription_exempt_account_email?: string | null;
+  minimum_withdrawal_amount?: number | string | null;
+  maximum_withdrawal_amount?: number | string | null;
+  vat_tier_one_amount?: number | string | null;
+  vat_tier_two_base_amount?: number | string | null;
+  vat_additional_band_amount?: number | string | null;
+  packing_tier_one_amount?: number | string | null;
+  packing_tier_two_amount?: number | string | null;
+  packing_tier_three_amount?: number | string | null;
+  packing_tier_four_amount?: number | string | null;
+  packing_tier_five_amount?: number | string | null;
+  packing_tier_six_amount?: number | string | null;
 };
 
 type SupabaseEmailRow = {
@@ -533,6 +549,10 @@ type SupabaseRiderProfileRow = {
   full_name: string;
   email: string;
   phone_number: string;
+  whatsapp?: string | null;
+  address?: string | null;
+  profile_image?: string | null;
+  bio?: string | null;
   vehicle_type?: string | null;
   plate_number?: string | null;
   status: DispatchRiderProfile['status'];
@@ -581,12 +601,25 @@ export const supabaseConfig = {
 };
 
 let activeSupabaseAccessToken: string | undefined;
+const accessTokenListeners = new Set<() => void>();
 
 export function setSupabaseAccessToken(accessToken?: string) {
-  activeSupabaseAccessToken = accessToken?.trim() || undefined;
+  const nextAccessToken = accessToken?.trim() || undefined;
+  if (nextAccessToken === activeSupabaseAccessToken) {
+    return;
+  }
+
+  activeSupabaseAccessToken = nextAccessToken;
+  accessTokenListeners.forEach((listener) => listener());
+}
+
+export function subscribeToSupabaseAccessToken(listener: () => void) {
+  accessTokenListeners.add(listener);
+  return () => accessTokenListeners.delete(listener);
 }
 
 const listingMediaBucket = 'urbanconnect-listing-media';
+const privateDocumentBucket = 'urbanconnect-private-documents';
 
 export const isSupabaseConfigured = Boolean(
   !isUrbanConnectLocalTestMode && supabaseConfig.url && supabaseConfig.publishableKey,
@@ -817,10 +850,12 @@ function encodeStoragePath(path: string) {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-export async function uploadMediaUriToSupabaseStorage(
+async function uploadMediaUriToSupabaseBucket(
   uri: string,
   path: string,
   kind: StorageMediaKind,
+  bucket: string,
+  isPublic: boolean,
 ) {
   const supabaseUrl = supabaseConfig.url;
   const publishableKey = supabaseConfig.publishableKey;
@@ -865,7 +900,7 @@ export async function uploadMediaUriToSupabaseStorage(
   const normalizedPath = path.includes('.') ? path : `${path}.${extension}`;
   const encodedPath = encodeStoragePath(normalizedPath);
   const uploadResponse = await fetch(
-    `${supabaseUrl}/storage/v1/object/${listingMediaBucket}/${encodedPath}`,
+    `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`,
     {
       method: 'POST',
       headers: {
@@ -884,13 +919,30 @@ export async function uploadMediaUriToSupabaseStorage(
     throw new SupabaseApiError(
       getPayloadMessage(
         payload,
-        'Listing media could not be uploaded. Create the urbanconnect-listing-media storage bucket and policies, then try again.',
+        `${isPublic ? 'Listing media' : 'Private document'} could not be uploaded. Check the Supabase storage bucket and policies, then try again.`,
       ),
       uploadResponse.status,
     );
   }
 
-  return `${supabaseUrl}/storage/v1/object/public/${listingMediaBucket}/${encodedPath}`;
+  return isPublic
+    ? `${supabaseUrl}/storage/v1/object/public/${bucket}/${encodedPath}`
+    : normalizedPath;
+}
+
+export async function uploadMediaUriToSupabaseStorage(
+  uri: string,
+  path: string,
+  kind: StorageMediaKind,
+) {
+  return uploadMediaUriToSupabaseBucket(uri, path, kind, listingMediaBucket, true);
+}
+
+export async function uploadPrivateDocumentToSupabaseStorage(
+  uri: string,
+  path: string,
+) {
+  return uploadMediaUriToSupabaseBucket(uri, path, 'image', privateDocumentBucket, false);
 }
 
 export async function uploadChatAttachmentToSupabaseStorage(
@@ -1016,10 +1068,7 @@ function profileToAppUser(row: SupabaseProfileRow): AppUser {
     phoneNumber: row.phone_number,
     role,
     estateId: row.estate_id,
-    riverParkVerified:
-      role === 'businessOwner' || role === 'dispatch'
-        ? true
-        : Boolean(row.river_park_verified),
+    riverParkVerified: Boolean(row.river_park_verified),
     status: row.status ?? 'active',
     createdAt: row.created_at,
     ...(businessName ? { businessName } : {}),
@@ -1521,16 +1570,32 @@ async function requestPasswordSession(email: string, password: string) {
   });
 }
 
+async function requestRolePasswordSession(
+  identifier: string,
+  password: string,
+  role: UserRole,
+) {
+  return supabaseRequest<SupabaseAuthResponse>('/functions/v1/role-password-login', {
+    method: 'POST',
+    body: {
+      identifier: identifier.trim(),
+      password,
+      role,
+    },
+  });
+}
+
 export async function signInWithSupabase(
   identifier: string,
   password: string,
   requiredRole?: UserRole,
 ) {
-  const email = await resolveSupabaseEmail(identifier, requiredRole);
   let response: SupabaseAuthResponse;
 
   try {
-    response = await requestPasswordSession(email, password);
+    response = requiredRole
+      ? await requestRolePasswordSession(identifier, password, requiredRole)
+      : await requestPasswordSession(await resolveSupabaseEmail(identifier), password);
   } catch (error) {
     if (
       error instanceof SupabaseApiError &&
@@ -1769,6 +1834,73 @@ export async function setRiverParkVerificationInSupabase(userId: string, verifie
   }
 }
 
+export async function setSupabaseUserStatus(
+  userId: string,
+  status: 'active' | 'suspended',
+) {
+  await supabaseRequest('/rest/v1/rpc/admin_set_app_user_status', {
+    method: 'POST',
+    body: {
+      target_user_id: userId,
+      target_status: status,
+    },
+  });
+}
+
+export async function reviewStoreApplicationInSupabase(values: {
+  userId: string;
+  decision: 'approved' | 'changesRequested';
+  message: string;
+}) {
+  return supabaseRequest<boolean>('/rest/v1/rpc/admin_review_store_application', {
+    method: 'POST',
+    body: {
+      target_user_id: values.userId,
+      review_decision: values.decision,
+      review_message: values.message,
+    },
+  });
+}
+
+export async function setListingVerificationInSupabase(values: {
+  businessId: string;
+  verified: boolean;
+  adminPin: string;
+}) {
+  const row = await supabaseRequest<SupabaseBusinessRow>(
+    '/rest/v1/rpc/admin_set_listing_verification',
+    {
+      method: 'POST',
+      body: {
+        target_business_id: values.businessId,
+        target_verified: values.verified,
+        admin_pin: values.adminPin,
+      },
+    },
+  );
+
+  return businessRowToBusiness(row);
+}
+
+export async function initiateFlutterwaveOrderRefund(values: {
+  orderId: string;
+  reason: string;
+  accessToken?: string;
+}) {
+  return supabaseRequest<{
+    status: 'processing' | 'alreadyRefunded';
+    orderId: string;
+    refundReference?: string;
+  }>('/functions/v1/admin-refund-order', {
+    method: 'POST',
+    ...(values.accessToken ? { accessToken: values.accessToken } : {}),
+    body: {
+      orderId: values.orderId,
+      reason: values.reason.trim(),
+    },
+  });
+}
+
 export async function verifySupabaseAdmin(email: string, password: string) {
   const authResponse = await supabaseRequest<SupabaseAuthResponse>(
     '/auth/v1/token?grant_type=password',
@@ -1814,6 +1946,61 @@ export async function fetchMySupabaseAdmin(accessToken: string) {
   }
 
   return adminRowToUser(rows[0]);
+}
+
+export async function fetchSupabaseAdminUsers() {
+  const response = await supabaseRequest<{ admins?: SupabaseAdminRow[] }>(
+    '/functions/v1/admin-manage-staff',
+    {
+      method: 'POST',
+      body: { action: 'list' },
+    },
+  );
+
+  return (response.admins ?? []).map(adminRowToUser);
+}
+
+export async function createSupabaseCustomerCareAccount(values: {
+  fullName: string;
+  email: string;
+  password: string;
+}) {
+  const response = await supabaseRequest<{ admin?: SupabaseAdminRow }>(
+    '/functions/v1/admin-manage-staff',
+    {
+      method: 'POST',
+      body: { action: 'create', ...values },
+    },
+  );
+
+  if (!response.admin) {
+    throw new SupabaseApiError('Supabase did not return the new customer-care account.', 502);
+  }
+
+  return adminRowToUser(response.admin);
+}
+
+export async function setSupabaseAdminAccountActive(adminId: string, isActive: boolean) {
+  const response = await supabaseRequest<{ admin?: SupabaseAdminRow }>(
+    '/functions/v1/admin-manage-staff',
+    {
+      method: 'POST',
+      body: { action: 'setActive', adminId, isActive },
+    },
+  );
+
+  if (!response.admin) {
+    throw new SupabaseApiError('Supabase did not return the updated staff account.', 502);
+  }
+
+  return adminRowToUser(response.admin);
+}
+
+export async function updateSupabaseAdminPassword(adminId: string, password: string) {
+  await supabaseRequest('/functions/v1/admin-manage-staff', {
+    method: 'POST',
+    body: { action: 'updatePassword', adminId, password },
+  });
 }
 
 function parseAuthCallbackParams(url: string) {
@@ -2064,7 +2251,7 @@ function businessRowToBusiness(row: SupabaseBusinessRow): Business {
     ...(priceLabel ? { priceLabel } : {}),
     responseTime: row.response_time,
     verified: row.verified,
-    riverParkVerified: row.river_park_verified ?? true,
+    riverParkVerified: Boolean(row.river_park_verified),
     services: row.services ?? [],
     tags: row.tags ?? [],
     contact: row.contact ?? { phone: '', email: '' },
@@ -2266,6 +2453,9 @@ function withdrawalRowToWithdrawal(row: SupabaseWithdrawalRow): WithdrawalReques
     amount: toNumber(row.amount),
     status: row.status,
     createdAt: row.created_at,
+    ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
+    ...(row.provider_reference ? { providerReference: row.provider_reference } : {}),
+    ...(row.failure_reason ? { failureReason: row.failure_reason } : {}),
   };
 }
 
@@ -2273,6 +2463,8 @@ function virtualAccountRowToVirtualAccount(row: SupabaseVirtualAccountRow): Virt
   const kycType = row.kyc_type ?? undefined;
   const kycLast4 = optionalString(row.kyc_last4);
   const kycReference = optionalString(row.kyc_reference);
+  const idDocumentPath = optionalString(row.id_document_path);
+  const idDocumentName = optionalString(row.id_document_name);
 
   return {
     id: row.id,
@@ -2287,6 +2479,8 @@ function virtualAccountRowToVirtualAccount(row: SupabaseVirtualAccountRow): Virt
     ...(kycType ? { kycType } : {}),
     ...(kycLast4 ? { kycLast4 } : {}),
     ...(kycReference ? { kycReference } : {}),
+    ...(idDocumentPath ? { idDocumentUri: idDocumentPath } : {}),
+    ...(idDocumentName ? { idDocumentName } : {}),
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -2561,6 +2755,8 @@ export async function createFlutterwaveVirtualAccount(
     kycType?: WithdrawalRequest['kycType'];
     kycNumber?: string;
     purpose?: 'deposit' | 'withdrawal';
+    idDocumentPath?: string;
+    idDocumentName?: string;
   } = {},
 ) {
   const cleanKycNumber = values.kycNumber ? cleanDigits(values.kycNumber) : '';
@@ -2577,6 +2773,8 @@ export async function createFlutterwaveVirtualAccount(
         purpose: values.purpose ?? (hasKyc ? 'withdrawal' : 'deposit'),
         ...(values.kycType ? { kycType: values.kycType } : {}),
         ...(cleanKycNumber ? { kycNumber: cleanKycNumber } : {}),
+        ...(values.idDocumentPath ? { idDocumentPath: values.idDocumentPath } : {}),
+        ...(values.idDocumentName ? { idDocumentName: values.idDocumentName } : {}),
         narration: `${owner.businessName ?? owner.fullName} View2Connect wallet`,
       },
     },
@@ -2615,6 +2813,8 @@ export async function createFlutterwaveVirtualAccount(
     ...(values.kycType && hasKyc ? { kycType: values.kycType } : {}),
     ...(kycLast4 ? { kycLast4 } : {}),
     ...(kycReference ? { kycReference } : {}),
+    ...(values.idDocumentPath ? { idDocumentUri: values.idDocumentPath } : {}),
+    ...(values.idDocumentName ? { idDocumentName: values.idDocumentName } : {}),
     status: hasKyc ? 'verified' : 'depositReady',
     createdAt: now,
     updatedAt: now,
@@ -2705,38 +2905,6 @@ export async function createFlutterwaveDynamicDepositAccount(
   } satisfies DynamicDepositAccount;
 }
 
-export async function saveDynamicDepositAccountToSupabase(deposit: DynamicDepositAccount) {
-  return supabaseRequest('/rest/v1/dynamic_deposit_accounts?on_conflict=id', {
-    method: 'POST',
-    body: {
-      id: deposit.id,
-      reference: deposit.reference,
-      user_id: deposit.userId,
-      user_name: deposit.userName,
-      user_email: deposit.userEmail,
-      user_role: deposit.userRole,
-      provider: deposit.provider,
-      provider_reference: deposit.providerReference,
-      bank_name: deposit.bankName,
-      account_number: deposit.accountNumber,
-      account_name: deposit.accountName,
-      amount: deposit.amount,
-      currency: deposit.currency,
-      status: deposit.status,
-      expires_at: deposit.expiresAt ?? null,
-      paid_at: deposit.paidAt ?? null,
-      provider_charge_id: deposit.providerChargeId ?? null,
-      failure_reason: deposit.failureReason ?? null,
-      raw_payload: deposit.rawPayload ? JSON.parse(deposit.rawPayload) : null,
-      created_at: deposit.createdAt,
-      updated_at: deposit.updatedAt,
-    },
-    headers: {
-      Prefer: 'resolution=merge-duplicates,return=minimal',
-    },
-  });
-}
-
 export async function saveVirtualAccountToSupabase(account: VirtualAccount) {
   return supabaseRequest('/rest/v1/virtual_accounts?on_conflict=id', {
     method: 'POST',
@@ -2753,6 +2921,8 @@ export async function saveVirtualAccountToSupabase(account: VirtualAccount) {
       kyc_type: account.kycType ?? null,
       kyc_last4: account.kycLast4 ?? null,
       kyc_reference: account.kycReference ?? null,
+      id_document_path: account.idDocumentUri ?? null,
+      id_document_name: account.idDocumentName ?? null,
       status: account.status,
       created_at: account.createdAt,
       updated_at: account.updatedAt,
@@ -2787,6 +2957,40 @@ export async function saveWithdrawalToSupabase(withdrawal: WithdrawalRequest) {
   });
 }
 
+export async function requestSellerWithdrawalFromSupabase(amount: number) {
+  const row = await supabaseRequest<SupabaseWithdrawalRow>(
+    '/rest/v1/rpc/request_seller_withdrawal',
+    {
+      method: 'POST',
+      body: { requested_amount: amount },
+    },
+  );
+
+  return withdrawalRowToWithdrawal(row);
+}
+
+export async function updateWithdrawalStatusInSupabase(
+  withdrawalId: string,
+  status: Exclude<WithdrawalRequest['status'], 'pending'>,
+  providerReference?: string,
+  failureReason?: string,
+) {
+  const row = await supabaseRequest<SupabaseWithdrawalRow>(
+    '/rest/v1/rpc/admin_update_withdrawal_status',
+    {
+      method: 'POST',
+      body: {
+        target_withdrawal_id: withdrawalId,
+        target_status: status,
+        target_provider_reference: providerReference?.trim() || null,
+        target_failure_reason: failureReason?.trim() || null,
+      },
+    },
+  );
+
+  return withdrawalRowToWithdrawal(row);
+}
+
 export async function saveSupportMessageToSupabase(message: SupportMessage) {
   return supabaseRequest('/rest/v1/support_messages', {
     method: 'POST',
@@ -2807,6 +3011,17 @@ export async function saveSupportMessageToSupabase(message: SupportMessage) {
     },
     headers: {
       Prefer: 'return=minimal',
+    },
+  });
+}
+
+export async function saveStaffSupportReplyToSupabase(message: SupportMessage) {
+  return supabaseRequest<boolean>('/rest/v1/rpc/staff_reply_to_support', {
+    method: 'POST',
+    body: {
+      target_conversation_id: message.conversationId,
+      target_message_id: message.id,
+      reply_text: message.text,
     },
   });
 }
@@ -2937,6 +3152,13 @@ export async function saveNotificationToSupabase(notification: AppNotification) 
     headers: {
       Prefer: 'resolution=merge-duplicates,return=minimal',
     },
+  });
+}
+
+export async function markMyNotificationsReadInSupabase() {
+  return supabaseRequest<number>('/rest/v1/rpc/mark_my_notifications_read', {
+    method: 'POST',
+    body: {},
   });
 }
 
@@ -3125,6 +3347,26 @@ export async function saveOrderToSupabase(order: Order) {
       Prefer: 'resolution=merge-duplicates,return=minimal',
     },
   }).catch(() => undefined);
+}
+
+export async function updateOrderStatusInSupabase(
+  orderId: string,
+  status: Order['status'],
+) {
+  await supabaseRequest('/rest/v1/rpc/admin_update_order_status', {
+    method: 'POST',
+    body: {
+      target_order_id: orderId,
+      target_status: status,
+    },
+  });
+}
+
+export async function markSellerOrderReadyInSupabase(orderId: string) {
+  return supabaseRequest<boolean>('/rest/v1/rpc/seller_mark_order_ready', {
+    method: 'POST',
+    body: { target_order_id: orderId },
+  });
 }
 
 export async function createServerMarketplaceOrder(values: {
@@ -3323,8 +3565,8 @@ export async function deleteSupportConversationFromSupabase(conversationId: stri
   }
 }
 
-export async function saveBusinessToSupabase(business: Business) {
-  const body = {
+function businessToSupabasePayload(business: Business) {
+  return {
     id: business.id,
     estate_id: business.estateId,
     listing_type: business.listingType,
@@ -3362,6 +3604,38 @@ export async function saveBusinessToSupabase(business: Business) {
     created_at: business.createdAt,
     updated_at: business.updatedAt ?? null,
   };
+}
+
+export async function saveCatalogManagementAccessToSupabase(allowed: boolean) {
+  return supabaseRequest<SupabaseNotificationRow>(
+    '/rest/v1/rpc/set_my_catalog_management_access',
+    {
+      method: 'POST',
+      body: { allowed },
+    },
+  );
+}
+
+export async function saveAdminCatalogProductToSupabase(
+  business: Business,
+  adminPin: string,
+) {
+  const row = await supabaseRequest<SupabaseBusinessRow>(
+    '/rest/v1/rpc/admin_upsert_catalog_product',
+    {
+      method: 'POST',
+      body: {
+        target_product: businessToSupabasePayload(business),
+        admin_pin: adminPin,
+      },
+    },
+  );
+
+  return businessRowToBusiness(row);
+}
+
+export async function saveBusinessToSupabase(business: Business) {
+  const body = businessToSupabasePayload(business);
 
   try {
     return await supabaseRequest('/rest/v1/businesses?on_conflict=id', {
@@ -3438,11 +3712,48 @@ export async function saveSecuritySettingsToSupabase(settings: SecuritySettings)
       login_announcement_title: settings.loginAnnouncementTitle,
       login_announcement_body: settings.loginAnnouncementBody,
       subscription_exempt_account_email: settings.subscriptionExemptAccountEmail,
+      minimum_withdrawal_amount: settings.minimumWithdrawalAmount,
+      maximum_withdrawal_amount: settings.maximumWithdrawalAmount,
+      vat_tier_one_amount: settings.vatTierOneAmount,
+      vat_tier_two_base_amount: settings.vatTierTwoBaseAmount,
+      vat_additional_band_amount: settings.vatAdditionalBandAmount,
+      packing_tier_one_amount: settings.packingTierOneAmount,
+      packing_tier_two_amount: settings.packingTierTwoAmount,
+      packing_tier_three_amount: settings.packingTierThreeAmount,
+      packing_tier_four_amount: settings.packingTierFourAmount,
+      packing_tier_five_amount: settings.packingTierFiveAmount,
+      packing_tier_six_amount: settings.packingTierSixAmount,
       updated_at: new Date().toISOString(),
     },
     headers: {
       Prefer: 'resolution=merge-duplicates,return=minimal',
     },
+  });
+}
+
+export async function fetchAdminActionPinStatus() {
+  const rows = await supabaseRequest<Array<{ configured?: boolean; updated_at?: string | null }>>(
+    '/rest/v1/rpc/get_admin_action_pin_status',
+    { method: 'POST', body: {} },
+  );
+
+  return {
+    configured: Boolean(rows[0]?.configured),
+    updatedAt: rows[0]?.updated_at ?? '',
+  };
+}
+
+export async function saveAdminActionPin(pin: string) {
+  return supabaseRequest<string>('/rest/v1/rpc/set_admin_action_pin', {
+    method: 'POST',
+    body: { admin_pin: pin },
+  });
+}
+
+export async function verifyAdminActionPin(pin: string) {
+  return supabaseRequest<boolean>('/rest/v1/rpc/verify_admin_action_pin', {
+    method: 'POST',
+    body: { admin_pin: pin },
   });
 }
 
@@ -3477,6 +3788,17 @@ function securityRowToSettings(row: SupabaseSecurityRow): SecuritySettings {
       row.login_announcement_body ??
       'Marketplace updates, verification notices, and customer care messages will appear in your notifications.',
     subscriptionExemptAccountEmail: row.subscription_exempt_account_email ?? 'owner.admin@urbanconnect.com',
+    minimumWithdrawalAmount: toNumber(row.minimum_withdrawal_amount ?? 1000),
+    maximumWithdrawalAmount: toNumber(row.maximum_withdrawal_amount ?? 1000000),
+    vatTierOneAmount: toNumber(row.vat_tier_one_amount ?? 500),
+    vatTierTwoBaseAmount: toNumber(row.vat_tier_two_base_amount ?? 1500),
+    vatAdditionalBandAmount: toNumber(row.vat_additional_band_amount ?? 1000),
+    packingTierOneAmount: toNumber(row.packing_tier_one_amount ?? 50),
+    packingTierTwoAmount: toNumber(row.packing_tier_two_amount ?? 100),
+    packingTierThreeAmount: toNumber(row.packing_tier_three_amount ?? 200),
+    packingTierFourAmount: toNumber(row.packing_tier_four_amount ?? 300),
+    packingTierFiveAmount: toNumber(row.packing_tier_five_amount ?? 500),
+    packingTierSixAmount: toNumber(row.packing_tier_six_amount ?? 800),
   };
 }
 
@@ -3761,6 +4083,10 @@ function riderProfileRowToProfile(row: SupabaseRiderProfileRow): DispatchRiderPr
     fullName: row.full_name,
     email: row.email,
     phoneNumber: row.phone_number,
+    whatsapp: row.whatsapp ?? null,
+    address: row.address ?? null,
+    profileImage: row.profile_image ?? null,
+    bio: row.bio ?? null,
     vehicleType: row.vehicle_type ?? null,
     plateNumber: row.plate_number ?? null,
     status: row.status,
@@ -3780,15 +4106,13 @@ function groupSupportMessages(messages: SupportMessage[]) {
 }
 
 export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
-  const ownerProfilesPath = activeSupabaseAccessToken
-    ? '/rest/v1/owner_business_profiles?select=*&order=updated_at.desc'
-    : '/rest/v1/public_owner_business_profiles?select=*&order=updated_at.desc';
   const [
     businessRows,
     orderRows,
     paymentRows,
     securityRows,
-    ownerProfileRows,
+    publicOwnerProfileRows,
+    privateOwnerProfileRows,
     emailRows,
     auditRows,
     notificationRows,
@@ -3805,9 +4129,16 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     ).catch(() => [] as SupabaseOrderRow[]),
     supabaseRequest<SupabasePaymentPlanRow[]>('/rest/v1/payment_plans?select=*&order=cycle.asc'),
     supabaseRequest<SupabaseSecurityRow[]>('/rest/v1/security_settings?select=*&id=eq.default&limit=1'),
-    supabaseRequest<SupabaseOwnerProfileRow[]>(ownerProfilesPath).catch(
+    supabaseRequest<SupabaseOwnerProfileRow[]>(
+      '/rest/v1/public_owner_business_profiles?select=*&order=updated_at.desc',
+    ).catch(
       () => [] as SupabaseOwnerProfileRow[],
     ),
+    activeSupabaseAccessToken
+      ? supabaseRequest<SupabaseOwnerProfileRow[]>(
+          '/rest/v1/owner_business_profiles?select=*&order=updated_at.desc',
+        ).catch(() => [] as SupabaseOwnerProfileRow[])
+      : Promise.resolve([] as SupabaseOwnerProfileRow[]),
     supabaseRequest<SupabaseEmailRow[]>('/rest/v1/email_logs?select=*&order=created_at.desc').catch(
       () => [] as SupabaseEmailRow[],
     ),
@@ -3836,6 +4167,13 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
       '/rest/v1/dynamic_deposit_accounts?select=*&order=created_at.desc',
     ).catch(() => [] as SupabaseDynamicDepositRow[]),
   ]);
+
+  const ownerProfileRows = Array.from(
+    [...publicOwnerProfileRows, ...privateOwnerProfileRows].reduce(
+      (profiles, profile) => profiles.set(profile.id, profile),
+      new Map<string, SupabaseOwnerProfileRow>(),
+    ).values(),
+  );
 
   return {
     businesses: businessRows.map(businessRowToBusiness),
@@ -3877,6 +4215,38 @@ export async function fetchDispatchRiderProfile(accessToken: string) {
   );
 
   return profiles[0] ? riderProfileRowToProfile(profiles[0]) : null;
+}
+
+export async function updateDispatchRiderProfile(
+  accessToken: string,
+  values: {
+    fullName: string;
+    email: string;
+    phoneNumber: string;
+    whatsapp: string;
+    address: string;
+    profileImage: string;
+    bio: string;
+  },
+) {
+  const profile = await supabaseRequest<SupabaseRiderProfileRow>(
+    '/rest/v1/rpc/update_my_dispatch_profile',
+    {
+      method: 'POST',
+      accessToken,
+      body: {
+        rider_full_name: values.fullName.trim(),
+        rider_email: values.email.trim().toLowerCase(),
+        rider_phone_number: values.phoneNumber.trim(),
+        rider_whatsapp: values.whatsapp.trim(),
+        rider_address: values.address.trim(),
+        rider_profile_image: values.profileImage.trim(),
+        rider_bio: values.bio.trim(),
+      },
+    },
+  );
+
+  return riderProfileRowToProfile(profile);
 }
 
 export async function acceptDispatchDeliveryJob(accessToken: string, targetJobId: string) {

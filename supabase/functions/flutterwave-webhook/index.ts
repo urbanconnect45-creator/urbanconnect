@@ -118,7 +118,7 @@ function findReference(payload: JsonRecord, data: JsonRecord) {
 
 function buildRawPayload(previousPayload: unknown, webhookPayload: unknown) {
   return {
-    ...(previousPayload ? { creation: previousPayload } : {}),
+    ...(isJsonRecord(previousPayload) ? previousPayload : {}),
     webhook: webhookPayload,
   };
 }
@@ -326,6 +326,18 @@ async function handleOrderCharge(
     };
   }
 
+  await patchRows(
+    supabaseUrl,
+    headers,
+    `/rest/v1/orders?id=eq.${encodeURIComponent(reference)}`,
+    {
+      provider_transaction_id: optionalString(data.id) ?? null,
+      provider_reference:
+        optionalString(data.flw_ref) ?? optionalString(data.reference) ?? reference,
+      updated_at: new Date().toISOString(),
+    },
+  );
+
   const stockFinalized = await callRpc<boolean>(
     supabaseUrl,
     headers,
@@ -428,6 +440,9 @@ async function handleSubscriptionCharge(
   );
   const nextBillingAt = calculateSubscriptionEnd(cycle, rawPayload, now);
   const ownerUserId = optionalString(payment.owner_user_id);
+  const subscriptionType = isJsonRecord(rawPayload)
+    ? optionalString(rawPayload.subscriptionType)
+    : undefined;
 
   await patchRows(
     supabaseUrl,
@@ -437,18 +452,14 @@ async function handleSubscriptionCharge(
       status: 'paid',
       paid_at: now,
       updated_at: now,
-      raw_payload: buildRawPayload(rawPayload, payload),
+      raw_payload: {
+        ...buildRawPayload(rawPayload, payload),
+        nextBillingAt,
+      },
     },
   );
 
   if (ownerUserId) {
-    const profiles = await readRows<JsonRecord>(
-      supabaseUrl,
-      headers,
-      `/rest/v1/owner_business_profiles?select=*&owner_user_id=eq.${encodeURIComponent(ownerUserId)}&limit=1`,
-    ).catch(() => []);
-    const profile = profiles[0];
-    const riverParkVerified = Boolean(profile?.river_park_verified);
     const subscriptionPatch = {
       subscription_cycle: cycle,
       subscription_status: 'paid',
@@ -459,25 +470,123 @@ async function handleSubscriptionCharge(
       updated_at: now,
     };
 
-    await patchRows(
-      supabaseUrl,
-      headers,
-      `/rest/v1/owner_business_profiles?owner_user_id=eq.${encodeURIComponent(ownerUserId)}`,
-      subscriptionPatch,
-    ).catch(() => undefined);
-    await patchRows(
-      supabaseUrl,
-      headers,
-      `/rest/v1/businesses?owner_user_id=eq.${encodeURIComponent(ownerUserId)}`,
-      {
-        ...subscriptionPatch,
-        verified: riverParkVerified,
-        river_park_verified: riverParkVerified,
-      },
-    ).catch(() => undefined);
+    if (subscriptionType === 'customerBenefits') {
+      await patchRows(
+        supabaseUrl,
+        headers,
+        `/rest/v1/businesses?owner_user_id=eq.${encodeURIComponent(ownerUserId)}&listing_source=eq.customerAccount&listing_audience=eq.customerAdvert`,
+        subscriptionPatch,
+      ).catch(() => undefined);
+      await insertRows(supabaseUrl, headers, '/rest/v1/notifications?on_conflict=id', {
+        id: `notification-benefits-${reference}`,
+        user_id: ownerUserId,
+        user_name: optionalString(payment.owner_name) ?? 'Customer',
+        audience: 'resident',
+        title: 'Benefits subscription active',
+        body: `Your advert promotion is active until ${nextBillingAt}.`,
+        context_type: 'general',
+        context_id: reference,
+        created_at: now,
+      }).catch(() => undefined);
+    } else {
+      const profiles = await readRows<JsonRecord>(
+        supabaseUrl,
+        headers,
+        `/rest/v1/owner_business_profiles?select=*&owner_user_id=eq.${encodeURIComponent(ownerUserId)}&limit=1`,
+      ).catch(() => []);
+      const profile = profiles[0];
+      const riverParkVerified = Boolean(profile?.river_park_verified);
+
+      await patchRows(
+        supabaseUrl,
+        headers,
+        `/rest/v1/owner_business_profiles?owner_user_id=eq.${encodeURIComponent(ownerUserId)}`,
+        subscriptionPatch,
+      ).catch(() => undefined);
+      await patchRows(
+        supabaseUrl,
+        headers,
+        `/rest/v1/businesses?owner_user_id=eq.${encodeURIComponent(ownerUserId)}`,
+        {
+          ...subscriptionPatch,
+          verified: riverParkVerified,
+          river_park_verified: riverParkVerified,
+        },
+      ).catch(() => undefined);
+    }
   }
 
   return { body: { status: 'paid', reference, target: 'subscription' } };
+}
+
+async function handleRefundCompleted(
+  supabaseUrl: string,
+  headers: SupabaseHeaders,
+  payload: JsonRecord,
+  data: JsonRecord,
+): Promise<HandlerResult> {
+  const refundReference =
+    optionalString(data.id) ??
+    optionalString(data.refund_id) ??
+    optionalString(payload.id);
+  const transactionId =
+    optionalString(data.TransactionId) ??
+    optionalString(data.transaction_id) ??
+    optionalString(data.tx_id) ??
+    optionalString(data.charge_id);
+  const providerReference =
+    optionalString(data.FlwRef) ??
+    optionalString(data.flw_ref) ??
+    optionalString(data.reference);
+  const refundStatus = optionalString(data.status)?.toLowerCase() ?? '';
+  const filters = [
+    refundReference
+      ? `refund_provider_reference.eq.${encodeURIComponent(refundReference)}`
+      : undefined,
+    transactionId
+      ? `provider_transaction_id.eq.${encodeURIComponent(transactionId)}`
+      : undefined,
+    providerReference
+      ? `provider_reference.eq.${encodeURIComponent(providerReference)}`
+      : undefined,
+  ].filter((filter): filter is string => Boolean(filter));
+
+  if (filters.length === 0) {
+    return { body: { status: 'ignored', reason: 'Refund event has no transaction reference.' } };
+  }
+
+  const orders = await readRows<JsonRecord>(
+    supabaseUrl,
+    headers,
+    `/rest/v1/orders?select=*&or=(${filters.join(',')})&limit=1`,
+  );
+  const order = orders[0];
+
+  if (!order) {
+    return { body: { status: 'ignored', reason: 'No matching order refund was found.' } };
+  }
+
+  const orderId = optionalString(order.id);
+  if (!orderId) {
+    return { body: { status: 'ignored', reason: 'Matching order has no identifier.' } };
+  }
+
+  if (refundStatus.includes('fail')) {
+    await patchRows(
+      supabaseUrl,
+      headers,
+      `/rest/v1/orders?id=eq.${encodeURIComponent(orderId)}`,
+      { refund_status: 'failed', updated_at: new Date().toISOString() },
+    );
+    return { body: { status: 'failed', reference: orderId, target: 'refund' } };
+  }
+
+  await callRpc<boolean>(supabaseUrl, headers, 'finalize_order_refund', {
+    target_order_id: orderId,
+    target_refund_reference: refundReference ?? providerReference ?? transactionId,
+  });
+
+  return { body: { status: 'refunded', reference: orderId, target: 'refund' } };
 }
 
 serve(async (request) => {
@@ -515,19 +624,7 @@ serve(async (request) => {
 
   const eventType = optionalString(payload.type) ?? optionalString(payload.event);
 
-  if (eventType && eventType !== 'charge.completed') {
-    return jsonResponse({ status: 'ignored', reason: `Unhandled event ${eventType}.` });
-  }
-
   const data = isJsonRecord(payload.data) ? payload.data : payload;
-  const reference = findReference(payload, data);
-  const amount = toNumber(data.amount);
-  const currency = optionalString(data.currency)?.toUpperCase() ?? 'NGN';
-  const chargeId = optionalString(data.id) ?? optionalString(payload.id);
-
-  if (!reference) {
-    return jsonResponse({ error: 'Flutterwave webhook did not include a reference.' }, 400);
-  }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
@@ -541,6 +638,32 @@ serve(async (request) => {
     Authorization: `Bearer ${serviceRoleKey}`,
     'Content-Type': 'application/json',
   };
+
+  if (eventType === 'refund.completed') {
+    try {
+      const refundResult = await handleRefundCompleted(supabaseUrl, headers, payload, data);
+      return jsonResponse(refundResult.body, refundResult.status ?? 200);
+    } catch (error) {
+      return jsonResponse(
+        { error: error instanceof Error ? error.message : 'Unable to finalize the refund.' },
+        502,
+      );
+    }
+  }
+
+  if (eventType && eventType !== 'charge.completed') {
+    return jsonResponse({ status: 'ignored', reason: `Unhandled event ${eventType}.` });
+  }
+
+  const reference = findReference(payload, data);
+  const amount = toNumber(data.amount);
+  const currency = optionalString(data.currency)?.toUpperCase() ?? 'NGN';
+  const chargeId = optionalString(data.id) ?? optionalString(payload.id);
+
+  if (!reference) {
+    return jsonResponse({ error: 'Flutterwave webhook did not include a reference.' }, 400);
+  }
+
   const encodedReference = encodeURIComponent(reference);
   const deposits = await readRows<JsonRecord>(
     supabaseUrl,

@@ -32,6 +32,14 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
     sendChatMessage,
     updateCartQuantity,
   } = useBusinessDirectory();
+  const runCartAction = (action: () => Promise<void>) => {
+    void action().catch((error) => {
+      Alert.alert(
+        'Cart not updated',
+        error instanceof Error ? error.message : 'Please check your connection and try again.',
+      );
+    });
+  };
   const seller = findUserById(route.params.userId);
   const profileListings = businesses.filter(
     (business) =>
@@ -144,7 +152,7 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
     },
   ];
   const gridCardWidth = '48%';
-  const messageAdvertiser = (business: typeof sellerListings[number]) => {
+  const messageAdvertiser = async (business: typeof sellerListings[number]) => {
     if (!user) {
       navigation.navigate('AuthPrompt');
       return;
@@ -155,12 +163,19 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
       return;
     }
 
-    void sendChatMessage(
-      business.id,
-      user,
-      `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
-    ).catch(() => undefined);
-    navigation.navigate('Chats');
+    try {
+      await sendChatMessage(
+        business.id,
+        user,
+        `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
+      );
+      navigation.navigate('Chats');
+    } catch (error) {
+      Alert.alert(
+        'Message not sent',
+        error instanceof Error ? error.message : 'Please check your connection and try again.',
+      );
+    }
   };
   const contactAdvertiser = (business: typeof sellerListings[number]) => {
     showProfileContact(
@@ -351,9 +366,15 @@ export function SellerProfileScreen({ navigation, route }: SellerProfileScreenPr
                     key={business.id}
                     business={business}
                     maxQuantity={availableStock}
-                    onAddToCart={() => addToCart(business.id, user)}
-                    onDecreaseQuantity={() => updateCartQuantity(business.id, cartQuantity - 1, user)}
-                    onIncreaseQuantity={() => addToCart(business.id, user)}
+                    onAddToCart={() => runCartAction(() => addToCart(business.id, user))}
+                    onDecreaseQuantity={() =>
+                      runCartAction(() =>
+                        updateCartQuantity(business.id, cartQuantity - 1, user),
+                      )
+                    }
+                    onIncreaseQuantity={() =>
+                      runCartAction(() => addToCart(business.id, user))
+                    }
                     onPress={() => navigation.navigate('BusinessDetails', { businessId: business.id })}
                     onProfilePress={() =>
                       navigation.navigate('SellerProfile', {

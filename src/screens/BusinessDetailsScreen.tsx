@@ -49,6 +49,14 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
     useBusinessDirectory();
   const business = getBusinessById(route.params.businessId);
   const [activeVideo, setActiveVideo] = useState<BusinessMedia | null>(null);
+  const runCartAction = (action: () => Promise<void>) => {
+    void action().catch((error) => {
+      Alert.alert(
+        'Cart not updated',
+        error instanceof Error ? error.message : 'Please check your connection and try again.',
+      );
+    });
+  };
 
   if (!business) {
     return (
@@ -93,7 +101,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
   const isOutOfStock = isStoreProduct && availableStock <= 0;
   const isLowStock =
     isStoreProduct && !isOutOfStock && availableStock <= Math.max(1, business.reorderLevel ?? 0);
-  const messageAdvertiser = () => {
+  const messageAdvertiser = async () => {
     if (!user) {
       navigation.navigate('AuthPrompt');
       return;
@@ -104,12 +112,19 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
       return;
     }
 
-    void sendChatMessage(
-      business.id,
-      user,
-      `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
-    ).catch(() => undefined);
-    navigation.navigate('Chats');
+    try {
+      await sendChatMessage(
+        business.id,
+        user,
+        `Hi ${business.ownerName}, I am interested in your advertisement: ${business.name}.`,
+      );
+      navigation.navigate('Chats');
+    } catch (error) {
+      Alert.alert(
+        'Message not sent',
+        error instanceof Error ? error.message : 'Please check your connection and try again.',
+      );
+    }
   };
   const contactAdvertiser = () => {
     showProfileContact(
@@ -316,7 +331,11 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
                 <View style={[styles.quantityControl, isOwnProduct && styles.quantityControlDisabled]}>
                   <Pressable
                     disabled={cartQuantity <= 0 || isOwnProduct}
-                    onPress={() => updateCartQuantity(business.id, cartQuantity - 1, user)}
+                    onPress={() =>
+                      runCartAction(() =>
+                        updateCartQuantity(business.id, cartQuantity - 1, user),
+                      )
+                    }
                     style={({ pressed }) => [
                       styles.quantityButton,
                       pressed && styles.quantityButtonPressed,
@@ -338,7 +357,7 @@ export function BusinessDetailsScreen({ navigation, route }: BusinessDetailsScre
                         return;
                       }
 
-                      addToCart(business.id, user);
+                      runCartAction(() => addToCart(business.id, user));
                     }}
                     style={({ pressed }) => [
                       styles.quantityButton,

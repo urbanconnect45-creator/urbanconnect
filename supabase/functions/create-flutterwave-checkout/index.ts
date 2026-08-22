@@ -24,6 +24,8 @@ type CheckoutPayload = {
   meta?: Record<string, unknown>;
 };
 
+type JsonRecord = Record<string, unknown>;
+
 const defaultPaymentOptions = ['card', 'account', 'banktransfer'];
 const flutterwavePaymentsEndpoint = 'https://api.flutterwave.com/v3/payments';
 const defaultSiteUrl = 'https://www.view2connect.ng';
@@ -64,6 +66,15 @@ function getDefaultFlutterwaveRedirectUrl() {
     defaultSiteUrl;
 
   return `${siteUrl.replace(/\/+$/, '')}${flutterwaveCheckoutReturnPath}`;
+}
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function finiteNumber(value: unknown) {
+  const result = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(result) ? result : 0;
 }
 
 type FlutterwaveCredentialKind =
@@ -293,6 +304,229 @@ async function loadPendingOrder(orderId: string, userId: string) {
   return rows[0];
 }
 
+async function loadPendingSubscription(reference: string, userId: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return undefined;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/subscription_payments?select=reference,owner_user_id,owner_name,owner_email,amount,currency,status,cycle,raw_payload&reference=eq.${encodeURIComponent(reference)}&owner_user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+    },
+  );
+  const rows = response.ok
+    ? ((await response.json()) as Array<{
+        reference: string;
+        owner_user_id: string;
+        owner_name: string;
+        owner_email: string;
+        amount: number | string;
+        currency: string;
+        status: string;
+        cycle: 'weekly' | 'monthly';
+        raw_payload?: unknown;
+      }>)
+    : [];
+
+  return rows[0];
+}
+
+async function savePendingAddFundsDeposit(values: {
+  userId: string;
+  reference: string;
+  amount: number;
+  currency: string;
+  checkoutUrl: string;
+  paymentOptions: string[];
+  providerBody: unknown;
+  mode: 'live' | 'test' | 'unknown';
+}) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return { error: 'Secure deposit storage is not configured.' };
+  }
+
+  const headers = {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+    'Content-Type': 'application/json',
+  };
+  const profileResponse = await fetch(
+    `${supabaseUrl}/rest/v1/app_users?select=id,full_name,business_name,email,role,status&id=eq.${encodeURIComponent(values.userId)}&limit=1`,
+    { headers },
+  );
+  const profiles = profileResponse.ok
+    ? ((await profileResponse.json()) as Array<{
+        id: string;
+        full_name: string;
+        business_name?: string | null;
+        email: string;
+        role: string;
+        status?: string | null;
+      }>)
+    : [];
+  const profile = profiles[0];
+
+  if (!profile || profile.status === 'suspended') {
+    return { error: 'An active View2Connect profile was not found for this payment.' };
+  }
+
+  const now = new Date().toISOString();
+  const accountName = profile.business_name?.trim() || profile.full_name.trim();
+  const saveResponse = await fetch(
+    `${supabaseUrl}/rest/v1/dynamic_deposit_accounts?on_conflict=id`,
+    {
+      method: 'POST',
+      headers: {
+        ...headers,
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        id: `deposit-${values.reference}`,
+        reference: values.reference,
+        user_id: profile.id,
+        user_name: profile.full_name,
+        user_email: profile.email,
+        user_role: profile.role,
+        provider: 'flutterwave',
+        provider_reference: values.reference,
+        bank_name: 'Flutterwave Checkout',
+        account_number: values.reference,
+        account_name: accountName,
+        amount: values.amount,
+        currency: values.currency,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        raw_payload: {
+          method: 'flutterwaveCheckout',
+          checkoutUrl: values.checkoutUrl,
+          paymentOptions: values.paymentOptions,
+          mode: values.mode,
+          providerBody: values.providerBody,
+        },
+        created_at: now,
+        updated_at: now,
+      }),
+    },
+  );
+
+  if (!saveResponse.ok) {
+    return { error: await saveResponse.text() };
+  }
+
+  return { profile };
+}
+
+async function calculateCustomerBenefitPrice(
+  reference: string,
+  subscription: {
+    owner_user_id: string;
+    cycle: 'weekly' | 'monthly';
+    raw_payload?: unknown;
+  },
+) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return undefined;
+  }
+
+  const headers = {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+    'Content-Type': 'application/json',
+  };
+  const [userResponse, planResponse] = await Promise.all([
+    fetch(
+      `${supabaseUrl}/rest/v1/app_users?select=role&id=eq.${encodeURIComponent(subscription.owner_user_id)}&limit=1`,
+      { headers },
+    ),
+    fetch(
+      `${supabaseUrl}/rest/v1/payment_plans?select=cycle,title,amount&cycle=eq.${encodeURIComponent(subscription.cycle)}&limit=1`,
+      { headers },
+    ),
+  ]);
+  const users = userResponse.ok
+    ? ((await userResponse.json()) as Array<{ role?: string }>)
+    : [];
+  const plans = planResponse.ok
+    ? ((await planResponse.json()) as Array<{ title?: string; amount?: number | string }>)
+    : [];
+  const plan = plans[0];
+  const metadata = isJsonRecord(subscription.raw_payload) ? subscription.raw_payload : {};
+
+  if (users[0]?.role !== 'resident' || metadata.subscriptionType !== 'customerBenefits' || !plan) {
+    return undefined;
+  }
+
+  const durationMinutes = Math.floor(finiteNumber(metadata.durationMinutes));
+  const durationMonths = Math.floor(finiteNumber(metadata.durationMonths) || 1);
+  const planAmount = finiteNumber(plan.amount);
+
+  if (planAmount <= 0) {
+    return undefined;
+  }
+
+  let amountBeforeDiscount = 0;
+  let discountRate = 0;
+
+  if (durationMinutes === 30) {
+    const planMinutes = subscription.cycle === 'weekly' ? 7 * 24 * 60 : 30 * 24 * 60;
+    amountBeforeDiscount = Math.max(100, Math.round((planAmount * 30) / planMinutes));
+  } else {
+    const allowedDiscounts: Record<number, number> = { 1: 0, 3: 0.05, 6: 0.1, 12: 0.15 };
+    if (!(durationMonths in allowedDiscounts)) {
+      return undefined;
+    }
+    amountBeforeDiscount = planAmount * durationMonths;
+    discountRate = allowedDiscounts[durationMonths] ?? 0;
+  }
+
+  const discountAmount = Math.round(amountBeforeDiscount * discountRate);
+  const amount = Math.max(1, Math.round(amountBeforeDiscount - discountAmount));
+  const {
+    amountBeforeDiscount: _clientAmountBeforeDiscount,
+    discountAmount: _clientDiscountAmount,
+    durationLabel: _clientDurationLabel,
+    durationMinutes: _clientDurationMinutes,
+    durationMonths: _clientDurationMonths,
+    nextBillingAt: _clientNextBillingAt,
+    planTitle: _clientPlanTitle,
+    reference: _clientReference,
+    ...safeMetadata
+  } = metadata;
+  const normalizedMetadata = {
+    ...safeMetadata,
+    subscriptionType: 'customerBenefits',
+    planTitle: plan.title || `${subscription.cycle} plan`,
+    durationLabel:
+      durationMinutes === 30
+        ? '30 minutes'
+        : `${durationMonths} month${durationMonths === 1 ? '' : 's'}`,
+    durationMonths,
+    ...(durationMinutes === 30 ? { durationMinutes: 30 } : {}),
+    amountBeforeDiscount,
+    discountAmount,
+    itemCount: 1,
+  };
+
+  const updateResponse = await fetch(
+    `${supabaseUrl}/rest/v1/subscription_payments?reference=eq.${encodeURIComponent(reference)}`,
+    { method: 'PATCH', headers, body: JSON.stringify({ amount, currency: 'NGN', raw_payload: normalizedMetadata }) },
+  );
+
+  return updateResponse.ok ? { amount, metadata: normalizedMetadata } : undefined;
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -371,6 +605,27 @@ Deno.serve(async (request: Request) => {
     customerName = order.user_name;
     customerEmail = order.user_email?.trim().toLowerCase();
     customerPhone = cleanPhone(order.delivery_contact_phone);
+  } else if (payload.purpose === 'subscription') {
+    const subscription = await loadPendingSubscription(reference, authenticatedUser);
+
+    if (!subscription || subscription.status !== 'pending') {
+      return jsonResponse({ error: 'A payable subscription was not found for this account.' }, 403);
+    }
+
+    const pricing = await calculateCustomerBenefitPrice(subscription.reference, {
+      owner_user_id: subscription.owner_user_id,
+      cycle: subscription.cycle,
+      raw_payload: subscription.raw_payload,
+    });
+    if (!pricing) {
+      return jsonResponse({ error: 'This subscription option is not available.' }, 403);
+    }
+
+    reference = subscription.reference;
+    amount = pricing.amount;
+    currency = 'NGN';
+    customerName = subscription.owner_name;
+    customerEmail = subscription.owner_email.trim().toLowerCase();
   } else {
     const claimedUserId = optionalString(payload.meta?.userId ?? payload.meta?.ownerUserId);
 
@@ -477,6 +732,30 @@ Deno.serve(async (request: Request) => {
       },
       502,
     );
+  }
+
+  if (payload.purpose === 'addFunds') {
+    const savedDeposit = await savePendingAddFundsDeposit({
+      userId: authenticatedUser,
+      reference,
+      amount,
+      currency,
+      checkoutUrl,
+      paymentOptions,
+      providerBody: providerJson,
+      mode: credentialCheck.report.mode,
+    });
+
+    if (savedDeposit.error) {
+      return jsonResponse(
+        {
+          error:
+            'Flutterwave created the checkout, but View2Connect could not save the pending deposit. Please retry before making payment.',
+          storageError: savedDeposit.error,
+        },
+        502,
+      );
+    }
   }
 
   return jsonResponse({

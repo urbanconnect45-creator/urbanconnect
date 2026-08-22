@@ -34,12 +34,16 @@ import {
   addOAuthContextToCallbackUrl,
   completeSupabaseOAuth,
   createDispatchAccountWithSupabase,
+  createSupabaseCustomerCareAccount,
   fetchMySupabaseAdmin,
+  fetchSupabaseAdminUsers,
   fetchSupabaseUserProfiles,
   isRecoverableSupabaseSetupError,
   isSupabaseConfigured,
   refreshSupabaseSession,
   setSupabaseAccessToken,
+  setSupabaseAdminAccountActive,
+  setSupabaseUserStatus,
   setRiverParkVerificationInSupabase,
   sendSupabaseSignupVerificationCode,
   signInWithSupabase,
@@ -47,6 +51,7 @@ import {
   signUpWithSupabase,
   syncSupabaseSessionProfile,
   updateSupabaseAuthPassword,
+  updateSupabaseAdminPassword,
   updateSupabaseUserProfile,
   verifySupabaseAdmin,
 } from '../services/supabaseApi';
@@ -78,7 +83,7 @@ type AuthContextValue = {
     isActive: boolean,
     actorName?: string,
     actorRole?: AdminUser['role'],
-  ) => void;
+  ) => Promise<void>;
   createCustomerCareAccount: (
     values: {
       fullName: string;
@@ -87,7 +92,7 @@ type AuthContextValue = {
     },
     actorName?: string,
     actorRole?: AdminUser['role'],
-  ) => AdminUser;
+  ) => Promise<AdminUser>;
   createDispatchAccount: (
     values: {
       fullName: string;
@@ -108,13 +113,13 @@ type AuthContextValue = {
     actorName?: string,
     actorRole?: AdminUser['role'],
     actorAdminId?: string,
-  ) => void;
+  ) => Promise<void>;
   setUserStatus: (
     userId: string,
     status: UserStatus,
     actorName?: string,
     actorRole?: AdminUser['role'],
-  ) => void;
+  ) => Promise<void>;
   setUserRiverParkVerification: (
     userId: string,
     verified: boolean,
@@ -220,8 +225,7 @@ function migrateStoredUser(user: StoredUser): StoredUser {
     lastName,
     fullName: `${firstName} ${lastName}`.trim(),
     phoneNumber: user.phoneNumber?.trim() || `+234${String(user.id).replace(/\D/g, '').slice(0, 10).padEnd(10, '0')}`,
-    riverParkVerified:
-      user.riverParkVerified ?? (user.role === 'resident' || user.role === 'businessOwner'),
+    riverParkVerified: user.riverParkVerified ?? user.role === 'resident',
     status: user.status ?? 'active',
     ...(user.businessName ? { businessName: user.businessName } : {}),
     ...(user.businessCluster ? { businessCluster: user.businessCluster } : {}),
@@ -1059,8 +1063,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
           }
 
           setUser(null);
+          setSupabaseAccessToken(remoteLogin.session.accessToken);
           setSupabaseSession(remoteLogin.session);
           setAdminUser(remoteAdmin);
+          if (remoteAdmin.role === 'owner') {
+            const remoteAdmins = await fetchSupabaseAdminUsers();
+            setStoredAdminUsers(
+              remoteAdmins.map((admin) => ({ ...admin, password: '' })),
+            );
+          }
           return;
         }
       } catch (remoteAdminError) {
@@ -1222,7 +1233,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setAdminUser(null);
   };
 
-  const setAdminAccountActive = (
+  const setAdminAccountActive = async (
     adminId: string,
     isActive: boolean,
     actorName = 'View2Connect Owner',
@@ -1232,10 +1243,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
 
+    const remoteAdmin = isSupabaseConfigured
+      ? await setSupabaseAdminAccountActive(adminId, isActive)
+      : undefined;
+
     setStoredAdminUsers((currentAdmins) =>
       currentAdmins.map((admin) =>
         admin.id === adminId && admin.role === 'customerCare'
-          ? { ...admin, isActive }
+          ? { ...admin, isActive: remoteAdmin?.isActive ?? isActive }
           : admin,
       ),
     );
@@ -1252,7 +1267,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const createCustomerCareAccount = (
+  const createCustomerCareAccount = async (
     values: {
       fullName: string;
       email: string;
@@ -1277,12 +1292,31 @@ export function AuthProvider({ children }: PropsWithChildren) {
       throw new Error('Enter a valid customer care email.');
     }
 
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters.');
+    if (password.length < 8) {
+      throw new Error('Password must be at least 8 characters.');
     }
 
     if (storedAdminUsers.some((admin) => normalizeAdminEmail(admin.email) === email)) {
       throw new Error('A customer care account with that email already exists.');
+    }
+
+    if (isSupabaseConfigured) {
+      const remoteAdmin = await createSupabaseCustomerCareAccount({
+        fullName,
+        email,
+        password,
+      });
+      setStoredAdminUsers((currentAdmins) => [
+        { ...remoteAdmin, password: '' },
+        ...currentAdmins.filter((admin) => admin.id !== remoteAdmin.id),
+      ]);
+      appendAuditLog(
+        actorName,
+        actorRole,
+        'Customer care created',
+        `${fullName} was added as a customer care agent.`,
+      );
+      return remoteAdmin;
     }
 
     const createdAt = new Date().toISOString();
@@ -1434,7 +1468,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return toAppUser(nextDispatchUser);
   };
 
-  const updateAdminPassword = (
+  const updateAdminPassword = async (
     adminId: string,
     nextPassword: string,
     actorName = 'View2Connect Owner',
@@ -1450,14 +1484,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const password = nextPassword.trim();
 
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters.');
+    if (password.length < 8) {
+      throw new Error('Password must be at least 8 characters.');
     }
 
     const matchedAdmin = storedAdminUsers.find((admin) => admin.id === adminId);
 
     if (!matchedAdmin) {
       throw new Error('Admin account was not found.');
+    }
+
+    if (isSupabaseConfigured) {
+      await updateSupabaseAdminPassword(adminId, password);
     }
 
     setStoredAdminUsers((currentAdmins) =>
@@ -1474,7 +1512,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     );
   };
 
-  const setUserStatus = (
+  const setUserStatus = async (
     userId: string,
     status: UserStatus,
     actorName = 'View2Connect Owner',
@@ -1482,6 +1520,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   ) => {
     if (!canAdminEditSensitiveData(actorRole)) {
       return;
+    }
+
+    if (isSupabaseConfigured) {
+      await setSupabaseUserStatus(userId, status);
     }
 
     setStoredUsers((currentUsers) =>
@@ -1497,10 +1539,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
         updatedAt: new Date().toISOString(),
       },
     }));
-
-    if (isSupabaseConfigured) {
-      void updateSupabaseUserProfile(userId, { status }).catch(() => undefined);
-    }
 
     const matchedUser = storedUsers.find((item) => item.id === userId);
 

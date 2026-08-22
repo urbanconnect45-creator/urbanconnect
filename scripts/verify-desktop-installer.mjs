@@ -57,7 +57,13 @@ try {
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.waitForTimeout(900);
+  await page.waitForFunction(
+    () =>
+      document.body.textContent?.includes('MARKETPLACE CONNECTED') ||
+      Boolean(document.querySelector('[aria-label="View2Connect is opening"]')),
+    undefined,
+    { timeout: 15_000 },
+  );
   const openingProbe = await page.evaluate(() => {
     const labelled = document.querySelector('[aria-label="View2Connect is opening"]');
     const bounds = labelled?.getBoundingClientRect();

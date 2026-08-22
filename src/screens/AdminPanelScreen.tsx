@@ -18,8 +18,10 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useBusinessDirectory } from '../hooks/useBusinessDirectory';
 import { UrbanConnectLogo } from '../components/UrbanConnectLogo';
+import { isUrbanConnectLocalTestMode } from '../config/runtime';
 import {
   fetchSupabaseUserProfiles,
+  initiateFlutterwaveOrderRefund,
   isSupabaseConfigured,
 } from '../services/supabaseApi';
 import {
@@ -134,7 +136,14 @@ const orderStatusOptions = [
   'delivered',
   'cancelled',
 ] as const;
-const paymentStatusOptions = ['All', 'pending', 'paid', 'refunded'] as const;
+const paymentStatusOptions = [
+  'All',
+  'pending',
+  'paid',
+  'failed',
+  'refundPending',
+  'refunded',
+] as const;
 
 type GlobalSearchResult = {
   id: string;
@@ -512,6 +521,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     setAdminAccountActive,
     createCustomerCareAccount,
     createDispatchAccount,
+    supabaseAccessToken,
     updateAdminPassword,
   } = useAuth();
   const { colors } = useAppTheme();
@@ -539,6 +549,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     subscriptionPayments,
     updatePaymentPlan,
     updateOrderProgressCode,
+    syncOrderProgressSettings,
+    verifyOrderProgressCode,
     restockBusinessStock,
     securitySettings,
     confirmOwnerSubscription,
@@ -546,13 +558,13 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     deleteLatestSupportConversation,
     sendSupportReply,
     toggleBusinessVerification,
-    approveStoreApplicationForOwner,
+    reviewStoreApplicationForOwner,
     updateBusinessReorderLevel,
-    updateEmailLogContent,
     updateOrderStatus,
     updatePaymentStatus,
     clearOrderTestingState,
     withdrawalRequests,
+    updateWithdrawalStatus,
     updateSecuritySettings,
     deleteBusiness,
   } = useBusinessDirectory();
@@ -563,8 +575,12 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
   const [activeSection, setActiveSection] = useState<AdminSectionKey>('overview');
   const [searchValue, setSearchValue] = useState('');
+  const [refundingOrderId, setRefundingOrderId] = useState<string | null>(null);
   const [userStatusFilter, setUserStatusFilter] =
     useState<(typeof userStatusOptions)[number]>('All');
+  const [withdrawalReferenceDrafts, setWithdrawalReferenceDrafts] = useState<
+    Record<string, string>
+  >({});
   const [liveUserProfiles, setLiveUserProfiles] = useState<AppUser[]>([]);
   const [applicationMessageDrafts, setApplicationMessageDrafts] = useState<
     Record<string, string>
@@ -608,9 +624,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     title: securitySettings.loginAnnouncementTitle,
     body: securitySettings.loginAnnouncementBody,
   });
-  const [subscriptionExemptEmailDraft, setSubscriptionExemptEmailDraft] = useState(
-    securitySettings.subscriptionExemptAccountEmail,
-  );
   const [customerCareDraft, setCustomerCareDraft] = useState({
     fullName: '',
     email: '',
@@ -696,12 +709,12 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   }, [securitySettings.loginAnnouncementBody, securitySettings.loginAnnouncementTitle]);
 
   useEffect(() => {
-    setSubscriptionExemptEmailDraft(securitySettings.subscriptionExemptAccountEmail);
-  }, [securitySettings.subscriptionExemptAccountEmail]);
+    setProgressCodeDraft(/^\d{4}$/.test(orderProgressSettings.code) ? orderProgressSettings.code : '');
+  }, [orderProgressSettings.code]);
 
   useEffect(() => {
-    setProgressCodeDraft(orderProgressSettings.code);
-  }, [orderProgressSettings.code]);
+    void syncOrderProgressSettings().catch(() => undefined);
+  }, [adminUser.id]);
 
   const estateLookup = useMemo(
     () =>
@@ -1578,7 +1591,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return;
     }
 
-    if (adminPinDraft.trim() !== orderProgressSettings.code) {
+    const pinIsValid = await verifyOrderProgressCode(adminPinDraft);
+    if (!pinIsValid) {
       Alert.alert('Wrong PIN', 'Enter the active owner admin PIN before making changes.');
       return;
     }
@@ -1726,38 +1740,13 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     runAdminChange(
       'Admin PIN',
       `Enter the PIN to mark ${applicant.businessName ?? applicant.fullName} as ${decisionCopy.title.toLowerCase()}.`,
-      () => {
-        setUserStatus(
-          applicant.id,
-          'active',
+      async () => {
+        await reviewStoreApplicationForOwner(
+          applicant,
+          decision,
+          decisionCopy.body,
           adminUser.fullName,
           adminUser.role,
-        );
-        if (decision === 'approved') {
-          approveStoreApplicationForOwner(applicant, adminUser.fullName, adminUser.role);
-        }
-        appendNotification({
-          userId: applicant.id,
-          userName: applicant.fullName,
-          recipientEmail: applicant.email,
-          audience: 'businessOwner',
-          title: decisionCopy.title,
-          body: decisionCopy.body,
-          contextType: 'general',
-          contextId: `store-application-${applicant.id}`,
-        });
-        appendEmailLog({
-          recipientType: 'owner',
-          recipientName: applicant.fullName,
-          recipientEmail: applicant.email,
-          subject: `View2Connect: ${decisionCopy.title}`,
-          body: decisionCopy.body,
-        });
-        appendAuditLog(
-          adminUser.fullName,
-          adminUser.role,
-          decisionCopy.title,
-          `${applicant.businessName ?? applicant.fullName}: ${decisionCopy.body}`,
         );
         setApplicationMessageDrafts((currentDrafts) => ({
           ...currentDrafts,
@@ -1799,9 +1788,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return;
     }
 
-    runAdminChange('Admin PIN', `Enter the PIN before marking ${order.id}.`, () => {
+    runAdminChange('Admin PIN', `Enter the PIN before marking ${order.id}.`, async () => {
       try {
-        updateOrderStatus(
+        await updateOrderStatus(
           order.id,
           nextStatus,
           adminUser.fullName,
@@ -1817,15 +1806,48 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     });
   };
 
+  const handleCancelOrder = (order: Order) => {
+    runAdminChange('Admin PIN', `Enter the PIN before cancelling ${order.id}.`, () =>
+      updateOrderStatus(
+        order.id,
+        'cancelled',
+        adminUser.fullName,
+        adminUser.role,
+        orderProgressSettings.code,
+      ),
+    );
+  };
+
+  const handleInitiateRefund = (order: Order) => {
+    runAdminChange('Admin PIN', `Enter the PIN before refunding ${order.id}.`, async () => {
+      try {
+        setRefundingOrderId(order.id);
+        const result = await initiateFlutterwaveOrderRefund({
+          orderId: order.id,
+          reason: `Order ${order.id} was cancelled by View2Connect.`,
+          ...(supabaseAccessToken ? { accessToken: supabaseAccessToken } : {}),
+        });
+        Alert.alert(
+          result.status === 'alreadyRefunded' ? 'Refund completed' : 'Refund started',
+          result.status === 'alreadyRefunded'
+            ? 'Flutterwave already completed this refund.'
+            : 'Flutterwave is processing the refund. The payment status will update from the signed webhook.',
+        );
+      } finally {
+        setRefundingOrderId(null);
+      }
+    });
+  };
+
   const handlePaymentUpdate = (orderId: string, paymentStatus: PaymentStatus) => {
     runAdminChange('Admin PIN', `Enter the PIN before changing payment for ${orderId}.`, () =>
       updatePaymentStatus(orderId, paymentStatus, adminUser.fullName, adminUser.role),
     );
   };
 
-  const handleSaveProgressCode = () => {
+  const handleSaveProgressCode = async () => {
     try {
-      updateOrderProgressCode(progressCodeDraft, adminUser.fullName, adminUser.role);
+      await updateOrderProgressCode(progressCodeDraft, adminUser.fullName, adminUser.role);
       Alert.alert('Admin PIN saved', 'Admin changes now require this 4 digit PIN.');
     } catch (error) {
       Alert.alert(
@@ -1853,6 +1875,42 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
+  const processWithdrawal = (
+    withdrawalId: string,
+    status: 'processing' | 'paid' | 'failed',
+  ) => {
+    const providerReference = withdrawalReferenceDrafts[withdrawalId]?.trim();
+
+    if (status === 'paid' && !providerReference) {
+      Alert.alert(
+        'Payout reference required',
+        'Enter the Flutterwave or bank transfer reference after sending the money.',
+      );
+      return;
+    }
+
+    runAdminChange(
+      'Admin PIN',
+      `Enter the PIN before marking this withdrawal ${status}.`,
+      async () => {
+        await updateWithdrawalStatus(
+          withdrawalId,
+          status,
+          providerReference,
+          status === 'failed' ? 'Payout could not be completed. Contact support.' : undefined,
+          adminUser.fullName,
+          adminUser.role,
+        );
+        if (status === 'paid' || status === 'failed') {
+          setWithdrawalReferenceDrafts((current) => ({
+            ...current,
+            [withdrawalId]: '',
+          }));
+        }
+      },
+    );
+  };
+
   const handleSaveReorderLevel = (business: Business) => {
     const draftValue = reorderDrafts[business.id] ?? String(business.reorderLevel ?? 1);
     const parsedValue = Number.parseInt(draftValue, 10);
@@ -1875,6 +1933,19 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
+  const handleRestockBusiness = (business: Business) => {
+    runAdminChange(
+      'Admin PIN',
+      `Enter the PIN before adding stock to ${business.name}.`,
+      () => restockBusinessStock(
+        business.id,
+        10,
+        adminUser.fullName,
+        adminUser.role,
+      ),
+    );
+  };
+
   const toggleSecurityFlag = (key: keyof SecuritySettings) => {
     runAdminChange(
       'Admin PIN',
@@ -1889,11 +1960,40 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   };
 
   const adjustSecurityNumber = (
-    key: 'sessionTimeoutMinutes' | 'maxLoginAttempts',
+    key:
+      | 'sessionTimeoutMinutes'
+      | 'maxLoginAttempts'
+      | 'minimumWithdrawalAmount'
+      | 'maximumWithdrawalAmount'
+      | 'vatTierOneAmount'
+      | 'vatTierTwoBaseAmount'
+      | 'vatAdditionalBandAmount'
+      | 'packingTierOneAmount'
+      | 'packingTierTwoAmount'
+      | 'packingTierThreeAmount'
+      | 'packingTierFourAmount'
+      | 'packingTierFiveAmount'
+      | 'packingTierSixAmount',
     delta: number,
     minimum: number,
   ) => {
     const nextValue = Math.max(minimum, securitySettings[key] + delta);
+
+    if (
+      key === 'minimumWithdrawalAmount' &&
+      nextValue > securitySettings.maximumWithdrawalAmount
+    ) {
+      Alert.alert('Invalid withdrawal limits', 'The minimum cannot be greater than the maximum.');
+      return;
+    }
+    if (
+      key === 'maximumWithdrawalAmount' &&
+      nextValue < securitySettings.minimumWithdrawalAmount
+    ) {
+      Alert.alert('Invalid withdrawal limits', 'The maximum cannot be less than the minimum.');
+      return;
+    }
+
     runAdminChange(
       'Admin PIN',
       'Enter the PIN before changing security limits.',
@@ -1930,28 +2030,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
-  const saveSubscriptionExemptAccount = (nextEmail = subscriptionExemptEmailDraft) => {
-    const normalizedEmail = nextEmail.trim().toLowerCase();
-
-    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      Alert.alert('Email needed', 'Enter one valid business-owner account email, or clear it.');
-      return;
-    }
-
-    runAdminChange(
-      'Admin PIN',
-      'Enter the PIN before changing the subscription exempt account.',
-      () =>
-        updateSecuritySettings(
-          {
-            subscriptionExemptAccountEmail: normalizedEmail,
-          },
-          adminUser.fullName,
-          adminUser.role,
-        ),
-    );
-  };
-
   const handleCreateCustomerCareAccount = () => {
     if (!isOwnerAdmin) {
       return;
@@ -1969,9 +2047,9 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     runAdminChange(
       'Admin PIN',
       `Enter the PIN before creating ${fullName}.`,
-      () => {
+      async () => {
         try {
-          const account = createCustomerCareAccount(
+          const account = await createCustomerCareAccount(
             { fullName, email, password },
             adminUser.fullName,
             adminUser.role,
@@ -2060,17 +2138,17 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return;
     }
 
-    if (nextPassword.length < 6) {
-      setCustomerCareError('Customer care password must be at least 6 characters.');
+    if (nextPassword.length < 8) {
+      setCustomerCareError('Customer care password must be at least 8 characters.');
       return;
     }
 
     runAdminChange(
       'Admin PIN',
       `Enter the PIN before changing ${account.fullName}'s password.`,
-      () => {
+      async () => {
         try {
-          updateAdminPassword(account.id, nextPassword, adminUser.fullName, adminUser.role);
+          await updateAdminPassword(account.id, nextPassword, adminUser.fullName, adminUser.role);
           setCustomerCarePasswordDrafts((currentDrafts) => ({
             ...currentDrafts,
             [account.id]: '',
@@ -2086,11 +2164,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     );
   };
 
-  const handleUpdateCurrentAdminPassword = () => {
+  const handleUpdateCurrentAdminPassword = async () => {
     const nextPassword = adminPasswordDraft.trim();
 
-    if (nextPassword.length < 6) {
-      setAdminPasswordError('Admin password must be at least 6 characters.');
+    if (nextPassword.length < 8) {
+      setAdminPasswordError('Admin password must be at least 8 characters.');
       return;
     }
 
@@ -2100,7 +2178,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     }
 
     try {
-      updateAdminPassword(
+      await updateAdminPassword(
         adminUser.id,
         nextPassword,
         adminUser.fullName,
@@ -2193,22 +2271,13 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return;
     }
 
-    runAdminChange('Admin PIN', 'Enter the PIN before sending this support reply.', () => {
-      sendSupportReply(conversation.id, adminUser.fullName, adminUser.role, reply);
+    runAdminChange('Admin PIN', 'Enter the PIN before sending this support reply.', async () => {
+      await sendSupportReply(conversation.id, adminUser.fullName, adminUser.role, reply);
       setSupportReplyDrafts((currentDrafts) => ({
         ...currentDrafts,
         [conversation.id]: '',
       }));
     });
-  };
-
-  const handleEmailLogUpdate = (
-    logId: string,
-    patch: Parameters<typeof updateEmailLogContent>[1],
-  ) => {
-    runAdminChange('Admin PIN', 'Enter the PIN before editing this email record.', () =>
-      updateEmailLogContent(logId, patch),
-    );
   };
 
   const openListingVerification = (business: Business) => {
@@ -2241,15 +2310,15 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
       return;
     }
 
-    if (listingVerificationPinDraft.trim() !== orderProgressSettings.code) {
-      setListingVerificationError('Wrong PIN. Enter the active owner admin PIN.');
-      return;
-    }
-
     try {
       setVerifyingListingId(business.id);
       setListingVerificationError(null);
-      await toggleBusinessVerification(business.id, adminUser.fullName, adminUser.role);
+      await toggleBusinessVerification(
+        business.id,
+        adminUser.fullName,
+        adminUser.role,
+        listingVerificationPinDraft,
+      );
       setPendingListingVerificationId(null);
       setListingVerificationPinDraft('');
       setVerificationFilter('All');
@@ -2832,7 +2901,26 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                                   onPress={() => handleAdvanceOrder(order)}
                                 />
                               ) : null}
-                              {order.paymentStatus === 'paid' ? (
+                              {order.status !== 'cancelled' && order.status !== 'delivered' ? (
+                                <MonoButton
+                                  dark={false}
+                                  label="Cancel order"
+                                  onPress={() => handleCancelOrder(order)}
+                                />
+                              ) : null}
+                              {isSupabaseConfigured && order.paymentStatus === 'refundPending' ? (
+                                <MonoButton
+                                  dark
+                                  disabled={refundingOrderId === order.id}
+                                  label={
+                                    refundingOrderId === order.id
+                                      ? 'Starting refund...'
+                                      : 'Initiate refund'
+                                  }
+                                  onPress={() => handleInitiateRefund(order)}
+                                />
+                              ) : null}
+                              {!isSupabaseConfigured && order.paymentStatus === 'paid' ? (
                                 <MonoButton
                                   dark={false}
                                   label="Refund"
@@ -2946,14 +3034,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                               <MonoButton
                                 dark
                                 label="Restock +10"
-                                onPress={() =>
-                                  restockBusinessStock(
-                                    business.id,
-                                    10,
-                                    adminUser.fullName,
-                                    adminUser.role,
-                                  )
-                                }
+                                onPress={() => handleRestockBusiness(business)}
                               />
                             </View>
                           </View>
@@ -3112,7 +3193,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
                   <SectionPanel
                     title="Withdrawal ledger"
-                    subtitle="Seller withdrawals are removed from available balances immediately."
+                    subtitle="Requests reserve available earnings. Mark paid only after the bank transfer succeeds."
                   >
                     <View style={styles.tableStack}>
                       {withdrawalRequests.length > 0 ? (
@@ -3133,6 +3214,47 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             <Text style={styles.tableValue}>
                               {formatCurrency(withdrawal.amount)}
                             </Text>
+                            <View style={styles.recordBadge}>
+                              <Text style={styles.recordBadgeText}>{withdrawal.status}</Text>
+                            </View>
+                            {isOwnerAdmin &&
+                            withdrawal.status !== 'paid' &&
+                            withdrawal.status !== 'reversed' ? (
+                              <View style={styles.recordStack}>
+                                <TextInput
+                                  autoCapitalize="characters"
+                                  onChangeText={(value) =>
+                                    setWithdrawalReferenceDrafts((current) => ({
+                                      ...current,
+                                      [withdrawal.id]: value,
+                                    }))
+                                  }
+                                  placeholder="Payout provider reference"
+                                  placeholderTextColor="#777777"
+                                  style={styles.compactInput}
+                                  value={withdrawalReferenceDrafts[withdrawal.id] ?? ''}
+                                />
+                                <View style={styles.inlineActionRow}>
+                                  {withdrawal.status === 'pending' ? (
+                                    <MonoButton
+                                      dark={false}
+                                      label="Mark processing"
+                                      onPress={() => processWithdrawal(withdrawal.id, 'processing')}
+                                    />
+                                  ) : null}
+                                  <MonoButton
+                                    dark
+                                    label="Mark paid"
+                                    onPress={() => processWithdrawal(withdrawal.id, 'paid')}
+                                  />
+                                  <MonoButton
+                                    dark={false}
+                                    label="Mark failed"
+                                    onPress={() => processWithdrawal(withdrawal.id, 'failed')}
+                                  />
+                                </View>
+                              </View>
+                            ) : null}
                           </View>
                         ))
                       ) : (
@@ -3400,7 +3522,11 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                 <View style={[styles.dashboardGrid, !isWideLayout && styles.dashboardGridStacked]}>
                   <SectionPanel
                     title="Order payment queue"
-                    subtitle="Customer care confirms the buyer's payment before the seller packs the order."
+                    subtitle={
+                      isSupabaseConfigured
+                        ? 'Flutterwave confirms live payments through the signed webhook before sellers can prepare orders.'
+                        : 'Local testing can manually confirm a simulated payment.'
+                    }
                   >
                     <View style={styles.recordStack}>
                       {pendingOrderPayments.length > 0 ? (
@@ -3424,13 +3550,17 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             <Text style={styles.recordMeta}>
                               {order.items.map((item) => item.businessName).join(', ')}
                             </Text>
-                            <View style={styles.inlineActionRow}>
-                              <MonoButton
-                                dark
-                                label="Confirm payment"
-                                onPress={() => confirmOrderPayment(order)}
-                              />
-                            </View>
+                            {isSupabaseConfigured ? (
+                              <Text style={styles.recordMeta}>Awaiting Flutterwave confirmation.</Text>
+                            ) : (
+                              <View style={styles.inlineActionRow}>
+                                <MonoButton
+                                  dark
+                                  label="Confirm payment"
+                                  onPress={() => confirmOrderPayment(order)}
+                                />
+                              </View>
+                            )}
                           </View>
                         ))
                       ) : (
@@ -3442,8 +3572,8 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                   </SectionPanel>
 
                   <SectionPanel
-                    title="Business subscriptions"
-                    subtitle="Confirm owner profile payments so approved listings can become public."
+                    title="Legacy business subscriptions"
+                    subtitle="Seller listings are free. Historical subscription records remain visible for audit only."
                   >
                     <View style={styles.recordStack}>
                       {pendingSubscriptionProfiles.length > 0 ? (
@@ -3495,13 +3625,15 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                               <Text style={styles.recordMeta}>
                                 Verified amount {formatCurrency(profile.verifiedAmount ?? 0)}
                               </Text>
-                              <View style={styles.inlineActionRow}>
-                                <MonoButton
-                                  dark
-                                  label="Confirm plan"
-                                  onPress={() => confirmSubscriptionPayment(profile)}
-                                />
-                              </View>
+                              {!isSupabaseConfigured ? (
+                                <View style={styles.inlineActionRow}>
+                                  <MonoButton
+                                    dark
+                                    label="Confirm plan"
+                                    onPress={() => confirmSubscriptionPayment(profile)}
+                                  />
+                                </View>
+                              ) : null}
                             </View>
                           );
                         })
@@ -3664,7 +3796,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                     </View>
                   </View>
 
-                  <View style={styles.recordCard}>
+                  {isUrbanConnectLocalTestMode ? <View style={styles.recordCard}>
                     <View style={styles.recordTopRow}>
                       <View style={styles.recordCopy}>
                         <Text style={styles.recordTitle}>Fresh order testing</Text>
@@ -3681,7 +3813,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         onPress={handleClearOrderTestingState}
                       />
                     </View>
-                  </View>
+                  </View> : null}
                 </View>
               </SectionPanel>
             ) : null}
@@ -3713,7 +3845,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
                 <SectionPanel
                   title="Email center"
-                  subtitle="Actual emails sent or queued for users and business owners can be edited here."
+                  subtitle="Delivery records for emails sent or queued by the platform. Sent records are kept read-only for audit integrity."
                 >
                   <View style={styles.recordStack}>
                     {emailLogs.length > 0 ? (
@@ -3729,25 +3861,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             </View>
                           </View>
                           <Text style={styles.recordMeta}>{log.recipientEmail}</Text>
-                          <TextInput
-                            onChangeText={(subject) =>
-                              handleEmailLogUpdate(log.id, { subject, body: log.body })
-                            }
-                            placeholder="Email subject"
-                            placeholderTextColor="#8A8A8A"
-                            style={styles.compactInput}
-                            value={log.subject}
-                          />
-                          <TextInput
-                            multiline
-                            onChangeText={(body) =>
-                              handleEmailLogUpdate(log.id, { subject: log.subject, body })
-                            }
-                            placeholder="Email body"
-                            placeholderTextColor="#8A8A8A"
-                            style={[styles.compactInput, styles.largeInput]}
-                            value={log.body}
-                          />
+                          <Text style={styles.recordBody}>{log.body}</Text>
                           <Text style={styles.recordMeta}>
                             {log.status === 'sent' ? 'Sent' : 'Queued'} -{' '}
                             {formatDateTime(log.createdAt)}
@@ -4751,11 +4865,16 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             dark={!account.isActive}
                             label={account.isActive ? 'Deactivate' : 'Activate'}
                             onPress={() =>
-                              setAdminAccountActive(
-                                account.id,
-                                !account.isActive,
-                                adminUser.fullName,
-                                adminUser.role,
+                              runAdminChange(
+                                'Admin PIN',
+                                `Enter the PIN before ${account.isActive ? 'deactivating' : 'activating'} ${account.fullName}.`,
+                                () =>
+                                  setAdminAccountActive(
+                                    account.id,
+                                    !account.isActive,
+                                    adminUser.fullName,
+                                    adminUser.role,
+                                  ),
                               )
                             }
                           />
@@ -4864,43 +4983,16 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                 </SectionPanel>
 
                 <SectionPanel
-                  title="Subscription exemption"
-                  subtitle="Only one business-owner account can bypass subscription payment."
+                  title="Seller listing access"
+                  subtitle="Store owners can publish catalog listings without a subscription."
                 >
                   <View style={styles.recordStack}>
                     <View style={styles.recordCard}>
-                      <Text style={styles.recordTitle}>Exempt account email</Text>
+                      <Text style={styles.recordTitle}>Free seller catalog publishing</Text>
                       <Text style={styles.recordMeta}>
-                        {securitySettings.subscriptionExemptAccountEmail
-                          ? `${securitySettings.subscriptionExemptAccountEmail} is currently exempt.`
-                          : 'No account is currently exempt.'}
+                        This applies to every approved store-owner account. Customer advert
+                        promotion plans remain separate and are paid through Flutterwave.
                       </Text>
-                      <View style={styles.customerCareFormGrid}>
-                        <TextInput
-                          autoCapitalize="none"
-                          keyboardType="email-address"
-                          onChangeText={setSubscriptionExemptEmailDraft}
-                          placeholder="business-owner@email.com"
-                          placeholderTextColor="#777777"
-                          style={[styles.compactInput, styles.customerCareInput]}
-                          value={subscriptionExemptEmailDraft}
-                        />
-                        <MonoButton
-                          dark
-                          label="Save exempt account"
-                          onPress={() => saveSubscriptionExemptAccount()}
-                        />
-                        {securitySettings.subscriptionExemptAccountEmail ? (
-                          <MonoButton
-                            dark={false}
-                            label="Clear"
-                            onPress={() => {
-                              setSubscriptionExemptEmailDraft('');
-                              saveSubscriptionExemptAccount('');
-                            }}
-                          />
-                        ) : null}
-                      </View>
                     </View>
                   </View>
                 </SectionPanel>
@@ -4937,6 +5029,98 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                         onPress={() => toggleSecurityFlag('loginAnnouncementEnabled')}
                       />
                     </View>
+                  </View>
+                </SectionPanel>
+
+                <SectionPanel
+                  title="Seller withdrawal limits"
+                  subtitle="These values are enforced by Supabase when a seller submits a payout request."
+                >
+                  <View style={styles.totalStack}>
+                    <View style={styles.securityNumberRow}>
+                      <View style={styles.securityCopy}>
+                        <Text style={styles.securityTitle}>Minimum withdrawal</Text>
+                        <Text style={styles.securityMeta}>
+                          {formatCurrency(securitySettings.minimumWithdrawalAmount)}
+                        </Text>
+                      </View>
+                      <View style={styles.numericControlRow}>
+                        <MonoButton
+                          dark={false}
+                          label="-500"
+                          onPress={() => adjustSecurityNumber('minimumWithdrawalAmount', -500, 0)}
+                        />
+                        <MonoButton
+                          dark
+                          label="+500"
+                          onPress={() => adjustSecurityNumber('minimumWithdrawalAmount', 500, 0)}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.securityNumberRow}>
+                      <View style={styles.securityCopy}>
+                        <Text style={styles.securityTitle}>Maximum withdrawal</Text>
+                        <Text style={styles.securityMeta}>
+                          {formatCurrency(securitySettings.maximumWithdrawalAmount)}
+                        </Text>
+                      </View>
+                      <View style={styles.numericControlRow}>
+                        <MonoButton
+                          dark={false}
+                          label="-5000"
+                          onPress={() =>
+                            adjustSecurityNumber('maximumWithdrawalAmount', -5000, 0)
+                          }
+                        />
+                        <MonoButton
+                          dark
+                          label="+5000"
+                          onPress={() =>
+                            adjustSecurityNumber('maximumWithdrawalAmount', 5000, 0)
+                          }
+                        />
+                      </View>
+                    </View>
+                  </View>
+                </SectionPanel>
+
+                <SectionPanel
+                  title="Checkout fees"
+                  subtitle="These amounts drive both the customer cart preview and Supabase order totals."
+                >
+                  <View style={styles.totalStack}>
+                    {([
+                      ['VAT from NGN 3,000 to 9,999', 'vatTierOneAmount', 100],
+                      ['VAT base from NGN 10,000', 'vatTierTwoBaseAmount', 100],
+                      ['VAT per extra NGN 10,000 band', 'vatAdditionalBandAmount', 100],
+                      ['Packing support NGN 100 to 999', 'packingTierOneAmount', 50],
+                      ['Packing support NGN 1,000 to 4,999', 'packingTierTwoAmount', 50],
+                      ['Packing support NGN 5,000 to 9,999', 'packingTierThreeAmount', 50],
+                      ['Packing support NGN 10,000 to 19,999', 'packingTierFourAmount', 50],
+                      ['Packing support NGN 20,000 to 49,999', 'packingTierFiveAmount', 50],
+                      ['Packing support from NGN 50,000', 'packingTierSixAmount', 50],
+                    ] as const).map(([label, key, step]) => (
+                      <View key={key} style={styles.securityNumberRow}>
+                        <View style={styles.securityCopy}>
+                          <Text style={styles.securityTitle}>{label}</Text>
+                          <Text style={styles.securityMeta}>
+                            {formatCurrency(securitySettings[key])}
+                          </Text>
+                        </View>
+                        <View style={styles.numericControlRow}>
+                          <MonoButton
+                            dark={false}
+                            label={`-${step}`}
+                            onPress={() => adjustSecurityNumber(key, -step, 0)}
+                          />
+                          <MonoButton
+                            dark
+                            label={`+${step}`}
+                            onPress={() => adjustSecurityNumber(key, step, 0)}
+                          />
+                        </View>
+                      </View>
+                    ))}
                   </View>
                 </SectionPanel>
 
@@ -5806,6 +5990,11 @@ function createStyles(colors: AppColors) {
     recordMeta: {
       ...typography.caption,
       color: colors.textMuted,
+    },
+    recordBody: {
+      ...typography.body,
+      color: colors.text,
+      lineHeight: 22,
     },
     inlinePinBox: {
       gap: spacing.sm,

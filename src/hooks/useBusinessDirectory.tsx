@@ -66,7 +66,10 @@ import {
   getDepositStatusLabel,
 } from '../utils/deposits';
 import { formatCurrency } from '../utils/format';
-import { getAccountWalletBalance, getPaidWithdrawalTotal } from '../utils/wallet';
+import {
+  getAccountWalletBalance,
+  getCommittedWithdrawalTotal,
+} from '../utils/wallet';
 import { calculateProgressiveVat, calculateSellerPackingSupport } from '../utils/cart';
 import {
   createFlutterwaveVirtualAccount,
@@ -82,8 +85,11 @@ import {
   fetchCustomerCartFromSupabase,
   fetchCustomerDeliveryLocationFromSupabase,
   fetchMarketplaceSnapshot,
+  fetchAdminActionPinStatus,
   isSupabaseConfigured,
   saveBusinessToSupabase,
+  saveAdminCatalogProductToSupabase,
+  saveCatalogManagementAccessToSupabase,
   saveCartItemToSupabase,
   saveChatMessageToSupabase,
   saveCustomerDeliveryLocationToSupabase,
@@ -93,14 +99,23 @@ import {
   saveOrderToSupabase,
   saveOwnerBusinessProfileToSupabase,
   savePaymentPlanToSupabase,
+  saveStaffSupportReplyToSupabase,
   saveSecuritySettingsToSupabase,
-  saveDynamicDepositAccountToSupabase,
+  saveAdminActionPin,
   saveSubscriptionPaymentToSupabase,
-  saveVirtualAccountToSupabase,
-  saveWithdrawalToSupabase,
+  requestSellerWithdrawalFromSupabase,
+  reviewStoreApplicationInSupabase,
+  setListingVerificationInSupabase,
+  updateWithdrawalStatusInSupabase,
+  verifyAdminActionPin as verifyAdminActionPinInSupabase,
   saveSupportMessageToSupabase,
+  subscribeToSupabaseAccessToken,
   uploadBusinessMediaToSupabase,
   uploadChatAttachmentToSupabaseStorage,
+  uploadPrivateDocumentToSupabaseStorage,
+  updateOrderStatusInSupabase,
+  markSellerOrderReadyInSupabase,
+  markMyNotificationsReadInSupabase,
 } from '../services/supabaseApi';
 import { normalizeOrderStatus } from '../utils/order';
 import {
@@ -155,7 +170,7 @@ type BusinessDirectoryContextValue = {
     actorName?: string,
     actorRole?: AuditActorRole,
     shouldAudit?: boolean,
-  ) => void;
+  ) => Promise<void>;
   confirmBusinessSubscription: (
     businessId: string,
     actorName?: string,
@@ -178,8 +193,8 @@ type BusinessDirectoryContextValue = {
   isStoreOwnerListing: (business: Business) => boolean;
   isStoreOwnerListingSource: (business: Business) => boolean;
   hasCatalogManagementAccess: (ownerUserId: string) => boolean;
-  setCatalogManagementAccess: (owner: AppUser, allowed: boolean) => void;
-  markNotificationsRead: (userId: string) => void;
+  setCatalogManagementAccess: (owner: AppUser, allowed: boolean) => Promise<void>;
+  markNotificationsRead: (userId: string) => Promise<void>;
   sendSupportMessage: (
     user: AppUser,
     text: string,
@@ -191,9 +206,9 @@ type BusinessDirectoryContextValue = {
     actorName: string,
     actorRole: AuditActorRole,
     text: string,
-  ) => void;
-  deleteSupportConversation: (conversationId: string) => void;
-  deleteLatestSupportConversation: () => void;
+  ) => Promise<void>;
+  deleteSupportConversation: (conversationId: string) => Promise<void>;
+  deleteLatestSupportConversation: () => Promise<void>;
   setCurrentEstateId: (estateId: string) => void;
   registerBusiness: (
     values: BusinessProfileFormValues,
@@ -202,6 +217,7 @@ type BusinessDirectoryContextValue = {
   createCentralCatalogProduct: (
     values: CentralCatalogProductValues,
     managedOwner?: AppUser,
+    adminPin?: string,
   ) => Promise<Business>;
   getOwnerBusinessProfile: (owner?: AppUser | null) => OwnerBusinessProfile | undefined;
   isSubscriptionExemptForUser: (owner?: AppUser | null) => boolean;
@@ -225,6 +241,14 @@ type BusinessDirectoryContextValue = {
     amountOverride?: number,
     discountAmount?: number,
   ) => SubscriptionPayment;
+  startCustomerBenefitFlutterwaveCheckout: (
+    customer: AppUser,
+    cycle: PaymentPlanCycle,
+    durationMonths?: number,
+    durationMinutes?: number,
+    amountOverride?: number,
+    discountAmount?: number,
+  ) => Promise<FlutterwaveCheckoutSession & { payment: SubscriptionPayment }>;
   startOwnerSubscriptionFlutterwaveCheckout: (
     owner: AppUser,
     cycle: PaymentPlanCycle,
@@ -262,7 +286,15 @@ type BusinessDirectoryContextValue = {
       accountNumber: string;
       accountName?: string;
     },
-  ) => WithdrawalRequest;
+  ) => Promise<WithdrawalRequest>;
+  updateWithdrawalStatus: (
+    withdrawalId: string,
+    status: Exclude<WithdrawalRequest['status'], 'pending'>,
+    providerReference?: string,
+    failureReason?: string,
+    actorName?: string,
+    actorRole?: AuditActorRole,
+  ) => Promise<WithdrawalRequest>;
   notifyBusinessOwnerInspection: (owner: AppUser) => void;
   setOwnerRiverParkVerification: (
     ownerUserId: string,
@@ -275,6 +307,13 @@ type BusinessDirectoryContextValue = {
     actorName?: string,
     actorRole?: AuditActorRole,
   ) => void;
+  reviewStoreApplicationForOwner: (
+    owner: AppUser,
+    decision: 'approved' | 'changesRequested',
+    message: string,
+    actorName?: string,
+    actorRole?: AuditActorRole,
+  ) => Promise<void>;
   updateOwnerBusinessProfile: (
     owner: AppUser,
     values: OwnerBusinessProfileValues,
@@ -289,6 +328,7 @@ type BusinessDirectoryContextValue = {
   getOrderById: (orderId: string) => Order | undefined;
   getOrdersForUser: (userId: string) => Order[];
   getOrdersForOwner: (ownerUserId: string, owner?: AppUser | null) => Order[];
+  markSellerOrderReady: (orderId: string, owner: AppUser) => Promise<boolean>;
   syncCustomerAccountData: (user?: AppUser | null) => Promise<void>;
   getCustomerDeliveryLocation: (user?: AppUser | null) => DeliveryLocation | undefined;
   saveCustomerDeliveryLocation: (
@@ -313,13 +353,17 @@ type BusinessDirectoryContextValue = {
       reorderLevel?: number;
     },
     owner?: AppUser | null,
-  ) => Business;
-  deleteOwnedBusinessListing: (businessId: string, owner?: AppUser | null) => void;
+  ) => Promise<Business>;
+  deleteOwnedBusinessListing: (businessId: string, owner?: AppUser | null) => Promise<void>;
   getAvailableStock: (businessId: string) => number;
-  addToCart: (businessId: string, user?: AppUser | null) => void;
-  removeFromCart: (businessId: string, user?: AppUser | null) => void;
-  updateCartQuantity: (businessId: string, quantity: number, user?: AppUser | null) => void;
-  clearCart: (user?: AppUser | null) => void;
+  addToCart: (businessId: string, user?: AppUser | null) => Promise<void>;
+  removeFromCart: (businessId: string, user?: AppUser | null) => Promise<void>;
+  updateCartQuantity: (
+    businessId: string,
+    quantity: number,
+    user?: AppUser | null,
+  ) => Promise<void>;
+  clearCart: (user?: AppUser | null) => Promise<void>;
   checkoutCart: (payload: CheckoutPayload, customer?: AppUser | null) => Order;
   startCartFlutterwaveCheckout: (
     payload: Omit<CheckoutPayload, 'paymentMethod'>,
@@ -331,13 +375,13 @@ type BusinessDirectoryContextValue = {
     quantity: number,
     actorName?: string,
     actorRole?: AuditActorRole,
-  ) => void;
+  ) => Promise<void>;
   updateBusinessReorderLevel: (
     businessId: string,
     reorderLevel: number,
     actorName?: string,
     actorRole?: AuditActorRole,
-  ) => void;
+  ) => Promise<void>;
   updateOrderStatus: (
     orderId: string,
     status: OrderStatus,
@@ -346,13 +390,15 @@ type BusinessDirectoryContextValue = {
     progressCode?: string,
     actorUserId?: string,
     actor?: AppUser | null,
-  ) => void;
+  ) => Promise<void>;
   deleteOrder: (orderId: string, actorName?: string, actorRole?: AuditActorRole) => void;
   updateOrderProgressCode: (
     code: string,
     actorName?: string,
     actorRole?: AuditActorRole,
-  ) => void;
+  ) => Promise<void>;
+  syncOrderProgressSettings: () => Promise<void>;
+  verifyOrderProgressCode: (code: string) => Promise<boolean>;
   clearOrderTestingState: (actorName?: string, actorRole?: AuditActorRole) => void;
   updatePaymentStatus: (
     orderId: string,
@@ -364,13 +410,14 @@ type BusinessDirectoryContextValue = {
     patch: Partial<SecuritySettings>,
     actorName?: string,
     actorRole?: AuditActorRole,
-  ) => void;
+  ) => Promise<void>;
   toggleBusinessVerification: (
     businessId: string,
     actorName?: string,
     actorRole?: AuditActorRole,
+    adminPin?: string,
   ) => Promise<void>;
-  deleteBusiness: (businessId: string, actorName?: string, actorRole?: AuditActorRole) => void;
+  deleteBusiness: (businessId: string, actorName?: string, actorRole?: AuditActorRole) => Promise<void>;
   restoreBusiness: (businessId: string, actorName?: string, actorRole?: AuditActorRole) => void;
 };
 
@@ -512,9 +559,6 @@ function supportAutoReplyText(userRole: AppUser['role']) {
     ? 'Thanks for reaching View2Connect support. Please describe the listing, order, payment, or verification issue clearly. A support agent will attend to you shortly.'
     : 'Thanks for reaching View2Connect support. Please describe the problem clearly. A support agent will attend to you shortly.';
 }
-
-const supportFollowUpText =
-  'We did not receive a response within 5 minutes, so this support chat was closed automatically. Start a new message if the issue is still active.';
 
 function slugify(value: string) {
   return value
@@ -673,26 +717,6 @@ function normalizeOwnerKey(key?: string | null) {
   return key?.trim().toLowerCase();
 }
 
-function normalizeIdentityName(value?: string | null) {
-  return value
-    ?.trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function identityNamesMatch(left?: string | null, right?: string | null) {
-  const normalizedLeft = normalizeIdentityName(left);
-  const normalizedRight = normalizeIdentityName(right);
-
-  if (!normalizedLeft || !normalizedRight) {
-    return false;
-  }
-
-  return normalizedLeft === normalizedRight;
-}
-
 function getUserOwnerKeys(user?: AppUser | null, ownerProfile?: OwnerBusinessProfile) {
   return [
     user?.id,
@@ -819,6 +843,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     [],
     persistenceOptions,
   );
+  const cartItemsRef = useRef<CartItem[]>(cartItems);
+  const cartMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [customerDeliveryLocations, setCustomerDeliveryLocations] = usePersistentState<
     DeliveryLocation[]
   >('urbanconnect.customerDeliveryLocations.v1', [], persistenceOptions);
@@ -908,6 +934,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     estates[0]?.id ?? 'river-park',
     persistenceOptions,
   );
+
+  useEffect(() => {
+    cartItemsRef.current = cartItems;
+  }, [cartItems]);
   const verifiedUserIdsFromNotifications = useMemo(
     () => getVerifiedUserIdsFromNotifications(notifications),
     [notifications],
@@ -977,7 +1007,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
         setBusinesses((currentBusinesses) => {
           const deletedIds = new Set(deletedBusinessIds);
-          const staticBusinesses = mockBusinesses.filter(
+          const staticBusinesses = (isUrbanConnectLocalTestMode ? mockBusinesses : []).filter(
             (business) =>
               !deletedIds.has(business.id) && !isUnlinkedStaticSupermarketListing(business),
           );
@@ -1009,7 +1039,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
                 : remoteBusiness;
             });
 
-          return mergeNewestById(staticBusinesses, remoteBusinesses);
+          return isUrbanConnectLocalTestMode
+            ? mergeNewestById(staticBusinesses, remoteBusinesses)
+            : remoteBusinesses;
         });
         setOrders((currentOrders) => {
           const resetTime = new Date(orderResetAt).getTime();
@@ -1019,7 +1051,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
               )
             : snapshot.orders;
 
-          const mergedOrders = mergeRemoteOrdersWithRecentLocal(currentOrders, remoteOrders);
+          const mergedOrders = isUrbanConnectLocalTestMode
+            ? mergeRemoteOrdersWithRecentLocal(currentOrders, remoteOrders)
+            : remoteOrders;
           const mergedOrderIds = new Set(mergedOrders.map((order) => order.id));
           const droppedLocalOrders = currentOrders.filter(
             (order) =>
@@ -1029,19 +1063,27 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
               order.paymentStatus !== 'refunded',
           );
 
-          if (droppedLocalOrders.length > 0) {
+          if (isUrbanConnectLocalTestMode && droppedLocalOrders.length > 0) {
             restoreInventoryForOrders(droppedLocalOrders, new Date().toISOString());
           }
 
           return mergedOrders;
         });
         setOwnerBusinessProfiles((currentProfiles) =>
-          mergeNewestById(currentProfiles, snapshot.ownerBusinessProfiles),
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentProfiles, snapshot.ownerBusinessProfiles)
+            : snapshot.ownerBusinessProfiles,
         );
-        setEmailLogs((currentLogs) => mergeNewestById(currentLogs, snapshot.emailLogs));
+        setEmailLogs((currentLogs) =>
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentLogs, snapshot.emailLogs)
+            : snapshot.emailLogs,
+        );
         setAuditLogs(snapshot.auditLogs);
         setNotifications((currentNotifications) =>
-          mergeNewestById(currentNotifications, snapshot.notifications),
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentNotifications, snapshot.notifications)
+            : snapshot.notifications,
         );
         setChatThreads(snapshot.chatThreads);
         setSupportThreads(() => {
@@ -1054,16 +1096,24 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           );
         });
         setSubscriptionPayments((currentPayments) =>
-          mergeNewestById(currentPayments, snapshot.subscriptionPayments),
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentPayments, snapshot.subscriptionPayments)
+            : snapshot.subscriptionPayments,
         );
         setWithdrawalRequests((currentWithdrawals) =>
-          mergeNewestById(currentWithdrawals, snapshot.withdrawalRequests),
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentWithdrawals, snapshot.withdrawalRequests)
+            : snapshot.withdrawalRequests,
         );
         setVirtualAccounts((currentAccounts) =>
-          mergeNewestById(currentAccounts, snapshot.virtualAccounts),
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentAccounts, snapshot.virtualAccounts)
+            : snapshot.virtualAccounts,
         );
         setDynamicDepositAccounts((currentDeposits) =>
-          mergeNewestById(currentDeposits, snapshot.dynamicDepositAccounts),
+          isUrbanConnectLocalTestMode
+            ? mergeNewestById(currentDeposits, snapshot.dynamicDepositAccounts)
+            : snapshot.dynamicDepositAccounts,
         );
 
         if (snapshot.paymentPlans.length > 0) {
@@ -1081,10 +1131,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     loadSnapshot();
     const refreshInterval = setInterval(loadSnapshot, 30_000);
+    const unsubscribeFromAccessToken = subscribeToSupabaseAccessToken(loadSnapshot);
 
     return () => {
       isCancelled = true;
       clearInterval(refreshInterval);
+      unsubscribeFromAccessToken();
     };
   }, [
     setAuditLogs,
@@ -1107,12 +1159,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const syncExpiredDeposits = () => {
       setDynamicDepositAccounts((currentDeposits) => {
         const { deposits: nextDeposits, expiredDeposits } = expirePendingDeposits(currentDeposits);
-
-        expiredDeposits.forEach((deposit) => {
-          if (isSupabaseConfigured) {
-            void saveDynamicDepositAccountToSupabase(deposit).catch(() => undefined);
-          }
-        });
 
         return expiredDeposits.length > 0 ? nextDeposits : currentDeposits;
       });
@@ -1148,14 +1194,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   };
 
   const isSubscriptionExemptForUser = (owner?: AppUser | null) => {
-    if (!owner || owner.role !== 'businessOwner') {
-      return false;
-    }
-
-    return emailMatchesSubscriptionExemption(
-      owner.email,
-      normalizeSubscriptionExemptAccountEmail(securitySettings.subscriptionExemptAccountEmail),
-    );
+    return owner?.role === 'businessOwner';
   };
 
   const getSupportConversations = () => {
@@ -1209,34 +1248,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const isCustomerAdvertisementSourceForDirectory = (business: Business) =>
     isCustomerAdvertisementSourceListing(business, ownerBusinessProfiles);
 
-  const markNotificationsRead = (userId: string) => {
+  const markNotificationsRead = async (userId: string) => {
     const readAt = new Date().toISOString();
 
-    setNotifications((currentNotifications) => {
-      const nextNotifications = currentNotifications.map((notification) =>
+    if (isSupabaseConfigured) {
+      await markMyNotificationsReadInSupabase();
+    }
+
+    setNotifications((currentNotifications) =>
+      currentNotifications.map((notification) =>
         notification.userId === userId && !notification.readAt
           ? { ...notification, readAt }
           : notification,
-      );
-
-      if (isSupabaseConfigured) {
-        nextNotifications
-          .filter((notification, index) => {
-            const previousNotification = currentNotifications[index];
-            return Boolean(
-              previousNotification &&
-                previousNotification.userId === userId &&
-                !previousNotification.readAt &&
-                notification.readAt,
-            );
-          })
-          .forEach((notification) => {
-            void saveNotificationToSupabase(notification).catch(() => undefined);
-          });
-      }
-
-      return nextNotifications;
-    });
+      ),
+    );
   };
 
   const canDeliverEmailLog = (log: AutomatedEmailLog) =>
@@ -1460,12 +1485,13 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return latestDecision?.title === 'Catalog management access granted';
   };
 
-  const setCatalogManagementAccess = (owner: AppUser, allowed: boolean) => {
+  const setCatalogManagementAccess = async (owner: AppUser, allowed: boolean) => {
     if (owner.role !== 'businessOwner') {
-      return;
+      throw new Error('Only store owners can change catalog management access.');
     }
 
-    appendNotification({
+    const notification: AppNotification = {
+      id: `notification-catalog-management-${owner.id}`,
       userId: owner.id,
       userName: owner.fullName,
       recipientEmail: owner.email,
@@ -1478,13 +1504,28 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         : 'View2Connect Admin can no longer create or update products for your store.',
       contextType: 'general',
       contextId: `catalog-management-${owner.id}`,
-    });
-    appendAuditLog(
-      owner.fullName,
-      'businessOwner',
-      allowed ? 'Catalog management access granted' : 'Catalog management access revoked',
-      `${owner.businessName ?? owner.fullName} ${allowed ? 'granted' : 'revoked'} Admin catalog access.`,
-    );
+      createdAt: new Date().toISOString(),
+    };
+
+    if (isSupabaseConfigured) {
+      await saveCatalogManagementAccessToSupabase(allowed);
+    }
+
+    setNotifications((currentNotifications) => [
+      notification,
+      ...currentNotifications.filter(
+        (currentNotification) => currentNotification.id !== notification.id,
+      ),
+    ]);
+
+    if (!isSupabaseConfigured) {
+      appendAuditLog(
+        owner.fullName,
+        'businessOwner',
+        allowed ? 'Catalog management access granted' : 'Catalog management access revoked',
+        `${owner.businessName ?? owner.fullName} ${allowed ? 'granted' : 'revoked'} Admin catalog access.`,
+      );
+    }
   };
 
   useEffect(() => {
@@ -1586,9 +1627,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         ),
       ),
     );
-    setDeletedSupportConversationIds((currentIds) =>
-      currentIds.filter((currentId) => currentId !== conversationId),
-    );
     const message: SupportMessage = {
       id: messageId,
       conversationId,
@@ -1623,6 +1661,16 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     };
     const nextMessages = shouldSendAutoReply ? [message, autoReply] : [message];
 
+    if (isSupabaseConfigured) {
+      await saveSupportMessageToSupabase(message);
+      if (shouldSendAutoReply) {
+        await saveSupportMessageToSupabase(autoReply);
+      }
+    }
+
+    setDeletedSupportConversationIds((currentIds) =>
+      currentIds.filter((currentId) => currentId !== conversationId),
+    );
     setSupportThreads((currentThreads) => ({
       ...currentThreads,
       [conversationId]: [...(currentThreads[conversationId] ?? []), ...nextMessages],
@@ -1640,16 +1688,9 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         contextId: context?.contextId ?? conversationId,
       });
     }
-
-    if (isSupabaseConfigured) {
-      await saveSupportMessageToSupabase(message);
-      if (shouldSendAutoReply) {
-        await saveSupportMessageToSupabase(autoReply);
-      }
-    }
   };
 
-  const sendSupportReply = (
+  const sendSupportReply = async (
     conversationId: string,
     actorName: string,
     actorRole: AuditActorRole,
@@ -1675,86 +1716,43 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       createdAt: new Date().toISOString(),
     };
 
+    if (isSupabaseConfigured) {
+      await saveStaffSupportReplyToSupabase(message);
+    }
+
     setSupportThreads((currentThreads) => ({
       ...currentThreads,
       [conversationId]: [...(currentThreads[conversationId] ?? []), message],
     }));
 
-    if (isSupabaseConfigured) {
-      void saveSupportMessageToSupabase(message).catch(() => undefined);
+    if (!isSupabaseConfigured) {
+      const replyRecipientEmail = resolveRequiredNotificationRecipientEmail({
+        userId: firstMessage.userId,
+        userName: firstMessage.userName,
+        audience: firstMessage.userRole,
+        contextType: 'general',
+        contextId: conversationId,
+      });
+
+      appendNotification({
+        userId: firstMessage.userId,
+        userName: firstMessage.userName,
+        recipientEmail: replyRecipientEmail,
+        audience: firstMessage.userRole,
+        title: 'Customer care replied',
+        body: trimmedText,
+        contextType: 'general',
+        contextId: conversationId,
+      });
     }
 
-    const replyRecipientEmail = resolveRequiredNotificationRecipientEmail({
-      userId: firstMessage.userId,
-      userName: firstMessage.userName,
-      audience: firstMessage.userRole,
-      contextType: 'general',
-      contextId: conversationId,
-    });
-
-    appendNotification({
-      userId: firstMessage.userId,
-      userName: firstMessage.userName,
-      recipientEmail: replyRecipientEmail,
-      audience: firstMessage.userRole,
-      title: 'Customer care replied',
-      body: trimmedText,
-      contextType: 'general',
-      contextId: conversationId,
-    });
-
-    setTimeout(() => {
-      setSupportThreads((currentThreads) => {
-        const currentMessages = currentThreads[conversationId] ?? [];
-        const replyIndex = currentMessages.findIndex(
-          (currentMessage) => currentMessage.id === message.id,
-        );
-        const newerUserReplyExists =
-          replyIndex >= 0 &&
-          currentMessages
-            .slice(replyIndex + 1)
-            .some(
-              (currentMessage) =>
-                currentMessage.senderRole === 'resident' ||
-                currentMessage.senderRole === 'businessOwner',
-            );
-        if (newerUserReplyExists) {
-          return currentThreads;
-        }
-
-        const closedRecipientEmail = resolveRequiredNotificationRecipientEmail({
-          userId: firstMessage.userId,
-          userName: firstMessage.userName,
-          audience: firstMessage.userRole,
-          contextType: 'general',
-          contextId: conversationId,
-        });
-
-        appendNotification({
-          userId: firstMessage.userId,
-          userName: firstMessage.userName,
-          recipientEmail: closedRecipientEmail,
-          audience: firstMessage.userRole,
-          title: 'Support chat closed',
-          body: supportFollowUpText,
-          contextType: 'general',
-          contextId: conversationId,
-        });
-
-        setDeletedSupportConversationIds((currentIds) =>
-          currentIds.includes(conversationId) ? currentIds : [...currentIds, conversationId],
-        );
-        const { [conversationId]: _deletedConversation, ...remainingThreads } = currentThreads;
-        if (isSupabaseConfigured) {
-          void deleteSupportConversationFromSupabase(conversationId).catch(() => undefined);
-        }
-
-        return remainingThreads;
-      });
-    }, 5 * 60 * 1000);
   };
 
-  const deleteSupportConversation = (conversationId: string) => {
+  const deleteSupportConversation = async (conversationId: string) => {
+    if (isSupabaseConfigured) {
+      await deleteSupportConversationFromSupabase(conversationId);
+    }
+
     setDeletedSupportConversationIds((currentIds) =>
       currentIds.includes(conversationId) ? currentIds : [...currentIds, conversationId],
     );
@@ -1768,16 +1766,13 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return remainingThreads;
     });
 
-    if (isSupabaseConfigured) {
-      void deleteSupportConversationFromSupabase(conversationId).catch(() => undefined);
-    }
   };
 
-  const deleteLatestSupportConversation = () => {
+  const deleteLatestSupportConversation = async () => {
     const latestConversation = getSupportConversations()[0];
 
     if (latestConversation) {
-      deleteSupportConversation(latestConversation.id);
+      await deleteSupportConversation(latestConversation.id);
     }
   };
 
@@ -2059,7 +2054,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const canConfirmPayments = (actorRole: AuditActorRole) =>
     actorRole === 'owner' || actorRole === 'customerCare';
 
-  const updatePaymentPlan = (
+  const updatePaymentPlan = async (
     cycle: PaymentPlanCycle,
     patch: Pick<PaymentPlan, 'title' | 'amount' | 'description'>,
     actorName = 'View2Connect Owner',
@@ -2077,15 +2072,15 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updatedAt,
     };
 
+    if (isSupabaseConfigured) {
+      await savePaymentPlanToSupabase(nextPlan);
+    }
+
     setPaymentPlans((currentPlans) =>
       currentPlans.some((plan) => plan.cycle === cycle)
         ? currentPlans.map((plan) => (plan.cycle === cycle ? nextPlan : plan))
         : [...currentPlans, nextPlan],
     );
-
-    if (isSupabaseConfigured) {
-      void savePaymentPlanToSupabase(nextPlan).catch(() => undefined);
-    }
 
     setOwnerBusinessProfiles((currentProfiles) =>
       currentProfiles.map((profile) => {
@@ -2603,6 +2598,104 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return payment;
   };
 
+  const startCustomerBenefitFlutterwaveCheckout = async (
+    customer: AppUser,
+    cycle: PaymentPlanCycle,
+    durationMonths = 1,
+    durationMinutes?: number,
+    amountOverride?: number,
+    discountAmount = 0,
+  ) => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Flutterwave live checkout needs Supabase to be configured.');
+    }
+    if (customer.role !== 'resident') {
+      throw new Error('Customer advert promotion is available only to customer accounts.');
+    }
+
+    const plan = getPaymentPlanByCycle(cycle);
+    const minuteDuration =
+      typeof durationMinutes === 'number' && Number.isFinite(durationMinutes) && durationMinutes > 0
+        ? Math.floor(durationMinutes)
+        : undefined;
+    const durationMultiplier = Math.max(1, Math.floor(durationMonths));
+    const amountBeforeDiscount =
+      minuteDuration && amountOverride !== undefined
+        ? amountOverride + discountAmount
+        : plan.amount * durationMultiplier;
+    const amount = amountOverride ?? amountBeforeDiscount;
+    const createdAt = new Date().toISOString();
+    const nextBillingDate = new Date(createdAt);
+    if (minuteDuration) {
+      nextBillingDate.setMinutes(nextBillingDate.getMinutes() + minuteDuration);
+    } else {
+      nextBillingDate.setDate(nextBillingDate.getDate() + 30 * durationMultiplier);
+    }
+    const nextBillingAt = nextBillingDate.toISOString();
+    const durationLabel = minuteDuration
+      ? `${minuteDuration} minute${minuteDuration === 1 ? '' : 's'}`
+      : `${durationMultiplier} month${durationMultiplier === 1 ? '' : 's'}`;
+    const reference = `UC-CUST-SUB-${customer.id}-${Date.now()}`;
+    const pendingPayment: SubscriptionPayment = {
+      id: reference,
+      reference,
+      ownerUserId: customer.id,
+      ownerName: customer.fullName,
+      ownerEmail: customer.email,
+      cycle,
+      amount,
+      currency: 'NGN',
+      status: 'pending',
+      rawPayload: JSON.stringify({
+        method: 'flutterwaveCheckout',
+        subscriptionType: 'customerBenefits',
+        planTitle: plan.title,
+        durationLabel,
+        durationMonths: durationMultiplier,
+        ...(minuteDuration ? { durationMinutes: minuteDuration } : {}),
+        amountBeforeDiscount,
+        discountAmount,
+        nextBillingAt,
+        itemCount: 1,
+      }),
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    await saveSubscriptionPaymentToSupabase(pendingPayment);
+    const session = await createFlutterwaveCheckoutSession({
+      reference,
+      amount,
+      customerName: customer.fullName,
+      customerEmail: customer.email,
+      customerPhone: customer.phoneNumber,
+      title: 'View2Connect advert promotion',
+      description: `${plan.title} promotion for ${durationLabel}.`,
+      purpose: 'subscription',
+      meta: { userId: customer.id },
+    });
+    const payment: SubscriptionPayment = {
+      ...pendingPayment,
+      currency: session.currency,
+      checkoutUrl: session.checkoutUrl,
+      rawPayload: JSON.stringify({
+        ...JSON.parse(pendingPayment.rawPayload ?? '{}'),
+        checkoutUrl: session.checkoutUrl,
+        paymentOptions: session.paymentOptions,
+        mode: session.mode,
+        providerBody: session.providerBody,
+      }),
+    };
+
+    await saveSubscriptionPaymentToSupabase(payment);
+    setSubscriptionPayments((currentPayments) => [
+      payment,
+      ...currentPayments.filter((item) => item.reference !== reference),
+    ]);
+
+    return { ...session, payment };
+  };
+
   const startOwnerSubscriptionFlutterwaveCheckout = async (
     owner: AppUser,
     cycle: PaymentPlanCycle,
@@ -2641,6 +2734,29 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const amount = amountPerListing * itemCount;
     const createdAt = new Date().toISOString();
     const reference = `UC-SUB-${owner.id}-${Date.now()}`;
+    const pendingPayment: SubscriptionPayment = {
+      id: reference,
+      reference,
+      ownerUserId: owner.id,
+      ownerName: owner.fullName,
+      ownerEmail: owner.email,
+      cycle,
+      amount,
+      currency: 'NGN',
+      status: 'pending',
+      rawPayload: JSON.stringify({
+        method: 'flutterwaveCheckout',
+        durationLabel,
+        durationMonths: durationMultiplier,
+        ...(hasMinuteDuration ? { durationMinutes } : {}),
+        amountPerListing,
+        itemCount,
+      }),
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    await saveSubscriptionPaymentToSupabase(pendingPayment);
     const session = await createFlutterwaveCheckoutSession({
       reference,
       amount,
@@ -2660,15 +2776,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       },
     });
     const payment: SubscriptionPayment = {
-      id: reference,
-      reference,
-      ownerUserId: owner.id,
-      ownerName: owner.fullName,
-      ownerEmail: owner.email,
-      cycle,
-      amount,
+      ...pendingPayment,
       currency: session.currency,
-      status: 'pending',
       checkoutUrl: session.checkoutUrl,
       rawPayload: JSON.stringify({
         method: 'flutterwaveCheckout',
@@ -2682,8 +2791,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         mode: session.mode,
         providerBody: session.providerBody,
       }),
-      createdAt,
-      updatedAt: createdAt,
     };
 
     await saveSubscriptionPaymentToSupabase(payment);
@@ -2910,6 +3017,55 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
+  const reviewStoreApplicationForOwner = async (
+    owner: AppUser,
+    decision: 'approved' | 'changesRequested',
+    message: string,
+    actorName = 'View2Connect Owner',
+    actorRole: AuditActorRole = 'owner',
+  ) => {
+    if (!canEditSensitiveData(actorRole) || owner.role !== 'businessOwner') {
+      throw new Error('Only the owner admin can review store applications.');
+    }
+
+    if (isSupabaseConfigured) {
+      await reviewStoreApplicationInSupabase({
+        userId: owner.id,
+        decision,
+        message,
+      });
+    }
+
+    if (decision === 'approved') {
+      if (isSupabaseConfigured) {
+        const updatedAt = new Date().toISOString();
+        setOwnerBusinessProfiles((currentProfiles) =>
+          currentProfiles.map((profile) =>
+            profile.ownerUserId === owner.id
+              ? { ...profile, riverParkVerified: true, updatedAt }
+              : profile,
+          ),
+        );
+        setBusinesses((currentBusinesses) =>
+          currentBusinesses.map((business) =>
+            business.ownerUserId === owner.id
+              ? { ...business, riverParkVerified: true, status: 'active', updatedAt }
+              : business,
+          ),
+        );
+      } else {
+        approveStoreApplicationForOwner(owner, actorName, actorRole);
+      }
+    }
+
+    appendAuditLog(
+      actorName,
+      actorRole,
+      decision === 'approved' ? 'Store application approved' : 'Store application changes requested',
+      `${owner.businessName ?? owner.fullName}: ${message}`,
+    );
+  };
+
   function formatDateTimeForEmail(value: string) {
     return new Date(value).toLocaleString();
   }
@@ -3119,6 +3275,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   const createCentralCatalogProduct = async (
     values: CentralCatalogProductValues,
     managedOwner?: AppUser,
+    adminPin?: string,
   ) => {
     const createdAt = new Date().toISOString();
     const managedProfile = managedOwner ? getOwnerBusinessProfile(managedOwner) : undefined;
@@ -3187,12 +3344,15 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       createdAt: matchingCatalogProduct?.createdAt ?? createdAt,
       updatedAt: createdAt,
     };
-    const productForSave = isSupabaseConfigured
+    let productForSave = isSupabaseConfigured
       ? await uploadBusinessMediaToSupabase(catalogProduct)
       : catalogProduct;
 
     if (isSupabaseConfigured) {
-      await saveBusinessToSupabase(productForSave);
+      if (!/^\d{4}$/.test(adminPin ?? '')) {
+        throw new Error('Enter the 4 digit Admin PIN before saving this catalog product.');
+      }
+      productForSave = await saveAdminCatalogProductToSupabase(productForSave, adminPin!);
     }
 
     setBusinesses((currentBusinesses) => [
@@ -3259,6 +3419,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updatedAt,
     };
 
+    if (isSupabaseConfigured) {
+      await saveOwnerBusinessProfileToSupabase(nextProfile);
+    }
+
     setOwnerBusinessProfiles((currentProfiles) => {
       const existingIndex = currentProfiles.findIndex(
         (profile) =>
@@ -3281,10 +3445,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         index === existingIndex ? nextProfile : profile,
       );
     });
-
-    if (isSupabaseConfigured) {
-      await saveOwnerBusinessProfileToSupabase(nextProfile);
-    }
 
     setBusinesses((currentBusinesses) =>
       currentBusinesses.map((business) => {
@@ -3316,10 +3476,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           },
           updatedAt,
         };
-
-        if (isSupabaseConfigured) {
-          void saveBusinessToSupabase(nextBusiness).catch(() => undefined);
-        }
 
         return nextBusiness;
       }),
@@ -3380,10 +3536,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           profile.ownerUserId !== owner.id && profile.accountEmail !== owner.email,
       ),
     ]);
-
-    if (isSupabaseConfigured) {
-      void saveOwnerBusinessProfileToSupabase(nextProfile).catch(() => undefined);
-    }
 
     appendAuditLog(
       owner.fullName,
@@ -3489,14 +3641,14 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updatedAt: new Date().toISOString(),
     };
 
+    if (isSupabaseConfigured) {
+      await saveCustomerDeliveryLocationToSupabase(nextLocation);
+    }
+
     setCustomerDeliveryLocations((currentLocations) => [
       nextLocation,
       ...currentLocations.filter((currentLocation) => currentLocation.userId !== accountUser.id),
     ]);
-
-    if (isSupabaseConfigured) {
-      await saveCustomerDeliveryLocationToSupabase(nextLocation);
-    }
 
     return nextLocation;
   };
@@ -3539,11 +3691,11 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       },
       0,
     );
-    const paidWithdrawals = getPaidWithdrawalTotal(withdrawalRequests, accountUser);
+    const committedWithdrawals = getCommittedWithdrawalTotal(withdrawalRequests, accountUser);
 
     return Math.max(
       0,
-      customerWalletBeforeWithdrawals + releasedSellerEarnings - paidWithdrawals,
+      customerWalletBeforeWithdrawals + releasedSellerEarnings - committedWithdrawals,
     );
   };
 
@@ -3558,7 +3710,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return getBusinessOwnerKeys(business).some((key) => ownerKeys.has(key));
   };
 
-  const updateBusinessListing = (
+  const updateBusinessListing = async (
     businessId: string,
     values: {
       name: string;
@@ -3625,6 +3777,25 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
 
     const updatedAt = new Date().toISOString();
+    const requestedImageUrl = values.imageUrl?.trim();
+    let replacedPrimaryImage = false;
+    const nextMedia = requestedImageUrl
+      ? business.media.map((item) => {
+          if (item.type !== 'image' || replacedPrimaryImage) {
+            return item;
+          }
+          replacedPrimaryImage = true;
+          return { ...item, url: requestedImageUrl };
+        })
+      : business.media;
+    if (requestedImageUrl && !replacedPrimaryImage) {
+      nextMedia.unshift({
+        id: `${business.id}-image-${Date.now()}`,
+        type: 'image',
+        url: requestedImageUrl,
+        label: 'Cover image',
+      });
+    }
     const nextBusiness: Business = {
       ...business,
       name,
@@ -3632,7 +3803,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       longDescription,
       category: values.category ?? business.category,
       address: values.address?.trim() || business.address,
-      imageUrl: values.imageUrl?.trim() || business.imageUrl,
+      imageUrl: requestedImageUrl || business.imageUrl,
+      media: nextMedia,
       services: values.services ?? business.services,
       ...(values.sku?.trim() ? { sku: values.sku.trim() } : {}),
       ...(isProduct
@@ -3645,15 +3817,15 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updatedAt,
     };
 
+    if (isSupabaseConfigured) {
+      await saveBusinessToSupabase(nextBusiness);
+    }
+
     setBusinesses((currentBusinesses) =>
       currentBusinesses.map((currentBusiness) =>
         currentBusiness.id === businessId ? nextBusiness : currentBusiness,
       ),
     );
-
-    if (isSupabaseConfigured) {
-      void saveBusinessToSupabase(nextBusiness).catch(() => undefined);
-    }
 
     appendAuditLog(
       owner?.fullName ?? nextBusiness.ownerName,
@@ -3665,7 +3837,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return nextBusiness;
   };
 
-  const deleteOwnedBusinessListing = (businessId: string, owner?: AppUser | null) => {
+  const deleteOwnedBusinessListing = async (businessId: string, owner?: AppUser | null) => {
     const business = getBusinessById(businessId);
 
     if (!business) {
@@ -3678,6 +3850,21 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const deletedAt = new Date().toISOString();
 
+    if (isSupabaseConfigured) {
+      const hiddenBusiness: Business = {
+        ...business,
+        status: 'archived',
+        verified: false,
+        updatedAt: deletedAt,
+      };
+
+      try {
+        await deleteBusinessFromSupabase(businessId);
+      } catch {
+        await saveBusinessToSupabase(hiddenBusiness);
+      }
+    }
+
     setDeletedBusinessIds((currentIds) =>
       currentIds.includes(businessId) ? currentIds : [...currentIds, businessId],
     );
@@ -3687,19 +3874,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     setCartItems((currentCartItems) =>
       currentCartItems.filter((item) => item.businessId !== businessId),
     );
-
-    if (isSupabaseConfigured) {
-      const hiddenBusiness: Business = {
-        ...business,
-        status: 'archived',
-        verified: false,
-        updatedAt: deletedAt,
-      };
-
-      void deleteBusinessFromSupabase(businessId).catch(() => {
-        void saveBusinessToSupabase(hiddenBusiness).catch(() => undefined);
-      });
-    }
 
     appendAuditLog(
       owner?.fullName ?? business.ownerName,
@@ -3750,8 +3924,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const deposit = await createFlutterwaveDynamicDepositAccount(accountUser, roundedAmount);
 
     setDynamicDepositAccounts((currentDeposits) => mergeNewestById(currentDeposits, [deposit]));
-
-    void saveDynamicDepositAccountToSupabase(deposit).catch(() => undefined);
 
     appendNotification({
       userId: accountUser.id,
@@ -3838,7 +4010,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updatedAt: createdAt,
     };
 
-    await saveDynamicDepositAccountToSupabase(deposit);
     setDynamicDepositAccounts((currentDeposits) => mergeNewestById(currentDeposits, [deposit]));
 
     appendNotification({
@@ -3863,7 +4034,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return { ...session, deposit };
   };
 
-  const saveVirtualAccountRecord = (account: VirtualAccount) => {
+  const saveVirtualAccountRecord = async (account: VirtualAccount) => {
     setVirtualAccounts((currentAccounts) =>
       mergeNewestById(
         currentAccounts.filter(
@@ -3872,10 +4043,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
         [account],
       ),
     );
-
-    if (isSupabaseConfigured) {
-      void saveVirtualAccountToSupabase(account).catch(() => undefined);
-    }
   };
 
   const ensureUserVirtualAccount = async (accountUser: AppUser) => {
@@ -3893,7 +4060,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       purpose: 'deposit',
     });
 
-    saveVirtualAccountRecord(account);
+    await saveVirtualAccountRecord(account);
 
     appendNotification({
       userId: accountUser.id,
@@ -3940,18 +4107,30 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       throw new Error('Flutterwave verification needs Supabase to be configured.');
     }
 
+    const safeDocumentName = (values.idDocumentName || 'id-document')
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'id-document';
+    const idDocumentPath = values.idDocumentUri.startsWith('seller-identity/')
+      ? values.idDocumentUri
+      : await uploadPrivateDocumentToSupabaseStorage(
+          values.idDocumentUri,
+          `seller-identity/${owner.id}/${safeDocumentName}-${Date.now()}`,
+        );
     const account = await createFlutterwaveVirtualAccount(owner, {
       kycType: values.kycType,
       kycNumber,
       purpose: 'withdrawal',
+      idDocumentPath,
+      ...(values.idDocumentName ? { idDocumentName: values.idDocumentName } : {}),
     });
     const accountWithDocument: VirtualAccount = {
       ...account,
-      idDocumentUri: values.idDocumentUri.trim(),
+      idDocumentUri: idDocumentPath,
       ...(values.idDocumentName?.trim() ? { idDocumentName: values.idDocumentName.trim() } : {}),
     };
 
-    saveVirtualAccountRecord(accountWithDocument);
+    await saveVirtualAccountRecord(accountWithDocument);
 
     appendNotification({
       userId: owner.id,
@@ -3975,7 +4154,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return accountWithDocument;
   };
 
-  const requestWithdrawal = (
+  const requestWithdrawal = async (
     owner: AppUser,
     values: {
       amount: number;
@@ -3998,29 +4177,36 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       throw new Error('Add your bank name, account number, and account name.');
     }
 
-    const virtualAccount = getVirtualAccountForOwner(owner.id);
+    const payoutProfile = getOwnerBusinessProfile(owner);
 
     if (
-      !virtualAccount ||
-      virtualAccount.status !== 'verified' ||
-      !virtualAccount.kycType ||
-      !virtualAccount.kycLast4 ||
-      !virtualAccount.kycReference ||
-      !virtualAccount.idDocumentUri
+      !payoutProfile?.payoutVerifiedAt ||
+      !payoutProfile.payoutBankName ||
+      !payoutProfile.payoutAccountNumber ||
+      !payoutProfile.payoutAccountName
     ) {
-      throw new Error('Verify your BVN or NIN with Flutterwave and upload your ID before withdrawal.');
+      throw new Error('Verify and save a payout bank account in your seller profile first.');
     }
 
-    const accountNameMatchesIdentity = [
-      virtualAccount.accountName,
-      owner.businessName,
-      owner.fullName,
-    ].some((verifiedName) => identityNamesMatch(accountName, verifiedName));
+    if (
+      payoutProfile.payoutBankName !== bankName ||
+      payoutProfile.payoutAccountNumber !== accountNumber ||
+      payoutProfile.payoutAccountName.toLowerCase() !== accountName.toLowerCase()
+    ) {
+      throw new Error('Use the verified payout account saved in your seller profile.');
+    }
 
-    if (!accountNameMatchesIdentity) {
-      throw new Error(
-        `Withdrawal account name must match the verified ${virtualAccount.kycType.toUpperCase()} identity.`,
-      );
+    if (amount > getAvailableAccountBalanceForUser(owner)) {
+      throw new Error('Withdrawal amount is higher than your available delivered earnings.');
+    }
+
+    if (isSupabaseConfigured) {
+      const savedWithdrawal = await requestSellerWithdrawalFromSupabase(amount);
+      setWithdrawalRequests((currentWithdrawals) => [
+        savedWithdrawal,
+        ...currentWithdrawals.filter((item) => item.id !== savedWithdrawal.id),
+      ]);
+      return savedWithdrawal;
     }
 
     const createdAt = new Date().toISOString();
@@ -4032,29 +4218,23 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       bankName,
       accountNumber,
       accountName,
-      kycType: virtualAccount.kycType,
-      kycLast4: virtualAccount.kycLast4,
-      kycReference: virtualAccount.kycReference,
-      idDocumentUri: virtualAccount.idDocumentUri,
-      ...(virtualAccount.idDocumentName ? { idDocumentName: virtualAccount.idDocumentName } : {}),
+      kycType: 'bvn',
+      kycLast4: payoutProfile.payoutAccountNumber.slice(-4),
+      kycReference: 'Payout account verified by Flutterwave',
       amount,
-      status: 'paid',
+      status: 'pending',
       createdAt,
     };
 
     setWithdrawalRequests((currentWithdrawals) => [withdrawal, ...currentWithdrawals]);
-
-    if (isSupabaseConfigured) {
-      void saveWithdrawalToSupabase(withdrawal).catch(() => undefined);
-    }
 
     appendNotification({
       userId: owner.id,
       userName: owner.fullName,
       recipientEmail: owner.email,
       audience: owner.role,
-      title: 'Withdrawal paid',
-      body: `${formatCurrency(amount)} was withdrawn to ${withdrawal.bankName} ${withdrawal.accountNumber} after ${withdrawal.kycReference} verification.`,
+      title: 'Withdrawal submitted',
+      body: `${formatCurrency(amount)} is pending payout review for ${withdrawal.bankName} ${withdrawal.accountNumber}.`,
       contextType: 'general',
       contextId: withdrawal.id,
       createdAt,
@@ -4064,18 +4244,72 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       recipientType: owner.role === 'businessOwner' ? 'owner' : 'buyer',
       recipientName: owner.fullName,
       recipientEmail: owner.email,
-      subject: 'View2Connect withdrawal paid',
-      body: `${formatCurrency(amount)} was withdrawn to ${withdrawal.bankName} ${withdrawal.accountNumber}. KYC: ${withdrawal.kycReference}.`,
+      subject: 'View2Connect withdrawal submitted',
+      body: `${formatCurrency(amount)} is pending payout review for ${withdrawal.bankName} ${withdrawal.accountNumber}.`,
     });
 
     appendAuditLog(
       owner.fullName,
       owner.role === 'businessOwner' ? 'owner' : 'system',
-      'Withdrawal paid',
-      `${withdrawal.ownerName} withdrew ${amount} to ${withdrawal.bankName} with ${withdrawal.kycReference}.`,
+      'Withdrawal submitted',
+      `${withdrawal.ownerName} requested ${amount} to ${withdrawal.bankName}.`,
     );
 
     return withdrawal;
+  };
+
+  const updateWithdrawalStatus = async (
+    withdrawalId: string,
+    status: Exclude<WithdrawalRequest['status'], 'pending'>,
+    providerReference?: string,
+    failureReason?: string,
+    actorName = 'View2Connect Owner',
+    actorRole: AuditActorRole = 'owner',
+  ) => {
+    if (actorRole !== 'owner') {
+      throw new Error('Only the owner admin can process seller withdrawals.');
+    }
+
+    const existing = withdrawalRequests.find((item) => item.id === withdrawalId);
+    if (!existing) {
+      throw new Error('Withdrawal request was not found.');
+    }
+
+    if (status === 'paid' && !providerReference?.trim()) {
+      throw new Error('Enter the payout provider reference before marking this withdrawal paid.');
+    }
+
+    const updatedAt = new Date().toISOString();
+    const nextWithdrawal = isSupabaseConfigured
+      ? await updateWithdrawalStatusInSupabase(
+          withdrawalId,
+          status,
+          providerReference,
+          failureReason,
+        )
+      : {
+          ...existing,
+          status,
+          updatedAt,
+          ...(providerReference?.trim()
+            ? { providerReference: providerReference.trim() }
+            : {}),
+          ...(failureReason?.trim() ? { failureReason: failureReason.trim() } : {}),
+        };
+
+    setWithdrawalRequests((currentWithdrawals) =>
+      currentWithdrawals.map((item) =>
+        item.id === withdrawalId ? nextWithdrawal : item,
+      ),
+    );
+    appendAuditLog(
+      actorName,
+      actorRole,
+      `Withdrawal ${status}`,
+      `${existing.ownerName}'s ${formatCurrency(existing.amount)} withdrawal was marked ${status}.`,
+    );
+
+    return nextWithdrawal;
   };
 
   const getAvailableStock = (businessId: string) => {
@@ -4088,116 +4322,116 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     return Math.max(0, business.stockQuantity ?? 0);
   };
 
-  const saveCartChange = (accountUser: AppUser | null | undefined, item: CartItem) => {
-    if (accountUser && isSupabaseConfigured) {
-      void saveCartItemToSupabase(accountUser.id, item).catch(() => undefined);
-    }
+  const commitCartItems = (nextItems: CartItem[]) => {
+    cartItemsRef.current = nextItems;
+    setCartItems(nextItems);
   };
 
-  const deleteCartChange = (accountUser: AppUser | null | undefined, businessId: string) => {
-    if (accountUser && isSupabaseConfigured) {
-      void deleteCartItemFromSupabase(accountUser.id, businessId).catch(() => undefined);
-    }
+  const queueCartMutation = (operation: () => Promise<void>) => {
+    const queuedOperation = cartMutationQueueRef.current
+      .catch(() => undefined)
+      .then(operation);
+    cartMutationQueueRef.current = queuedOperation.catch(() => undefined);
+    return queuedOperation;
   };
 
-  const addToCart = (businessId: string, accountUser?: AppUser | null) => {
-    const business = getBusinessById(businessId);
+  const addToCart = (businessId: string, accountUser?: AppUser | null) =>
+    queueCartMutation(async () => {
+      const business = getBusinessById(businessId);
 
-    if (!business || !isStoreOwnerProduct(business, ownerBusinessProfiles)) {
-      return;
-    }
-
-    const maxStock = getAvailableStock(businessId);
-
-    if (maxStock <= 0) {
-      return;
-    }
-
-    setCartItems((currentCartItems) => {
-      const existingItem = currentCartItems.find((item) => item.businessId === businessId);
-      const updatedAt = new Date().toISOString();
-
-      if (existingItem) {
-        if (existingItem.quantity >= maxStock) {
-          return currentCartItems;
-        }
-
-        const nextItem = {
-          ...existingItem,
-          quantity: existingItem.quantity + 1,
-          ...(accountUser ? { userId: accountUser.id } : {}),
-          updatedAt,
-        };
-        saveCartChange(accountUser, nextItem);
-
-        return currentCartItems.map((item) =>
-          item.businessId === businessId ? nextItem : item,
-        );
+      if (!business || !isStoreOwnerProduct(business, ownerBusinessProfiles)) {
+        throw new Error('This product is no longer available for purchase.');
       }
 
-      const nextItem = {
-        businessId,
-        quantity: 1,
+      const maxStock = getAvailableStock(businessId);
+
+      if (maxStock <= 0) {
+        throw new Error(`${business.name} is currently out of stock.`);
+      }
+
+      const currentCartItems = cartItemsRef.current;
+      const existingItem = currentCartItems.find((item) => item.businessId === businessId);
+
+      if (existingItem?.quantity && existingItem.quantity >= maxStock) {
+        throw new Error(`Only ${maxStock} ${business.name} item${maxStock === 1 ? '' : 's'} available.`);
+      }
+
+      const nextItem: CartItem = {
+        ...(existingItem ?? { businessId, quantity: 0 }),
+        quantity: (existingItem?.quantity ?? 0) + 1,
         ...(accountUser ? { userId: accountUser.id } : {}),
-        updatedAt,
+        updatedAt: new Date().toISOString(),
       };
-      saveCartChange(accountUser, nextItem);
 
-      return [nextItem, ...currentCartItems];
+      if (accountUser && isSupabaseConfigured) {
+        await saveCartItemToSupabase(accountUser.id, nextItem);
+      }
+
+      commitCartItems(
+        existingItem
+          ? currentCartItems.map((item) => (item.businessId === businessId ? nextItem : item))
+          : [nextItem, ...currentCartItems],
+      );
     });
-  };
 
-  const removeFromCart = (businessId: string, accountUser?: AppUser | null) => {
-    setCartItems((currentCartItems) =>
-      currentCartItems.filter((item) => item.businessId !== businessId),
-    );
-    deleteCartChange(accountUser, businessId);
-  };
+  const removeFromCart = (businessId: string, accountUser?: AppUser | null) =>
+    queueCartMutation(async () => {
+      if (accountUser && isSupabaseConfigured) {
+        await deleteCartItemFromSupabase(accountUser.id, businessId);
+      }
+
+      commitCartItems(
+        cartItemsRef.current.filter((item) => item.businessId !== businessId),
+      );
+    });
 
   const updateCartQuantity = (
     businessId: string,
     quantity: number,
     accountUser?: AppUser | null,
-  ) => {
-    if (quantity <= 0) {
-      removeFromCart(businessId, accountUser);
-      return;
-    }
-
-    const maxStock = getAvailableStock(businessId);
-
-    if (maxStock <= 0) {
-      removeFromCart(businessId, accountUser);
-      return;
-    }
-
-    setCartItems((currentCartItems) => {
+  ) =>
+    queueCartMutation(async () => {
+      const currentCartItems = cartItemsRef.current;
       const existingItem = currentCartItems.find((item) => item.businessId === businessId);
 
       if (!existingItem) {
-        return currentCartItems;
+        return;
       }
 
-      const nextItem = {
+      const maxStock = getAvailableStock(businessId);
+      const nextQuantity = Math.min(quantity, maxStock);
+
+      if (nextQuantity <= 0) {
+        if (accountUser && isSupabaseConfigured) {
+          await deleteCartItemFromSupabase(accountUser.id, businessId);
+        }
+        commitCartItems(currentCartItems.filter((item) => item.businessId !== businessId));
+        return;
+      }
+
+      const nextItem: CartItem = {
         ...existingItem,
-        quantity: Math.min(quantity, maxStock),
+        quantity: nextQuantity,
         ...(accountUser ? { userId: accountUser.id } : {}),
         updatedAt: new Date().toISOString(),
       };
-      saveCartChange(accountUser, nextItem);
 
-      return currentCartItems.map((item) =>
-        item.businessId === businessId ? nextItem : item,
+      if (accountUser && isSupabaseConfigured) {
+        await saveCartItemToSupabase(accountUser.id, nextItem);
+      }
+
+      commitCartItems(
+        currentCartItems.map((item) => (item.businessId === businessId ? nextItem : item)),
       );
     });
-  };
 
-  const clearCart = (accountUser?: AppUser | null) => {
-    setCartItems([]);
-    if (accountUser && isSupabaseConfigured) {
-      void clearCustomerCartInSupabase(accountUser.id).catch(() => undefined);
-    }
-  };
+  const clearCart = (accountUser?: AppUser | null) =>
+    queueCartMutation(async () => {
+      if (accountUser && isSupabaseConfigured) {
+        await clearCustomerCartInSupabase(accountUser.id);
+      }
+      commitCartItems([]);
+    });
 
   const getChatMessages = (businessId: string) => chatThreads[businessId] ?? [];
 
@@ -4282,14 +4516,14 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       createdAt,
     };
 
+    if (isSupabaseConfigured) {
+      await saveChatMessageToSupabase(customerMessage);
+    }
+
     setChatThreads((currentThreads) => ({
       ...currentThreads,
       [businessId]: [...(currentThreads[businessId] ?? []), customerMessage],
     }));
-
-    if (isSupabaseConfigured) {
-      await saveChatMessageToSupabase(customerMessage);
-    }
   };
 
   const persistPaidOrder = (
@@ -4400,8 +4634,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const createdAt = new Date().toISOString();
     const subtotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0);
-    const sellerPackingSupport = calculateSellerPackingSupport(subtotal);
-    const serviceFee = calculateProgressiveVat(subtotal);
+    const sellerPackingSupport = calculateSellerPackingSupport(subtotal, securitySettings);
+    const serviceFee = calculateProgressiveVat(subtotal, securitySettings);
     const deliveryFee = 0;
     const totalAmount = subtotal + sellerPackingSupport + serviceFee + deliveryFee;
     const walletBalance = getAvailableAccountBalanceForUser(customer);
@@ -4553,6 +4787,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     businessId: string,
     actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
+    adminPin = '',
   ) => {
     if (!canVerifyListings(actorRole)) {
       return;
@@ -4565,7 +4800,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const nextVerified = !business?.verified;
     const updatedAt = new Date().toISOString();
-    const nextBusiness: Business = {
+    let nextBusiness: Business = {
       ...business,
       status: 'active',
       verified: nextVerified,
@@ -4575,7 +4810,16 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     };
 
     if (isSupabaseConfigured) {
-      await saveBusinessToSupabase(nextBusiness);
+      if (!/^\d{4}$/.test(adminPin.trim())) {
+        throw new Error('Enter the active 4 digit Admin PIN.');
+      }
+      nextBusiness = await setListingVerificationInSupabase({
+        businessId,
+        verified: nextVerified,
+        adminPin: adminPin.trim(),
+      });
+    } else if (adminPin.trim() !== orderProgressSettings.code) {
+      throw new Error('Wrong PIN. Enter the active owner Admin PIN.');
     }
 
     setBusinesses((currentBusinesses) =>
@@ -4591,7 +4835,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       `${business.name} was marked ${nextVerified ? 'verified' : 'pending'}.`,
     );
 
-    if (business.ownerUserId) {
+    if (!isSupabaseConfigured && business.ownerUserId) {
       appendNotification({
         userId: business.ownerUserId,
         userName: business.ownerName,
@@ -4622,7 +4866,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const restockBusinessStock = (
+  const restockBusinessStock = async (
     businessId: string,
     quantity: number,
     actorName = 'View2Connect Owner',
@@ -4642,18 +4886,18 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return;
     }
 
+    const nextBusiness: Business = {
+      ...business,
+      stockQuantity: Math.max(0, (business.stockQuantity ?? 0) + quantity),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (isSupabaseConfigured) {
+      await saveBusinessToSupabase(nextBusiness);
+    }
+
     setBusinesses((currentBusinesses) =>
-      currentBusinesses.map((business) =>
-        business.id === businessId &&
-        business.listingType === 'product' &&
-        isPublicBusiness(business)
-          ? {
-              ...business,
-              stockQuantity: Math.max(0, (business.stockQuantity ?? 0) + quantity),
-              updatedAt: new Date().toISOString(),
-            }
-          : business,
-      ),
+      currentBusinesses.map((item) => (item.id === businessId ? nextBusiness : item)),
     );
 
     appendAuditLog(
@@ -4664,7 +4908,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
-  const updateBusinessReorderLevel = (
+  const updateBusinessReorderLevel = async (
     businessId: string,
     reorderLevel: number,
     actorName = 'View2Connect Owner',
@@ -4684,18 +4928,18 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return;
     }
 
+    const nextBusiness: Business = {
+      ...business,
+      reorderLevel,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (isSupabaseConfigured) {
+      await saveBusinessToSupabase(nextBusiness);
+    }
+
     setBusinesses((currentBusinesses) =>
-      currentBusinesses.map((business) =>
-        business.id === businessId &&
-        business.listingType === 'product' &&
-        isPublicBusiness(business)
-          ? {
-              ...business,
-              reorderLevel,
-              updatedAt: new Date().toISOString(),
-            }
-          : business,
-      ),
+      currentBusinesses.map((item) => (item.id === businessId ? nextBusiness : item)),
     );
 
     appendAuditLog(
@@ -4706,7 +4950,27 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
-  const updateOrderProgressCode = (
+  const syncOrderProgressSettings = async () => {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    const status = await fetchAdminActionPinStatus();
+    setOrderProgressSettings({
+      code: status.configured ? 'configured' : '',
+      updatedAt: status.updatedAt,
+    });
+  };
+
+  const verifyOrderProgressCode = async (code: string) => {
+    if (isSupabaseConfigured) {
+      return verifyAdminActionPinInSupabase(code.trim());
+    }
+
+    return Boolean(orderProgressSettings.code && code.trim() === orderProgressSettings.code);
+  };
+
+  const updateOrderProgressCode = async (
     code: string,
     actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
@@ -4723,8 +4987,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
 
     const updatedAt = new Date().toISOString();
 
+    if (isSupabaseConfigured) {
+      await saveAdminActionPin(trimmedCode);
+    }
+
     setOrderProgressSettings({
-      code: trimmedCode,
+      code: isSupabaseConfigured ? 'configured' : trimmedCode,
       updatedAt,
     });
 
@@ -4871,7 +5139,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
-  const updateOrderStatus = (
+  const updateOrderStatus = async (
     orderId: string,
     status: OrderStatus,
     actorName = 'View2Connect Owner',
@@ -4890,12 +5158,16 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    if (!orderProgressSettings.code) {
+    if (!isSupabaseConfigured && !orderProgressSettings.code) {
       throw new Error('Create a 4 digit admin PIN before changing delivery progress.');
     }
 
-    if (progressCode.trim() !== orderProgressSettings.code) {
+    if (!isSupabaseConfigured && progressCode.trim() !== orderProgressSettings.code) {
       throw new Error('Enter the active 4 digit admin PIN before confirming progress.');
+    }
+
+    if (isSupabaseConfigured) {
+      await updateOrderStatusInSupabase(orderId, status);
     }
 
     const updatedAt = new Date().toISOString();
@@ -4917,10 +5189,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
           ...(status === 'cancelled' ? { inventoryRestoredAt: updatedAt } : {}),
           timeline: [...order.timeline, buildTimelineEvent(orderId, status, updatedAt)],
         };
-
-        if (isSupabaseConfigured) {
-          void saveOrderToSupabase(nextOrder).catch(() => undefined);
-        }
 
         return nextOrder;
       }),
@@ -4944,6 +5212,52 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
   };
 
+  const markSellerOrderReady = async (orderId: string, owner: AppUser) => {
+    if (owner.role !== 'businessOwner') {
+      throw new Error('Only a store owner can prepare seller items for dispatch.');
+    }
+
+    const order = getOrderById(orderId);
+    if (!order || !getOrdersForOwner(owner.id, owner).some((item) => item.id === orderId)) {
+      throw new Error('This order does not contain items from your store.');
+    }
+    if (order.paymentStatus !== 'paid') {
+      throw new Error('Wait for confirmed payment before preparing this order.');
+    }
+
+    const allSellersReady = isSupabaseConfigured
+      ? await markSellerOrderReadyInSupabase(orderId)
+      : true;
+    const updatedAt = new Date().toISOString();
+
+    if (allSellersReady) {
+      setOrders((currentOrders) =>
+        currentOrders.map((currentOrder) =>
+          currentOrder.id === orderId && currentOrder.status === 'placed'
+            ? {
+                ...currentOrder,
+                status: 'packed',
+                updatedAt,
+                timeline: [
+                  ...currentOrder.timeline,
+                  buildTimelineEvent(orderId, 'packed', updatedAt),
+                ],
+              }
+            : currentOrder,
+        ),
+      );
+    }
+
+    appendAuditLog(
+      owner.fullName,
+      'businessOwner',
+      'Seller items ready',
+      `${owner.businessName ?? owner.fullName} marked its items in ${orderId} ready for dispatch.`,
+    );
+
+    return allSellersReady;
+  };
+
   const updatePaymentStatus = (
     orderId: string,
     paymentStatus: PaymentStatus,
@@ -4952,6 +5266,12 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
   ) => {
     if (!canConfirmPayments(actorRole)) {
       return;
+    }
+
+    if (isSupabaseConfigured) {
+      throw new Error(
+        'Live payment status is controlled by the Flutterwave webhook. Verify or refund the transaction with Flutterwave instead of changing it manually.',
+      );
     }
 
     const orderBeforeUpdate = getOrderById(orderId);
@@ -5061,7 +5381,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const updateSecuritySettings = (
+  const updateSecuritySettings = async (
     patch: Partial<SecuritySettings>,
     actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
@@ -5070,19 +5390,17 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    setSecuritySettings((currentSettings) => {
-      const nextSettings = {
-        ...defaultSecuritySettings,
-        ...currentSettings,
-        ...patch,
-      };
+    const nextSettings = {
+      ...defaultSecuritySettings,
+      ...securitySettings,
+      ...patch,
+    };
 
-      if (isSupabaseConfigured) {
-        void saveSecuritySettingsToSupabase(nextSettings).catch(() => undefined);
-      }
+    if (isSupabaseConfigured) {
+      await saveSecuritySettingsToSupabase(nextSettings);
+    }
 
-      return nextSettings;
-    });
+    setSecuritySettings(nextSettings);
 
     appendAuditLog(
       actorName,
@@ -5094,7 +5412,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     );
   };
 
-  const deleteBusiness = (
+  const deleteBusiness = async (
     businessId: string,
     actorName = 'View2Connect Owner',
     actorRole: AuditActorRole = 'owner',
@@ -5106,6 +5424,10 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     const business = getBusinessById(businessId);
     const deletedAt = new Date().toISOString();
 
+    if (isSupabaseConfigured && business) {
+      await deleteBusinessFromSupabase(businessId);
+    }
+
     setDeletedBusinessIds((currentIds) =>
       currentIds.includes(businessId) ? currentIds : [...currentIds, businessId],
     );
@@ -5115,19 +5437,6 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
     setCartItems((currentCartItems) =>
       currentCartItems.filter((item) => item.businessId !== businessId),
     );
-
-    if (isSupabaseConfigured && business) {
-      const hiddenBusiness: Business = {
-        ...business,
-        status: 'archived',
-        verified: false,
-        updatedAt: deletedAt,
-      };
-
-      void deleteBusinessFromSupabase(businessId).catch(() => {
-        void saveBusinessToSupabase(hiddenBusiness).catch(() => undefined);
-      });
-    }
 
     if (business) {
       appendAuditLog(
@@ -5331,6 +5640,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       confirmOwnerSubscription,
       payOwnerSubscriptionWithAccount,
       payCustomerBenefitSubscriptionWithAccount,
+      startCustomerBenefitFlutterwaveCheckout,
       startOwnerSubscriptionFlutterwaveCheckout,
       getWithdrawalsForOwner,
       getVirtualAccountForOwner,
@@ -5340,15 +5650,18 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       ensureUserVirtualAccount,
       verifyOwnerVirtualAccount,
       requestWithdrawal,
+      updateWithdrawalStatus,
       notifyBusinessOwnerInspection,
       setOwnerRiverParkVerification,
       approveStoreApplicationForOwner,
+      reviewStoreApplicationForOwner,
       updateOwnerBusinessProfile,
       setVerifiedSellerPayoutAccount,
       getBusinessById,
       getOrderById,
       getOrdersForUser,
       getOrdersForOwner,
+      markSellerOrderReady,
       syncCustomerAccountData,
       getCustomerDeliveryLocation,
       saveCustomerDeliveryLocation,
@@ -5368,6 +5681,8 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updateOrderStatus,
       deleteOrder,
       updateOrderProgressCode,
+      syncOrderProgressSettings,
+      verifyOrderProgressCode,
       clearOrderTestingState,
       updatePaymentStatus,
       updateSecuritySettings,
@@ -5404,6 +5719,7 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       updatePaymentPlan,
       confirmBusinessSubscription,
       approveStoreApplicationForOwner,
+      reviewStoreApplicationForOwner,
       updateOwnerBusinessProfile,
       payCustomerBenefitSubscriptionWithAccount,
     ],

@@ -20,6 +20,8 @@ type VirtualAccountPayload = {
   amount?: number;
   currency?: string;
   narration?: string;
+  idDocumentPath?: string;
+  idDocumentName?: string;
 };
 
 const minimumAddFundsDeposit = 2000;
@@ -219,7 +221,7 @@ async function authenticatedOwner(request: Request) {
   const profileResponse = await fetch(
     `${supabaseUrl}/rest/v1/app_users?id=eq.${encodeURIComponent(
       authUser.id,
-    )}&select=id,full_name,business_name,email,phone_number,status&limit=1`,
+    )}&select=id,full_name,business_name,email,phone_number,role,status&limit=1`,
     { headers: { apikey: anonKey, Authorization: authorization } },
   );
   if (!profileResponse.ok) {
@@ -232,6 +234,7 @@ async function authenticatedOwner(request: Request) {
     business_name?: string | null;
     email: string;
     phone_number: string;
+    role: string;
     status?: string | null;
   }>;
   const profile = profiles[0];
@@ -330,6 +333,8 @@ Deno.serve(async (request: Request) => {
   const kycType = payload.kycType === 'nin' ? 'nin' : 'bvn';
   const kycNumber = cleanDigits(payload.kycNumber);
   const purpose = payload.purpose === 'withdrawal' ? 'withdrawal' : 'deposit';
+  const idDocumentPath = payload.idDocumentPath?.trim() ?? '';
+  const idDocumentName = payload.idDocumentName?.trim() ?? '';
   const hasKyc = kycNumber.length === 11;
   const amount = Math.max(0, Math.floor(Number(payload.amount ?? 0)));
   const currency = payload.currency?.trim().toUpperCase() || 'NGN';
@@ -344,6 +349,17 @@ Deno.serve(async (request: Request) => {
 
   if (purpose === 'withdrawal' && !hasKyc) {
     return jsonResponse({ error: 'An 11-digit BVN or NIN is required.' }, 400);
+  }
+
+  if (purpose === 'withdrawal' && authenticatedProfile.role !== 'businessOwner') {
+    return jsonResponse({ error: 'Only a store owner can verify a withdrawal account.' }, 403);
+  }
+
+  if (
+    purpose === 'withdrawal' &&
+    (!idDocumentPath || !idDocumentPath.startsWith(`seller-identity/${ownerUserId}/`))
+  ) {
+    return jsonResponse({ error: 'Upload your identity document securely before verification.' }, 400);
   }
 
   if (purpose === 'deposit' && amount <= 0) {
@@ -450,6 +466,111 @@ Deno.serve(async (request: Request) => {
       },
       502,
     );
+  }
+
+  if (purpose === 'withdrawal') {
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+
+    if (!serviceRoleKey || !supabaseUrl) {
+      return jsonResponse({ error: 'Secure account storage is not configured.' }, 500);
+    }
+
+    const savedAt = new Date().toISOString();
+    const saveResponse = await fetch(`${supabaseUrl}/rest/v1/virtual_accounts?on_conflict=id`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        id: `virtual-account-${ownerUserId}`,
+        owner_user_id: ownerUserId,
+        owner_name: ownerName,
+        owner_email: ownerEmail,
+        provider: 'flutterwave',
+        provider_reference: txRef,
+        bank_name: bankName ?? 'Flutterwave',
+        account_number: accountNumber,
+        account_name: accountName ?? ownerName,
+        kyc_type: kycType,
+        kyc_last4: kycNumber.slice(-4),
+        kyc_reference: `${kycType.toUpperCase()} ending ${kycNumber.slice(-4)}`,
+        id_document_path: idDocumentPath,
+        id_document_name: idDocumentName || 'ID document',
+        status: 'verified',
+        created_at: savedAt,
+        updated_at: savedAt,
+      }),
+    });
+
+    if (!saveResponse.ok) {
+      const saveBody = await saveResponse.text();
+      return jsonResponse(
+        {
+          error: 'Flutterwave created the account, but View2Connect could not save it. Contact support before retrying.',
+          providerBody: saveBody,
+        },
+        502,
+      );
+    }
+  }
+
+  if (purpose === 'deposit') {
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/+$/, '');
+
+    if (!serviceRoleKey || !supabaseUrl) {
+      return jsonResponse({ error: 'Secure deposit storage is not configured.' }, 500);
+    }
+
+    const savedAt = new Date().toISOString();
+    const saveResponse = await fetch(
+      `${supabaseUrl}/rest/v1/dynamic_deposit_accounts?on_conflict=id`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify({
+          id: `deposit-${txRef}`,
+          reference: txRef,
+          user_id: ownerUserId,
+          user_name: authenticatedProfile.full_name,
+          user_email: ownerEmail,
+          user_role: authenticatedProfile.role,
+          provider: 'flutterwave',
+          provider_reference: txRef,
+          bank_name: bankName ?? 'Flutterwave',
+          account_number: accountNumber,
+          account_name: accountName ?? ownerName,
+          amount,
+          currency,
+          status: 'pending',
+          expires_at: expiresAt,
+          raw_payload: providerJson,
+          created_at: savedAt,
+          updated_at: savedAt,
+        }),
+      },
+    );
+
+    if (!saveResponse.ok) {
+      const saveBody = await saveResponse.text();
+      return jsonResponse(
+        {
+          error:
+            'Flutterwave created the deposit account, but View2Connect could not save it. Please retry before transferring money.',
+          providerBody: saveBody,
+        },
+        502,
+      );
+    }
   }
 
   return jsonResponse({

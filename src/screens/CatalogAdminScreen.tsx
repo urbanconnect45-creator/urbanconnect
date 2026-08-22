@@ -65,6 +65,7 @@ export function CatalogAdminScreen() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [adminPin, setAdminPin] = useState('');
   const [categoryManuallySelected, setCategoryManuallySelected] = useState(false);
   const [liveUsers, setLiveUsers] = useState<AppUser[]>([]);
   const requestedOwnerId = useMemo(() => {
@@ -236,11 +237,17 @@ export function CatalogAdminScreen() {
       return;
     }
 
+    if (isSupabaseConfigured && !/^\d{4}$/.test(adminPin)) {
+      setError('Enter the 4 digit Admin PIN before saving this catalog product.');
+      return;
+    }
+
     try {
       setIsSaving(true);
       setError(null);
-      await createCentralCatalogProduct(form, managedOwner);
+      await createCentralCatalogProduct(form, managedOwner, adminPin);
       setForm(emptyCatalogForm);
+      setAdminPin('');
       setCategoryManuallySelected(false);
       Alert.alert(
         'Catalog updated',
@@ -486,6 +493,18 @@ export function CatalogAdminScreen() {
               <Text style={styles.cameraButtonText}>Take product photo</Text>
             </Pressable>
           ) : null}
+          <FormField
+            keyboardType="number-pad"
+            label="Admin PIN"
+            maxLength={4}
+            onChangeText={(value) => {
+              setAdminPin(value.replace(/\D/g, '').slice(0, 4));
+              setError(null);
+            }}
+            placeholder="Enter 4 digit PIN"
+            secureTextEntry
+            value={adminPin}
+          />
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           <AppButton
             label={

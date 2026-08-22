@@ -47,6 +47,10 @@ function resolveRequestFile(webRoot, requestUrl) {
     candidates.push(path.join(webRoot, relativePath, 'index.html'));
   }
 
+  if (!path.extname(relativePath)) {
+    candidates.push(path.join(webRoot, 'index.html'));
+  }
+
   const normalizedRoot = path.resolve(webRoot);
   return candidates.find((candidate) => {
     const normalizedCandidate = path.resolve(candidate);

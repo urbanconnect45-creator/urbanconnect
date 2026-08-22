@@ -39,7 +39,7 @@ import {
 import { formatCurrency } from '../utils/format';
 import { getPaymentMethodLabel } from '../utils/order';
 
-const launchPaymentMethods: PaymentMethod[] = ['flutterwave', 'walletAccount'];
+const launchPaymentMethods: PaymentMethod[] = ['flutterwave'];
 
 type FlutterwaveChannelId = 'card' | 'bank';
 
@@ -95,6 +95,16 @@ export function CartScreen({ navigation }: CartScreenProps) {
     syncCustomerAccountData,
     updateCartQuantity,
   } = useBusinessDirectory();
+  const runCartAction = (action: () => Promise<void>) => {
+    void action().catch((cartError) => {
+      Alert.alert(
+        'Cart not updated',
+        cartError instanceof Error
+          ? cartError.message
+          : 'Please check your connection and try again.',
+      );
+    });
+  };
   const defaultCluster = cartEntries[0]?.business.cluster ?? estates[0]?.clusters[0] ?? 'Cluster 1';
   const savedDeliveryLocation = getCustomerDeliveryLocation(user);
   const [deliveryAddress, setDeliveryAddress] = useState('');
@@ -164,8 +174,8 @@ export function CartScreen({ navigation }: CartScreenProps) {
     setLocationSource(savedDeliveryLocation.source);
   }, [savedDeliveryLocation?.updatedAt, savedDeliveryLocation?.userId]);
 
-  const sellerPackingSupport = calculateSellerPackingSupport(cartTotal);
-  const vat = calculateProgressiveVat(cartTotal);
+  const sellerPackingSupport = calculateSellerPackingSupport(cartTotal, securitySettings);
+  const vat = calculateProgressiveVat(cartTotal, securitySettings);
   const orderTotal = cartTotal + sellerPackingSupport + vat;
   const walletBalance = user ? getAvailableAccountBalanceForUser(user) : 0;
   const insufficientFunds = paymentMethod === 'walletAccount' && Boolean(user && orderTotal > walletBalance);
@@ -528,7 +538,7 @@ export function CartScreen({ navigation }: CartScreenProps) {
         <Text style={styles.eyebrow}>Wallet payment</Text>
         <Text style={styles.title}>Pay immediately from your account.</Text>
         <Text style={styles.subtitle}>
-          Pay through Flutterwave live checkout, or use your View2Connect account balance when it has enough funds.
+          Pay securely through Flutterwave with your card or a bank transfer.
         </Text>
       </View>
 
@@ -595,7 +605,11 @@ export function CartScreen({ navigation }: CartScreenProps) {
               <Text style={styles.summaryLabel}>Cart subtotal</Text>
               <Text style={styles.summaryValue}>{formatCurrency(cartTotal)}</Text>
             </View>
-            <AppButton label="Clear cart" onPress={() => clearCart(user)} variant="ghost" />
+            <AppButton
+              label="Clear cart"
+              onPress={() => runCartAction(() => clearCart(user))}
+              variant="ghost"
+            />
           </View>
 
           <View style={styles.listStack}>
@@ -654,7 +668,11 @@ export function CartScreen({ navigation }: CartScreenProps) {
                   <View style={styles.cardBottomRow}>
                     <View style={styles.quantityRow}>
                       <Pressable
-                        onPress={() => updateCartQuantity(entry.business.id, entry.quantity - 1, user)}
+                        onPress={() =>
+                          runCartAction(() =>
+                            updateCartQuantity(entry.business.id, entry.quantity - 1, user),
+                          )
+                        }
                         style={({ pressed }) => [
                           styles.quantityButton,
                           pressed && styles.quantityButtonPressed,
@@ -664,7 +682,11 @@ export function CartScreen({ navigation }: CartScreenProps) {
                       </Pressable>
                       <Text style={styles.quantityValue}>{entry.quantity}</Text>
                       <Pressable
-                        onPress={() => updateCartQuantity(entry.business.id, entry.quantity + 1, user)}
+                        onPress={() =>
+                          runCartAction(() =>
+                            updateCartQuantity(entry.business.id, entry.quantity + 1, user),
+                          )
+                        }
                         style={({ pressed }) => [
                           styles.quantityButton,
                           pressed && styles.quantityButtonPressed,
@@ -675,7 +697,9 @@ export function CartScreen({ navigation }: CartScreenProps) {
                     </View>
 
                     <Pressable
-                      onPress={() => removeFromCart(entry.business.id, user)}
+                      onPress={() =>
+                        runCartAction(() => removeFromCart(entry.business.id, user))
+                      }
                       style={({ pressed }) => [styles.removeLink, pressed && styles.removeLinkPressed]}
                     >
                       <Text style={styles.removeLinkText}>Remove item</Text>

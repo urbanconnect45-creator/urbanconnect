@@ -222,11 +222,11 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
     <>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Business subscription</Text>
-        <Text style={styles.title}>Pay from your View2Connect account.</Text>
+        <Text style={styles.eyebrow}>Seller access</Text>
+        <Text style={styles.title}>Store listings are free.</Text>
         <Text style={styles.subtitle}>
           {subscriptionExempt
-            ? 'This account is covered by the owner admin subscription exemption.'
+            ? 'Approved store products remain visible without a seller subscription charge.'
             : 'Your current account balance can activate every listing on this business profile. Listings without an active subscription stay hidden from Home.'}
         </Text>
       </View>
@@ -239,10 +239,10 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
             size={22}
           />
           <Text style={styles.statusValue}>
-            {subscriptionExempt ? 'Exempt' : subscriptionStatusLabel(status, subscriptionIsActive)}
+            {subscriptionExempt ? 'Free' : subscriptionStatusLabel(status, subscriptionIsActive)}
           </Text>
           <Text style={styles.statusLabel}>
-            {subscriptionExempt ? 'Admin exemption' : 'Subscription payment'}
+            {subscriptionExempt ? 'Seller listing access' : 'Subscription payment'}
           </Text>
         </View>
         <View style={styles.statusCard}>
@@ -264,7 +264,7 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
       {subscriptionIsActive ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>
-            {subscriptionExempt ? 'Admin exemption active' : 'Subscription active'}
+            {subscriptionExempt ? 'Free seller access' : 'Subscription active'}
           </Text>
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Active until</Text>
@@ -282,7 +282,7 @@ export function SubscriptionScreen({ navigation }: MainTabsScreenProps<'Subscrip
           </View>
           <Text style={styles.bodyText}>
             {subscriptionExempt
-              ? 'Only the owner admin can move this exemption to another account.'
+              ? 'Customer advert promotion plans are separate and do not apply to store-owner products.'
               : 'The duration card will return automatically when this subscription expires.'}
           </Text>
         </View>

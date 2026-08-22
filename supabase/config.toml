@@ -438,10 +438,25 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/request-password-reset/index.ts"
 
+[functions.role-password-login]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/role-password-login/index.ts"
+
 [functions.admin-create-dispatch-account]
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/admin-create-dispatch-account/index.ts"
+
+[functions.admin-manage-staff]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/admin-manage-staff/index.ts"
+
+[functions.admin-refund-order]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/admin-refund-order/index.ts"
 
 [functions.verify-seller-bank-account]
 enabled = true

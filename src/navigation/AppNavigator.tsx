@@ -682,6 +682,10 @@ export function AppNavigator() {
         return;
       }
 
+      if (nextState === 'active' && /inactive|background/.test(previousState)) {
+        void syncCustomerAccountData(user).catch(() => undefined);
+      }
+
       const lockEnabled =
         userSecurityPreference.biometricEnabled ||
         Boolean(userSecurityPreference.passcodeEnabled && userSecurityPreference.passcode);
@@ -712,6 +716,7 @@ export function AppNavigator() {
     userSecurityPreference.biometricEnabled,
     userSecurityPreference.passcode,
     userSecurityPreference.passcodeEnabled,
+    syncCustomerAccountData,
   ]);
 
   useEffect(() => {
@@ -1318,7 +1323,7 @@ export function AppNavigator() {
     if (user && newUnreadNotifications.length > 0 && !adminUser) {
       setOpenNotificationIds(newUnreadNotifications.map((notification) => notification.id));
       setShowNotifications(true);
-      markNotificationsRead(user.id);
+      void markNotificationsRead(user.id).catch(() => undefined);
     }
 
     previousUnreadCount.current = alertableUnreadCount;
@@ -1335,7 +1340,7 @@ export function AppNavigator() {
     setShowNotifications(true);
 
     if (user) {
-      markNotificationsRead(user.id);
+      void markNotificationsRead(user.id).catch(() => undefined);
     }
   };
   const handlePasscodeGateUnlock = () => {
