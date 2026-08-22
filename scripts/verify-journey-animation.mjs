@@ -205,10 +205,10 @@ async function verifyCustomerTransition(
       'buyer@test.urbanconnect.local',
     );
     await page.getByPlaceholder('Enter your password', { exact: true }).fill('password123');
-    await page.getByRole('button', { exact: true, name: 'Login' }).click();
+    await page.getByRole('button', { exact: true, name: 'Sign in' }).click();
     await page.waitForTimeout(1_900);
     await screenshot(page, screenshotName);
-    await page.getByText('Welcome back, Test', { exact: true }).waitFor({ state: 'visible' });
+    await page.getByText('Welcome back, Test.', { exact: true }).waitFor({ state: 'visible' });
     await page
       .getByText('Your marketplace is ready', { exact: true })
       .waitFor({ state: 'hidden', timeout: 10_000 });

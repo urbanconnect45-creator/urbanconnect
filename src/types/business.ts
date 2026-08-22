@@ -363,6 +363,7 @@ export type ChatMessageAttachment = {
   id: string;
   type: ChatAttachmentType;
   url: string;
+  storagePath?: string;
   name: string;
   mimeType?: string;
   size?: number;
@@ -661,6 +662,7 @@ export type WithdrawalRequest = {
   ownerName: string;
   ownerEmail: string;
   bankName: string;
+  bankCode?: string;
   accountNumber: string;
   accountName?: string;
   kycType: WithdrawalKycType;
@@ -673,6 +675,8 @@ export type WithdrawalRequest = {
   createdAt: string;
   updatedAt?: string;
   providerReference?: string;
+  providerTransferId?: string;
+  providerStatus?: string;
   failureReason?: string;
 };
 

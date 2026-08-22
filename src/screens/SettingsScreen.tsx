@@ -196,7 +196,7 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
       await deleteCurrentAccount();
       setShowDeleteAccountModal(false);
       setDeleteConfirmDraft('');
-      Alert.alert('Account deleted', 'This account was removed from this device.');
+      Alert.alert('Account deleted', 'Your View2Connect account has been deleted.');
     } catch (error) {
       setDeleteAccountError(
         error instanceof Error ? error.message : 'Unable to delete this account right now.',
@@ -631,10 +631,10 @@ export function SettingsScreen({ navigation }: MainTabsScreenProps<'Settings'>) 
             <View style={styles.cardHeader}>
               <Text style={styles.dangerTitle}>Delete account</Text>
               <Text style={styles.bodyText}>
-                This will sign you out, remove this account from the app on this device, disable
-                the live profile, remove the saved app passcode, and stop this login from being
-                used again. Orders, receipts, payment records, and support history may still be
-                retained for compliance and customer care records.
+                This will sign you out, disable your public profile and listings, remove your
+                personal profile details, and permanently remove this login. Orders, receipts,
+                payment records, and support records may be retained where required for fraud
+                prevention, compliance, disputes, and customer care.
               </Text>
             </View>
             <FormField

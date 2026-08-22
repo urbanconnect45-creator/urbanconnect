@@ -24,7 +24,7 @@ async function verifyJourney(name, viewport) {
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   const response = await page.goto(baseUrl, { timeout: 60_000, waitUntil: 'domcontentloaded' });
-  const openingTitle = page.getByText('Buy. Sell. Deliver.', { exact: true });
+  const openingTitle = page.getByLabel('View2Connect is opening', { exact: true });
   await openingTitle.waitFor({ timeout: 60_000 });
   await page.waitForTimeout(760);
   const beforeLogoReady = await page.locator('img').evaluateAll((images) =>
@@ -45,7 +45,7 @@ async function verifyJourney(name, viewport) {
   await page.getByRole('button', { exact: true, name: 'Open sign in' }).click();
   await page.getByText('Customer', { exact: true }).click();
   await page.getByPlaceholder('email@example.com', { exact: true }).fill('buyer@test.urbanconnect.local');
-  await page.getByPlaceholder('Enter your password', { exact: true }).fill('local-audit-only');
+  await page.getByPlaceholder('Enter your password', { exact: true }).fill('password123');
   await page.getByRole('button', { exact: true, name: 'Sign in' }).click();
   await page.getByText('Welcome back, Test.', { exact: true }).waitFor({ timeout: 30_000 });
   await page.waitForTimeout(900);

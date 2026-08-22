@@ -104,6 +104,7 @@ import {
   saveAdminActionPin,
   saveSubscriptionPaymentToSupabase,
   requestSellerWithdrawalFromSupabase,
+  initiateFlutterwaveSellerPayout,
   reviewStoreApplicationInSupabase,
   setListingVerificationInSupabase,
   updateWithdrawalStatusInSupabase,
@@ -4275,18 +4276,20 @@ export function BusinessDirectoryProvider({ children }: PropsWithChildren) {
       throw new Error('Withdrawal request was not found.');
     }
 
-    if (status === 'paid' && !providerReference?.trim()) {
+    if (!isSupabaseConfigured && status === 'paid' && !providerReference?.trim()) {
       throw new Error('Enter the payout provider reference before marking this withdrawal paid.');
     }
 
     const updatedAt = new Date().toISOString();
     const nextWithdrawal = isSupabaseConfigured
-      ? await updateWithdrawalStatusInSupabase(
-          withdrawalId,
-          status,
-          providerReference,
-          failureReason,
-        )
+      ? status === 'paid'
+        ? await initiateFlutterwaveSellerPayout(withdrawalId)
+        : await updateWithdrawalStatusInSupabase(
+            withdrawalId,
+            status,
+            providerReference,
+            failureReason,
+          )
       : {
           ...existing,
           status,

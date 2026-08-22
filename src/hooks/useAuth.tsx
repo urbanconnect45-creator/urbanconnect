@@ -30,11 +30,13 @@ import { riverParkClusters } from '../types/business';
 import { canAdminEditSensitiveData, isUserActive } from '../utils/businessState';
 import { usePersistentState } from './usePersistentState';
 import { useSecureSupabaseSession } from './useSecureSupabaseSession';
+import { useSecureUserSecurityPreferences } from './useSecureUserSecurityPreferences';
 import {
   addOAuthContextToCallbackUrl,
   completeSupabaseOAuth,
   createDispatchAccountWithSupabase,
   createSupabaseCustomerCareAccount,
+  deleteSupabaseCurrentAccount,
   fetchMySupabaseAdmin,
   fetchSupabaseAdminUsers,
   fetchSupabaseUserProfiles,
@@ -307,9 +309,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [userProfileOverrides, setUserProfileOverrides] = usePersistentState<
     Record<string, UserProfileOverride>
   >('urbanconnect.userProfileOverrides.v1', {}, { enabled: false });
-  const [userSecurityPreferencesByUser, setUserSecurityPreferencesByUser] = usePersistentState<
-    Record<string, UserSecurityPreference>
-  >('urbanconnect.userSecurityPreferences.v1', {}, { enabled: false });
+  const [userSecurityPreferencesByUser, setUserSecurityPreferencesByUser] =
+    useSecureUserSecurityPreferences();
   const storedUsers = useMemo(() => rawStoredUsers.map(migrateStoredUser), [rawStoredUsers]);
   const user = useMemo(() => (rawUser ? migrateAppUser(rawUser) : null), [rawUser]);
   const userSecurityPreference = useMemo(
@@ -1206,7 +1207,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const targetUser = user;
 
     if (isSupabaseConfigured) {
-      await updateSupabaseUserProfile(targetUser.id, { status: 'suspended' });
+      await deleteSupabaseCurrentAccount();
     }
 
     setStoredUsers((currentUsers) =>

@@ -4,8 +4,8 @@
 
 ```powershell
 npm install
-npm run typecheck
-npm run test:unit
+npm test
+npx.cmd expo-doctor
 npm run export:web
 ```
 
@@ -30,8 +30,12 @@ notifications, CAC validation, or payout-account verification. Configure Flutter
 
 `https://uyhudlqajzuzonntodqk.supabase.co/functions/v1/flutterwave-webhook`
 
-Do not launch payment traffic until migration `20260816120000_v1_server_authority.sql` and the
-configured Edge Functions have deployed successfully.
+Do not launch payment traffic until migrations `20260816120000_v1_server_authority.sql`,
+`20260821120000_provider_confirmed_seller_payouts.sql`,
+`20260821130000_private_message_attachments.sql`, and
+`20260821140000_account_deletion.sql` and the configured Edge Functions have deployed
+successfully. Confirm the private `urbanconnect-message-attachments` bucket exists and is not
+public.
 
 ## 3. Deploy web
 
@@ -67,8 +71,10 @@ returns to the app, and the release remains on the Internal Testing track rather
 - Customer: OTP account creation, role-scoped password/Google sign-in, browse, cart, location,
   Flutterwave checkout, messages, and order tracking.
 - Store owner: seller sign-in, profile/catalog persistence, payout verification, paid order receipt,
-  seller-ready action, delivered balance, and withdrawal request.
+  seller-ready action, delivered balance, withdrawal request, and provider-confirmed payout.
 - Dispatch: account creation, dispatch-only login, rider profile edit, job accept, pickup, arrival,
   buyer contact, and completion confirmation.
 - Admin: PIN gate, store approval, seller/customer listing moderation, order status, refund,
   withdrawal review, staff management, settings, and audit log.
+- Privacy: delete one test account and verify the Auth identity is removed, personal profile fields
+  are anonymized, public listings are archived, and retained order/payment records remain intact.

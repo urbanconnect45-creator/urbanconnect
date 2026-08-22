@@ -589,6 +589,74 @@ async function handleRefundCompleted(
   return { body: { status: 'refunded', reference: orderId, target: 'refund' } };
 }
 
+async function handleTransferCompleted(
+  supabaseUrl: string,
+  headers: SupabaseHeaders,
+  payload: JsonRecord,
+  data: JsonRecord,
+): Promise<HandlerResult> {
+  const transferId = optionalString(data.id) ?? optionalString(payload.id);
+  const providerReference = findReference(payload, data);
+  const filters = [
+    transferId
+      ? `provider_transfer_id.eq.${encodeURIComponent(transferId)}`
+      : undefined,
+    providerReference
+      ? `provider_reference.eq.${encodeURIComponent(providerReference)}`
+      : undefined,
+  ].filter((filter): filter is string => Boolean(filter));
+
+  if (filters.length === 0) {
+    return { body: { status: 'ignored', reason: 'Transfer event has no payout reference.' } };
+  }
+
+  const withdrawals = await readRows<JsonRecord>(
+    supabaseUrl,
+    headers,
+    `/rest/v1/withdrawal_requests?select=*&or=(${filters.join(',')})&limit=1`,
+  );
+  const withdrawal = withdrawals[0];
+
+  if (!withdrawal) {
+    return { body: { status: 'ignored', reason: 'No matching seller withdrawal was found.' } };
+  }
+
+  const withdrawalId = optionalString(withdrawal.id);
+  const providerStatus = optionalString(data.status)?.toLowerCase() ?? '';
+  if (!withdrawalId) {
+    return { body: { status: 'ignored', reason: 'Matching withdrawal has no identifier.' } };
+  }
+
+  if (providerStatus.includes('fail') || ['cancelled', 'canceled', 'reversed'].includes(providerStatus)) {
+    await callRpc<JsonRecord>(supabaseUrl, headers, 'fail_flutterwave_withdrawal', {
+      target_withdrawal_id: withdrawalId,
+      target_transfer_id: transferId,
+      target_provider_reference: providerReference,
+      target_provider_status: providerStatus,
+      target_failure_reason:
+        optionalString(data.complete_message) ??
+        optionalString(data.message) ??
+        'Flutterwave reported that the payout failed.',
+    });
+    return { body: { status: 'failed', reference: withdrawalId, target: 'withdrawal' } };
+  }
+
+  if (!successfulStatus(providerStatus)) {
+    return { body: { status: 'processing', reference: withdrawalId, target: 'withdrawal' } };
+  }
+
+  await callRpc<JsonRecord>(supabaseUrl, headers, 'finalize_flutterwave_withdrawal', {
+    target_withdrawal_id: withdrawalId,
+    target_transfer_id: transferId,
+    target_provider_reference: providerReference,
+    target_provider_status: providerStatus,
+    target_amount: toNumber(data.amount),
+    target_currency: optionalString(data.currency),
+  });
+
+  return { body: { status: 'paid', reference: withdrawalId, target: 'withdrawal' } };
+}
+
 serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -623,6 +691,7 @@ serve(async (request) => {
   }
 
   const eventType = optionalString(payload.type) ?? optionalString(payload.event);
+  const normalizedEventType = eventType?.toLowerCase();
 
   const data = isJsonRecord(payload.data) ? payload.data : payload;
 
@@ -639,7 +708,7 @@ serve(async (request) => {
     'Content-Type': 'application/json',
   };
 
-  if (eventType === 'refund.completed') {
+  if (normalizedEventType === 'refund.completed') {
     try {
       const refundResult = await handleRefundCompleted(supabaseUrl, headers, payload, data);
       return jsonResponse(refundResult.body, refundResult.status ?? 200);
@@ -651,7 +720,28 @@ serve(async (request) => {
     }
   }
 
-  if (eventType && eventType !== 'charge.completed') {
+  if (
+    normalizedEventType === 'transfer.completed' ||
+    normalizedEventType === 'transfer' ||
+    normalizedEventType === 'payout.completed'
+  ) {
+    try {
+      const transferResult = await handleTransferCompleted(
+        supabaseUrl,
+        headers,
+        payload,
+        data,
+      );
+      return jsonResponse(transferResult.body, transferResult.status ?? 200);
+    } catch (error) {
+      return jsonResponse(
+        { error: error instanceof Error ? error.message : 'Unable to finalize the payout.' },
+        502,
+      );
+    }
+  }
+
+  if (eventType && normalizedEventType !== 'charge.completed') {
     return jsonResponse({ status: 'ignored', reason: `Unhandled event ${eventType}.` });
   }
 

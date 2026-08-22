@@ -3,7 +3,7 @@ name: Quality and security
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, seller-portal-storage-upload]
   workflow_dispatch:
 
 permissions:
@@ -22,6 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npx expo-doctor
       - run: npm run export:web
         env:
           CI: 1

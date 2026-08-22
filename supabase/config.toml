@@ -458,6 +458,16 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/admin-refund-order/index.ts"
 
+[functions.process-flutterwave-withdrawal]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/process-flutterwave-withdrawal/index.ts"
+
+[functions.delete-user-account]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/delete-user-account/index.ts"
+
 [functions.verify-seller-bank-account]
 enabled = true
 verify_jwt = true

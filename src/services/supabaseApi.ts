@@ -275,6 +275,7 @@ type SupabaseWithdrawalRow = {
   owner_name: string;
   owner_email: string;
   bank_name: string;
+  bank_code?: string | null;
   account_number: string;
   account_name?: string | null;
   kyc_type?: WithdrawalRequest['kycType'] | null;
@@ -285,6 +286,8 @@ type SupabaseWithdrawalRow = {
   created_at: string;
   updated_at?: string | null;
   provider_reference?: string | null;
+  provider_transfer_id?: string | null;
+  provider_status?: string | null;
   failure_reason?: string | null;
 };
 
@@ -620,6 +623,7 @@ export function subscribeToSupabaseAccessToken(listener: () => void) {
 
 const listingMediaBucket = 'urbanconnect-listing-media';
 const privateDocumentBucket = 'urbanconnect-private-documents';
+const messageAttachmentBucket = 'urbanconnect-message-attachments';
 
 export const isSupabaseConfigured = Boolean(
   !isUrbanConnectLocalTestMode && supabaseConfig.url && supabaseConfig.publishableKey,
@@ -960,11 +964,76 @@ export async function uploadChatAttachmentToSupabaseStorage(
     sanitizeStorageSegment(messageId),
     sanitizeStorageSegment(attachment.name || attachment.id),
   ].join('/');
-  const publicUrl = await uploadMediaUriToSupabaseStorage(attachment.url, path, attachment.type);
+  const storagePath = await uploadMediaUriToSupabaseBucket(
+    attachment.url,
+    path,
+    attachment.type,
+    messageAttachmentBucket,
+    false,
+  );
+  const signedUrl = await createMessageAttachmentSignedUrl(storagePath);
 
   return {
     ...attachment,
-    url: publicUrl,
+    url: signedUrl,
+    storagePath,
+  };
+}
+
+async function createMessageAttachmentSignedUrl(storagePath: string) {
+  const payload = await supabaseRequest<{ signedURL?: string; signedUrl?: string }>(
+    `/storage/v1/object/sign/${messageAttachmentBucket}/${encodeStoragePath(storagePath)}`,
+    {
+      method: 'POST',
+      body: { expiresIn: 60 * 60 },
+    },
+  );
+  const signedPath = payload.signedURL ?? payload.signedUrl;
+
+  if (!signedPath || !supabaseConfig.url) {
+    throw new SupabaseApiError('The private attachment could not be opened.', 500);
+  }
+
+  return /^https?:\/\//i.test(signedPath)
+    ? signedPath
+    : `${supabaseConfig.url}/storage/v1${signedPath.startsWith('/') ? signedPath : `/${signedPath}`}`;
+}
+
+async function hydrateMessageAttachment(
+  attachment: ChatMessageAttachment,
+): Promise<ChatMessageAttachment> {
+  if (isHostedMediaUri(attachment.url)) {
+    return attachment;
+  }
+
+  try {
+    return {
+      ...attachment,
+      storagePath: attachment.url,
+      url: await createMessageAttachmentSignedUrl(attachment.url),
+    };
+  } catch {
+    return attachment;
+  }
+}
+
+function attachmentsForPersistence(attachments: ChatMessageAttachment[] | undefined) {
+  return (attachments ?? []).map(({ storagePath, ...attachment }) => ({
+    ...attachment,
+    url: storagePath ?? attachment.url,
+  }));
+}
+
+async function hydrateMessageAttachments<T extends { attachments?: ChatMessageAttachment[] }>(
+  message: T,
+): Promise<T> {
+  if (!message.attachments?.length) {
+    return message;
+  }
+
+  return {
+    ...message,
+    attachments: await Promise.all(message.attachments.map(hydrateMessageAttachment)),
   };
 }
 
@@ -2445,6 +2514,7 @@ function withdrawalRowToWithdrawal(row: SupabaseWithdrawalRow): WithdrawalReques
     ownerName: row.owner_name,
     ownerEmail: row.owner_email,
     bankName: row.bank_name,
+    ...(row.bank_code ? { bankCode: row.bank_code } : {}),
     accountNumber: row.account_number,
     ...(row.account_name ? { accountName: row.account_name } : {}),
     kycType,
@@ -2455,6 +2525,8 @@ function withdrawalRowToWithdrawal(row: SupabaseWithdrawalRow): WithdrawalReques
     createdAt: row.created_at,
     ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
     ...(row.provider_reference ? { providerReference: row.provider_reference } : {}),
+    ...(row.provider_transfer_id ? { providerTransferId: row.provider_transfer_id } : {}),
+    ...(row.provider_status ? { providerStatus: row.provider_status } : {}),
     ...(row.failure_reason ? { failureReason: row.failure_reason } : {}),
   };
 }
@@ -2991,6 +3063,25 @@ export async function updateWithdrawalStatusInSupabase(
   return withdrawalRowToWithdrawal(row);
 }
 
+export async function initiateFlutterwaveSellerPayout(withdrawalId: string) {
+  const response = await supabaseRequest<{
+    status: 'processing' | 'paid';
+    withdrawal: SupabaseWithdrawalRow;
+  }>('/functions/v1/process-flutterwave-withdrawal', {
+    method: 'POST',
+    body: { withdrawalId },
+  });
+
+  return withdrawalRowToWithdrawal(response.withdrawal);
+}
+
+export async function deleteSupabaseCurrentAccount() {
+  await supabaseRequest<{ deleted: true }>('/functions/v1/delete-user-account', {
+    method: 'POST',
+    body: {},
+  });
+}
+
 export async function saveSupportMessageToSupabase(message: SupportMessage) {
   return supabaseRequest('/rest/v1/support_messages', {
     method: 'POST',
@@ -3006,7 +3097,7 @@ export async function saveSupportMessageToSupabase(message: SupportMessage) {
       context_type: message.contextType ?? null,
       context_id: message.contextId ?? null,
       context_label: message.contextLabel ?? null,
-      attachments: message.attachments ?? [],
+      attachments: attachmentsForPersistence(message.attachments),
       created_at: message.createdAt,
     },
     headers: {
@@ -3037,7 +3128,7 @@ export async function saveChatMessageToSupabase(message: ChatMessage) {
       sender_name: message.senderName,
       sender_type: message.senderType,
       text: message.text,
-      attachments: message.attachments ?? [],
+      attachments: attachmentsForPersistence(message.attachments),
       created_at: message.createdAt,
     },
     headers: {
@@ -4174,6 +4265,10 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
       new Map<string, SupabaseOwnerProfileRow>(),
     ).values(),
   );
+  const [chatMessages, supportMessages] = await Promise.all([
+    Promise.all(chatRows.map(chatRowToMessage).map(hydrateMessageAttachments)),
+    Promise.all(supportRows.map(supportRowToMessage).map(hydrateMessageAttachments)),
+  ]);
 
   return {
     businesses: businessRows.map(businessRowToBusiness),
@@ -4190,8 +4285,8 @@ export async function fetchMarketplaceSnapshot(): Promise<MarketplaceSnapshot> {
     emailLogs: emailRows.map(emailRowToLog),
     auditLogs: auditRows.map(auditRowToLog),
     notifications: notificationRows.map(notificationRowToNotification),
-    chatThreads: groupChatMessages(chatRows.map(chatRowToMessage)),
-    supportThreads: groupSupportMessages(supportRows.map(supportRowToMessage)),
+    chatThreads: groupChatMessages(chatMessages),
+    supportThreads: groupSupportMessages(supportMessages),
     subscriptionPayments: subscriptionPaymentRows.map(subscriptionPaymentRowToPayment),
     withdrawalRequests: withdrawalRows.map(withdrawalRowToWithdrawal),
     virtualAccounts: virtualAccountRows.map(virtualAccountRowToVirtualAccount),

@@ -578,9 +578,6 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
   const [refundingOrderId, setRefundingOrderId] = useState<string | null>(null);
   const [userStatusFilter, setUserStatusFilter] =
     useState<(typeof userStatusOptions)[number]>('All');
-  const [withdrawalReferenceDrafts, setWithdrawalReferenceDrafts] = useState<
-    Record<string, string>
-  >({});
   const [liveUserProfiles, setLiveUserProfiles] = useState<AppUser[]>([]);
   const [applicationMessageDrafts, setApplicationMessageDrafts] = useState<
     Record<string, string>
@@ -1879,34 +1876,26 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
     withdrawalId: string,
     status: 'processing' | 'paid' | 'failed',
   ) => {
-    const providerReference = withdrawalReferenceDrafts[withdrawalId]?.trim();
-
-    if (status === 'paid' && !providerReference) {
-      Alert.alert(
-        'Payout reference required',
-        'Enter the Flutterwave or bank transfer reference after sending the money.',
-      );
-      return;
-    }
-
     runAdminChange(
       'Admin PIN',
-      `Enter the PIN before marking this withdrawal ${status}.`,
+      status === 'paid'
+        ? 'Enter the PIN before sending this payout through Flutterwave.'
+        : `Enter the PIN before marking this withdrawal ${status}.`,
       async () => {
         await updateWithdrawalStatus(
           withdrawalId,
           status,
-          providerReference,
+          undefined,
           status === 'failed' ? 'Payout could not be completed. Contact support.' : undefined,
           adminUser.fullName,
           adminUser.role,
         );
-        if (status === 'paid' || status === 'failed') {
-          setWithdrawalReferenceDrafts((current) => ({
-            ...current,
-            [withdrawalId]: '',
-          }));
-        }
+        Alert.alert(
+          status === 'paid' ? 'Payout submitted' : 'Withdrawal updated',
+          status === 'paid'
+            ? 'Flutterwave is processing the payout. Paid status appears only after provider confirmation.'
+            : 'The withdrawal status was updated.',
+        );
       },
     );
   };
@@ -3193,7 +3182,7 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
 
                   <SectionPanel
                     title="Withdrawal ledger"
-                    subtitle="Requests reserve available earnings. Mark paid only after the bank transfer succeeds."
+                    subtitle="Requests reserve available earnings. Flutterwave confirmation controls paid status."
                   >
                     <View style={styles.tableStack}>
                       {withdrawalRequests.length > 0 ? (
@@ -3221,32 +3210,14 @@ export function AdminPanelScreen({ onReturnToApp }: AdminPanelScreenProps) {
                             withdrawal.status !== 'paid' &&
                             withdrawal.status !== 'reversed' ? (
                               <View style={styles.recordStack}>
-                                <TextInput
-                                  autoCapitalize="characters"
-                                  onChangeText={(value) =>
-                                    setWithdrawalReferenceDrafts((current) => ({
-                                      ...current,
-                                      [withdrawal.id]: value,
-                                    }))
-                                  }
-                                  placeholder="Payout provider reference"
-                                  placeholderTextColor="#777777"
-                                  style={styles.compactInput}
-                                  value={withdrawalReferenceDrafts[withdrawal.id] ?? ''}
-                                />
                                 <View style={styles.inlineActionRow}>
-                                  {withdrawal.status === 'pending' ? (
+                                  {withdrawal.status !== 'processing' ? (
                                     <MonoButton
-                                      dark={false}
-                                      label="Mark processing"
-                                      onPress={() => processWithdrawal(withdrawal.id, 'processing')}
+                                      dark
+                                      label="Send payout"
+                                      onPress={() => processWithdrawal(withdrawal.id, 'paid')}
                                     />
                                   ) : null}
-                                  <MonoButton
-                                    dark
-                                    label="Mark paid"
-                                    onPress={() => processWithdrawal(withdrawal.id, 'paid')}
-                                  />
                                   <MonoButton
                                     dark={false}
                                     label="Mark failed"
