@@ -1,4 +1,12 @@
-import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+declare namespace Deno {
+  export namespace env {
+    export function get(key: string): string | undefined;
+  }
+
+  export function serve(handler: (request: Request) => Response | Promise<Response>): unknown;
+}
+
+export {};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -657,7 +665,7 @@ async function handleTransferCompleted(
   return { body: { status: 'paid', reference: withdrawalId, target: 'withdrawal' } };
 }
 
-serve(async (request) => {
+Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -778,8 +786,7 @@ serve(async (request) => {
     const expectedAmount = toNumber(deposit.amount);
     const expectedCurrency = optionalString(deposit.currency)?.toUpperCase() ?? 'NGN';
     const expiresAt = optionalString(deposit.expires_at);
-    const isExpired =
-      Boolean(expiresAt) && new Date(expiresAt).getTime() <= Date.now();
+    const isExpired = expiresAt ? new Date(expiresAt).getTime() <= Date.now() : false;
     const isSuccessful = successfulStatus(data.status) || successfulStatus(payload.status);
     const now = new Date().toISOString();
     const failureReason = !isSuccessful
